@@ -238,10 +238,18 @@ function App() {
       } = await supabase.auth.getUser();
       if (!user) {
         setIsAdmin(false);
+        setNickname('Visitante');
         return;
       }
-      const { data } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
+      const { data } = await supabase
+        .from('profiles')
+        .select('role,nickname')
+        .eq('id', user.id)
+        .maybeSingle();
       setIsAdmin(data?.role === 'admin');
+      const meta = user.user_metadata?.nickname as string | undefined;
+      const saved = (data?.nickname as string | undefined) || meta;
+      setNickname(saved && saved.trim() ? saved.trim() : (user.email ?? 'Jogador').split('@')[0]);
     }
     void checkAdmin();
     const { data: sub } = supabase.auth.onAuthStateChange(() => {
@@ -496,6 +504,7 @@ function App() {
           onAdmin={() => navigate('admin')}
           onPlay={() => startClubChoice('classic')}
           onLeaderboard={() => navigate('leaderboard')}
+          onSquad={() => navigate('squad')}
         />
       )}
 
@@ -621,11 +630,13 @@ function Home({
   onAdmin,
   onPlay,
   onLeaderboard,
+  onSquad,
 }: {
   isAdmin: boolean;
   onAdmin: () => void;
   onPlay: () => void;
   onLeaderboard: () => void;
+  onSquad: () => void;
 }) {
   return (
     <main className="home-page">
@@ -654,6 +665,9 @@ function Home({
             <Swords size={17} /> Multiplayer <small>EM BREVE</small>
           </button>
         </div>
+        <button className="text-button" onClick={onSquad}>
+          Ver elenco completo <ArrowRight size={15} />
+        </button>
         {isAdmin && (
           <button className="outline-button" onClick={onAdmin} style={{ marginTop: 14 }}>
             <Shield size={16} /> Painel Admin: editar e adicionar jogadores
@@ -1503,6 +1517,13 @@ function LoginModal({
     if (result.error) {
       setMessage('Confira seus dados e tente novamente.');
       return;
+    }
+    if (signUp && nickname.trim() && result.data.user) {
+      // Garante o apelido também na tabela profiles (se a política permitir)
+      await supabase
+        .from('profiles')
+        .update({ nickname: nickname.trim() })
+        .eq('id', result.data.user.id);
     }
     setMessage(signUp ? 'Conta criada. Você já pode jogar.' : 'Login realizado.');
     onClose();
