@@ -504,7 +504,6 @@ function App() {
           onAdmin={() => navigate('admin')}
           onPlay={() => startClubChoice('classic')}
           onLeaderboard={() => navigate('leaderboard')}
-          onSquad={() => navigate('squad')}
         />
       )}
 
@@ -630,13 +629,11 @@ function Home({
   onAdmin,
   onPlay,
   onLeaderboard,
-  onSquad,
 }: {
   isAdmin: boolean;
   onAdmin: () => void;
   onPlay: () => void;
   onLeaderboard: () => void;
-  onSquad: () => void;
 }) {
   return (
     <main className="home-page">
@@ -665,9 +662,6 @@ function Home({
             <Swords size={17} /> Multiplayer <small>EM BREVE</small>
           </button>
         </div>
-        <button className="text-button" onClick={onSquad}>
-          Ver elenco completo <ArrowRight size={15} />
-        </button>
         {isAdmin && (
           <button className="outline-button" onClick={onAdmin} style={{ marginTop: 14 }}>
             <Shield size={16} /> Painel Admin: editar e adicionar jogadores
