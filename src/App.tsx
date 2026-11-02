@@ -43,6 +43,9 @@ type MatchStats = {
   botSaves: number;
 };
 
+// Registro de cada gol da partida (autor, assistência e minuto), usado na tabela final
+type GoalRecord = { minute: number; scorerId: string; assistId?: string; side: 'user' | 'bot' };
+
 const positions: Position[] = ['GK', 'LB', 'RB', 'CM', 'LF', 'RF', 'CF'];
 const positionNames: Record<Position, string> = {
   GK: 'Goleiro',
@@ -94,6 +97,17 @@ function pickShooter(team: Player[], type: MatchEvent['type'], roll: number): Pl
     if (left <= 0) return pool[i];
   }
   return pool[pool.length - 1];
+}
+
+// Sorteio ponderado a partir de um número `roll` entre 0 e 1 (assim dá o mesmo resultado nos dois lados do multiplayer)
+function pickByRoll(list: Player[], weight: (player: Player) => number, roll: number): Player | undefined {
+  if (!list.length) return undefined;
+  let left = roll * list.reduce((sum, player) => sum + weight(player), 0);
+  for (const player of list) {
+    left -= weight(player);
+    if (left <= 0) return player;
+  }
+  return list[list.length - 1];
 }
 
 function Card({
@@ -245,6 +259,7 @@ function App() {
   const [minute, setMinute] = useState(0);
   const [score, setScore] = useState({ user: 0, bot: 0 });
   const [stats, setStats] = useState<MatchStats>(emptyStats);
+  const [goalLog, setGoalLog] = useState<GoalRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [nickname, setNickname] = useState('Visitante');
@@ -693,6 +708,7 @@ function App() {
     setScore({ user: 0, bot: 0 });
     setEvents([]);
     setStats(emptyStats);
+    setGoalLog([]);
     setShownScore({ user: 0, bot: 0 });
     setShownGoalIds([]);
     setSkipped(false);
@@ -771,18 +787,40 @@ function App() {
     eventSeq.current += 1;
     const id = eventSeq.current;
     setEvents((current) => [{ id, minute: currentMinute, type, text, team: side }, ...current].slice(0, 18));
-    setStats((current) => ({
-      ...current,
-      userPossession: Math.max(38, Math.min(62, current.userPossession + (side === 'user' ? 2 : -2))),
-      botPossession: Math.max(38, Math.min(62, current.botPossession + (side === 'bot' ? 2 : -2))),
-      userShots: current.userShots + (side === 'user' && type === 'finalização' ? 1 : 0),
-      botShots: current.botShots + (side === 'bot' && type === 'finalização' ? 1 : 0),
-      userTarget: current.userTarget + (side === 'user' && type === 'finalização' ? 1 : 0),
-      botTarget: current.botTarget + (side === 'bot' && type === 'finalização' ? 1 : 0),
-      userSaves: current.userSaves + (side === 'bot' && type === 'defesa' ? 1 : 0),
-      botSaves: current.botSaves + (side === 'user' && type === 'defesa' ? 1 : 0),
-    }));
-    if (type === 'gol') setScore((current) => ({ ...current, [side]: current[side] + 1 }));
+    // Toda finalização, defesa ou gol é um chute do time que ataca.
+    // No alvo = defesa do goleiro ou gol. "Finalização" simples é o chute que sai para fora.
+    const isShot = type === 'finalização' || type === 'defesa' || type === 'gol';
+    const isOnTarget = type === 'defesa' || type === 'gol';
+    setStats((current) => {
+      const userPossession = Math.max(38, Math.min(62, current.userPossession + (side === 'user' ? 2 : -2)));
+      return {
+        ...current,
+        userPossession,
+        botPossession: 100 - userPossession,
+        userShots: current.userShots + (side === 'user' && isShot ? 1 : 0),
+        botShots: current.botShots + (side === 'bot' && isShot ? 1 : 0),
+        userTarget: current.userTarget + (side === 'user' && isOnTarget ? 1 : 0),
+        botTarget: current.botTarget + (side === 'bot' && isOnTarget ? 1 : 0),
+        // A defesa é do goleiro do time que NÃO está atacando
+        userSaves: current.userSaves + (side === 'bot' && type === 'defesa' ? 1 : 0),
+        botSaves: current.botSaves + (side === 'user' && type === 'defesa' ? 1 : 0),
+      };
+    });
+    if (type === 'gol') {
+      setScore((current) => ({ ...current, [side]: current[side] + 1 }));
+      if (attackPlayer) {
+        // Assistência sorteada na hora do gol (igual nos dois lados do multiplayer)
+        const mates = (side === 'user' ? userTeam : botTeam).filter(
+          (player) => player.id !== attackPlayer.id && player.primary_position !== 'GK',
+        );
+        const assistRoll = Math.abs(Math.sin(currentMinute * 39.3468 + 11.135) * 24634.6345) % 1;
+        const assist = assistRoll < 0.75 ? pickByRoll(mates, (player) => player.overall, assistRoll / 0.75) : undefined;
+        setGoalLog((current) => [
+          ...current,
+          { minute: currentMinute, scorerId: attackPlayer.id, assistId: assist?.id, side },
+        ]);
+      }
+    }
   }
 
   function skipMatch() {
@@ -948,6 +986,7 @@ function App() {
           shownGoalIds={shownGoalIds}
           onGoal={handleGoal}
           onSkip={skipMatch}
+          stats={stats}
           canSkip={!room && !spectating}
           multiplayer={!!room}
           userId={userId}
@@ -964,6 +1003,7 @@ function App() {
           botTeam={botTeam}
           score={score}
           stats={stats}
+          goalLog={goalLog}
           onAgain={() => {
             if (spectating) {
               navigate('lobby', true);
@@ -2094,6 +2134,7 @@ function MatchScreen({
   shownGoalIds,
   onGoal,
   onSkip,
+  stats,
   canSkip,
   multiplayer,
   userId,
@@ -2110,6 +2151,7 @@ function MatchScreen({
   shownGoalIds: number[];
   onGoal: (id: number, side: 'user' | 'bot') => void;
   onSkip: () => void;
+  stats: MatchStats;
   canSkip: boolean;
   multiplayer: boolean;
   userId: string | null;
@@ -2190,8 +2232,9 @@ function MatchScreen({
           )}
         </section>
         <aside className="match-side">
-          <MiniStat label="POSSE DE BOLA" user={50} bot={50} />
-          <MiniStat label="FINALIZAÇÕES" user={0} bot={0} />
+          <MiniStat label="POSSE DE BOLA" user={stats.userPossession} bot={stats.botPossession} suffix="%" />
+          <MiniStat label="FINALIZAÇÕES" user={stats.userShots} bot={stats.botShots} />
+          <MiniStat label="NO ALVO" user={stats.userTarget} bot={stats.botTarget} />
           <div className="side-players">
             <span className="eyebrow">FORMAÇÕES</span>
             <h3>Seu elenco</h3>
@@ -2221,18 +2264,21 @@ function EventIcon({ type }: { type: MatchEvent['type'] }) {
   );
 }
 
-function MiniStat({ label, user, bot }: { label: string; user: number; bot: number }) {
+function MiniStat({ label, user, bot, suffix = '' }: { label: string; user: number; bot: number; suffix?: string }) {
+  const total = user + bot;
+  const userWidth = total ? (user / total) * 100 : 50;
   return (
     <div className="mini-stat">
       <div>
         <span>{label}</span>
         <b>
-          {user}% <i>{bot}%</i>
+          {user}
+          {suffix} <i>{bot}{suffix}</i>
         </b>
       </div>
       <div className="stat-bar">
-        <i style={{ width: `${user}%` }} />
-        <b style={{ width: `${bot}%` }} />
+        <i style={{ width: `${userWidth}%` }} />
+        <b style={{ width: `${100 - userWidth}%` }} />
       </div>
     </div>
   );
@@ -2245,6 +2291,7 @@ function ResultsScreen({
   botTeam,
   score,
   stats,
+  goalLog,
   onAgain,
   onHome,
 }: {
@@ -2254,6 +2301,7 @@ function ResultsScreen({
   botTeam: Player[];
   score: { user: number; bot: number };
   stats: MatchStats;
+  goalLog: GoalRecord[];
   onAgain: () => void;
   onHome: () => void;
 }) {
@@ -2261,8 +2309,8 @@ function ResultsScreen({
   // Calculado uma vez por partida (não muda quando a tela é redesenhada)
   const ratings = useMemo(
     () => ({
-      user: rateTeam(userTeam, score.user, score.bot, stats.userSaves, stats.userPossession),
-      bot: rateTeam(botTeam, score.bot, score.user, stats.botSaves, stats.botPossession),
+      user: rateTeam(userTeam, score.user, score.bot, stats.userSaves, stats.userPossession, goalLog.filter((g) => g.side === 'user')),
+      bot: rateTeam(botTeam, score.bot, score.user, stats.botSaves, stats.botPossession, goalLog.filter((g) => g.side === 'bot')),
     }),
     [],
   );
@@ -2270,7 +2318,7 @@ function ResultsScreen({
     <main className="results-page">
       <div className={`result-banner ${userWon ? 'win' : 'loss'}`}>
         <span className="eyebrow">FIM DE JOGO</span>
-        <h1>{userWon ? 'VITÓRIA!' : score.user === score.bot ? 'EMPATE' : 'FIM DE JOGO'}</h1>
+        <h1>{userWon ? 'VITÓRIA!' : score.user === score.bot ? 'EMPATE' : 'DERROTA'}</h1>
         <p>{userWon ? 'Seu time jogou como uma verdadeira unidade.' : 'O próximo draft começa agora.'}</p>
       </div>
       <div className="result-score">
@@ -2293,6 +2341,29 @@ function ResultsScreen({
           <ResultBar label="Finalizações" user={stats.userShots} bot={stats.botShots} />
           <ResultBar label="No alvo" user={stats.userTarget} bot={stats.botTarget} />
           <ResultBar label="Defesas" user={stats.userSaves} bot={stats.botSaves} />
+          {goalLog.length > 0 && (
+            <div style={{ marginTop: 18 }}>
+              <span className="eyebrow">GOLS DA PARTIDA</span>
+              {goalLog.map((goal, index) => {
+                const squad = goal.side === 'user' ? userTeam : botTeam;
+                const scorer = squad.find((player) => player.id === goal.scorerId);
+                const assist = squad.find((player) => player.id === goal.assistId);
+                return (
+                  <div
+                    key={`${goal.minute}-${index}`}
+                    style={{ display: 'flex', gap: 10, padding: '7px 0', borderTop: '1px solid rgba(255,255,255,.08)', fontSize: 14 }}
+                  >
+                    <strong style={{ minWidth: 34 }}>{goal.minute}'</strong>
+                    <span style={{ flex: 1 }}>
+                      ⚽ {scorer?.name ?? 'Gol'}
+                      {assist && <small style={{ opacity: 0.6 }}> · assist. {assist.name}</small>}
+                    </span>
+                    <small style={{ opacity: 0.7 }}>{goal.side === 'user' ? club.abbreviation : opponent.abbreviation}</small>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </section>
         <section className="result-panel ratings">
           <div className="section-title">
@@ -2353,16 +2424,6 @@ function ResultBar({
 
 type PlayerRating = { rating: number; goals: number; assists: number };
 
-function pickWeighted(list: Player[], weight: (player: Player) => number) {
-  const total = list.reduce((sum, player) => sum + weight(player), 0);
-  let roll = Math.random() * total;
-  for (const player of list) {
-    roll -= weight(player);
-    if (roll <= 0) return player;
-  }
-  return list[list.length - 1];
-}
-
 // Nota de cada jogador: depende do resultado, de gols, defesas e de um pouco de sorte
 function rateTeam(
   team: Player[],
@@ -2370,22 +2431,17 @@ function rateTeam(
   goalsAgainst: number,
   saves: number,
   possession: number,
+  goals: GoalRecord[],
 ): Record<string, PlayerRating> {
   const out: Record<string, PlayerRating> = {};
   team.forEach((player) => {
     out[player.id] = { rating: 0, goals: 0, assists: 0 };
   });
-  const attackers = team.filter((player) => ['LF', 'RF', 'CF'].includes(player.primary_position));
-  const outfield = team.filter((player) => player.primary_position !== 'GK');
-  for (let i = 0; i < goalsFor && outfield.length; i += 1) {
-    const pool = attackers.length && Math.random() < 0.85 ? attackers : outfield;
-    const scorer = pickWeighted(pool, (player) => player.overall);
-    out[scorer.id].goals += 1;
-    const others = outfield.filter((player) => player.id !== scorer.id);
-    if (others.length && Math.random() < 0.75) {
-      out[pickWeighted(others, (player) => player.overall).id].assists += 1;
-    }
-  }
+  // Gols e assistências são os que realmente aconteceram na partida (mesmos nomes do feed)
+  goals.forEach((goal) => {
+    if (out[goal.scorerId]) out[goal.scorerId].goals += 1;
+    if (goal.assistId && out[goal.assistId]) out[goal.assistId].assists += 1;
+  });
   const result = goalsFor > goalsAgainst ? 0.4 : goalsFor < goalsAgainst ? -0.3 : 0;
   const cleanSheet = goalsAgainst === 0;
   team.forEach((player) => {
