@@ -111,3 +111,19 @@ export function generatePlan(hostSquad: Lite[], guestSquad: Lite[]): PlanItem[] 
   }
   return plan;
 }
+
+// Salva o resultado da partida no ranking. Os dois lados tentam; só o primeiro grava (room_id é único).
+export async function recordResult(room: Room, hostGoals: number, guestGoals: number) {
+  if (!room.guest_id) return;
+  const { error } = await supabase.from('match_results').insert({
+    room_id: room.id,
+    host_id: room.host_id,
+    guest_id: room.guest_id,
+    host_nick: room.host_nick,
+    guest_nick: room.guest_nick ?? 'Jogador',
+    host_goals: hostGoals,
+    guest_goals: guestGoals,
+  });
+  if (error && error.code !== '23505') console.warn('Não foi possível salvar o resultado:', error.message);
+  await supabase.from('rooms').update({ status: 'finished' }).eq('id', room.id);
+}
