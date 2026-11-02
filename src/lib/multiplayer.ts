@@ -88,6 +88,19 @@ export async function fetchRoom(id: string): Promise<Room | null> {
   return (data as Room | null) ?? null;
 }
 
+// A partida dura ~81 s (90 min x 900 ms). Passou de 3 min, ficou esquecida no banco e não está mais rolando.
+const MATCH_MAX_AGE_MS = 3 * 60 * 1000;
+
+export function isRoomLive(room: Room) {
+  if (room.status !== 'playing' || !room.guest_id || !room.plan || room.plan.length === 0) return false;
+  const startedAt = room.plan.find((item) => item.startedAt)?.startedAt;
+  // Partidas antigas não têm hora de início: usa a data de criação da sala, se existir
+  const created = (room as Room & { created_at?: string }).created_at;
+  const since = startedAt ?? (created ? new Date(created).getTime() : null);
+  if (since === null) return false;
+  return Date.now() - since < MATCH_MAX_AGE_MS;
+}
+
 // Partidas que estão rolando agora (para a galera assistir)
 export async function listLiveRooms(): Promise<Room[]> {
   let data: unknown[] | null = null;
@@ -106,7 +119,7 @@ export async function listLiveRooms(): Promise<Room[]> {
     data = plain.data;
   }
   return ((data ?? []) as Room[])
-    .filter((room) => room.guest_id && room.plan && room.plan.length > 0)
+    .filter(isRoomLive)
     .slice(0, 12);
 }
 
