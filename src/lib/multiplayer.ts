@@ -55,12 +55,8 @@ export async function createRoom(
   return { error: 'Não foi possível gerar um código de sala. Tente de novo.' };
 }
 
-export async function joinRoom(
-  code: string,
-  userId: string,
-  nick: string,
-  teamIds: string[],
-): Promise<{ room?: Room; error?: string }> {
+// Procura a sala pelo código (sem entrar), para o convidado escolher o clube antes
+export async function lookupRoom(code: string, userId: string): Promise<{ room?: Room; error?: string }> {
   const clean = code.trim().toUpperCase();
   if (clean.length < 4) return { error: 'Digite o código de 4 letras da sala.' };
   const { data, error } = await supabase.from('rooms').select('*').eq('code', clean).maybeSingle();
@@ -70,10 +66,24 @@ export async function joinRoom(
     return { error: 'Sala não encontrada ou já ocupada.' };
   }
   if (found.host_id === userId) return { error: 'Essa sala é sua. Passe o código para um amigo.' };
-  const guestTeam = teamIds.find((id) => id !== found.host_team_id) ?? teamIds[0];
+  return { room: found };
+}
+
+export async function joinRoom(
+  code: string,
+  userId: string,
+  nick: string,
+  teamId: string,
+): Promise<{ room?: Room; error?: string }> {
+  const lookup = await lookupRoom(code, userId);
+  if (lookup.error || !lookup.room) return { error: lookup.error };
+  const found = lookup.room;
+  if (!teamId || teamId === found.host_team_id) {
+    return { error: 'Esse clube já é do anfitrião. Escolha outro.' };
+  }
   const { data: joined, error: joinError } = await supabase
     .from('rooms')
-    .update({ guest_id: userId, guest_nick: nick, guest_team_id: guestTeam, status: 'drafting' })
+    .update({ guest_id: userId, guest_nick: nick, guest_team_id: teamId, status: 'drafting' })
     .eq('id', found.id)
     .is('guest_id', null)
     .select()
