@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 type Side = 'user' | 'bot';
-type PitchPlayer = { id: string; name: string };
+type PitchPlayer = { id: string; name: string; overall?: number };
 type PitchTeam = { name: string; abbreviation: string; primary_color: string; secondary_color: string };
 type PitchEvent = { id?: number; minute: number; type: 'posse' | 'finalização' | 'defesa' | 'gol'; text: string; team: Side };
 type Props = {
@@ -22,6 +22,7 @@ type Slot = {
   side: Side;
   pos: Pos;
   name: string;
+  ovr: number;
   base: Point;
   kick: Point;
   x: number;
@@ -40,6 +41,7 @@ type Step = {
   critical?: boolean;
   scripted?: boolean;
   ambient?: boolean;
+  dribble?: boolean;
   caption?: string;
   after?: () => void;
 };
@@ -139,6 +141,24 @@ function nearestOpp(all: Slot[], mySide: Side, p: Point) {
   return { slot: best, d: bd };
 }
 
+// Marcador logo à frente de quem está com a bola (candidato a drible)
+function aheadOpp(all: Slot[], h: Slot): Slot | undefined {
+  const d = dirOf(h.side);
+  let best: Slot | undefined;
+  let bd = Infinity;
+  for (const o of all) {
+    if (o.side === h.side || o.pos === 'GK') continue;
+    const ahead = (o.x - h.x) * d;
+    if (ahead < 22 || ahead > 110 || Math.abs(o.y - h.y) > 34) continue;
+    const dd = dist(o, h);
+    if (dd < bd) {
+      bd = dd;
+      best = o;
+    }
+  }
+  return best;
+}
+
 // Escolhe para quem passar: prefere quem está à frente e livre, mas passa para trás sob pressão
 function choosePass(h: Slot, all: Slot[]): Slot | undefined {
   const d = dirOf(h.side);
@@ -177,6 +197,7 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
           side,
           pos,
           name: player?.name ?? pos,
+          ovr: player?.overall ?? 75,
           base,
           kick,
           x: side === 'user' && pos === 'CM' ? MID_X - 12 : kick.x,
@@ -228,6 +249,54 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
     window.setTimeout(() => setGoalText(''), 1900);
   }
 
+  // Drible: finta para o lado do marcador e acelera por fora. Pode dar certo ou o marcador desarma.
+  function dribbleSteps(h: Slot, opp: Slot, ambient: boolean, forceWin: boolean): Step[] {
+    const st = engine.current;
+    const d = dirOf(h.side);
+    let sg = opp.y >= h.y ? -1 : 1;
+    if (h.y + sg * 40 < FY0 + 25 || h.y + sg * 40 > FY1 - 25) sg = -sg;
+    const chance = clamp(0.58 + (h.ovr - opp.ovr) / 80, 0.3, 0.85);
+    const win = forceWin || Math.random() < chance;
+    const first: Step = {
+      kind: 'carry',
+      to: {
+        x: clamp(opp.x - d * 6, FX0 + 20, FX1 - 20),
+        y: clamp(opp.y + sg * 38, FY0 + 20, FY1 - 20),
+      },
+      dur: 340,
+      ambient,
+      dribble: true,
+      caption: win ? `${h.name} dribla ${opp.name}` : `${h.name} tenta driblar ${opp.name}`,
+      after: () => {
+        const t = performance.now();
+        if (win) {
+          // O marcador fica para trás, desequilibrado
+          st.overrides[opp.key] = { x: opp.x, y: opp.y, until: t + 1000, speed: 0.18 };
+        } else {
+          st.queue = [];
+          st.active = null;
+          st.holder = opp.key;
+          st.poss = opp.side;
+          st.overrides = {};
+          st.ambientAt = t + 450;
+          setCaption(`${opp.name} desarma ${h.name} no drible`);
+        }
+      },
+    };
+    if (!win) return [first];
+    const second: Step = {
+      kind: 'carry',
+      to: {
+        x: clamp(opp.x + d * 70, FX0 + 20, FX1 - 20),
+        y: clamp(opp.y + sg * 26, FY0 + 20, FY1 - 20),
+      },
+      dur: 400,
+      ambient,
+      dribble: true,
+    };
+    return [first, second];
+  }
+
   // Começa um passo da fila (passe, condução, chute ou recuperação)
   function startStep(step: Step, now: number) {
     const st = engine.current;
@@ -238,7 +307,7 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
       if (!holder) return;
       const to = step.to as Point;
       st.active = { step, from: { x: st.ballX, y: st.ballY }, start: now, dest: null };
-      st.overrides[holder.key] = { x: to.x, y: to.y, until: now + step.dur + 120, speed: 0.9 };
+      st.overrides[holder.key] = { x: to.x, y: to.y, until: now + step.dur + 120, speed: step.dribble ? 1.3 : 0.9 };
       if (step.caption) setCaption(step.caption);
       return;
     }
@@ -309,7 +378,33 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
     const actorKey = named && named.pos !== 'GK' ? named.key : `${S}-${pick(['CF', 'LF', 'RF'])}`;
     if (!actorKey.endsWith('-CM') && Math.random() < 0.55) q.push(mk({ kind: 'pass', to: { slot: `${S}-CM` }, dur: 520 }));
     q.push(mk({ kind: 'pass', to: { slot: actorKey }, dur: 560 }));
-    q.push(mk({ kind: 'carry', to: { x: goalX - dir * rand(105, 135), y: MID_Y + rand(-55, 55) }, dur: rand(650, 900) }));
+    const carryTo = { x: goalX - dir * rand(105, 135), y: MID_Y + rand(-55, 55) };
+    q.push(mk({ kind: 'carry', to: carryTo, dur: rand(650, 900) }));
+
+    // Em parte das jogadas o atacante dribla um marcador antes de finalizar
+    const actor = find(actorKey);
+    const marker = find(`${O}-${pick(['LB', 'RB', 'CM'])}`);
+    if (actor && marker && ev.type !== 'defesa' && Math.random() < 0.65) {
+      const sg = carryTo.y >= MID_Y ? -1 : 1;
+      // O marcador sai para encontrar o atacante na hora do drible
+      st.overrides[marker.key] = {
+        x: carryTo.x + dir * 34,
+        y: carryTo.y - sg * 4,
+        until: performance.now() + 3500,
+        speed: 1,
+      };
+      const ghost = { ...marker, x: carryTo.x + dir * 34, y: carryTo.y - sg * 4 } as Slot;
+      const hero = { ...actor, x: carryTo.x, y: carryTo.y } as Slot;
+      dribbleSteps(hero, ghost, false, true).forEach((step, i) => {
+        const base = mk(step);
+        base.after = i === 0
+          ? () => {
+              st.overrides[marker.key] = { x: marker.x, y: marker.y, until: performance.now() + 1000, speed: 0.18 };
+            }
+          : undefined;
+        q.push(base);
+      });
+    }
 
     if (ev.type === 'gol') {
       q.push(
@@ -432,7 +527,8 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
         const uy = sp > 12 ? holderNow.vy / sp : 0;
         const k = 1 - Math.exp(-dt / 60);
         st.ballX += (holderNow.x + ux * 11 - st.ballX) * k;
-        st.ballY += (holderNow.y + uy * 11 + 2 - st.ballY) * k;
+        const wob = st.active && st.active.step.dribble ? Math.sin(now / 45) * 6 : 0;
+        st.ballY += (holderNow.y + uy * 11 + 2 + wob - st.ballY) * k;
       };
 
       // Move a bola
@@ -479,7 +575,7 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
 
       // Desarme: quem está com a bola e é pressionado pode perdê-la (só em jogadas de rotina)
       const scriptedPending = st.queue.some((s) => s.scripted) || !!(st.active && st.active.step.scripted);
-      if (!celebrating && !scriptedPending && st.holder && (!st.active || st.active.step.kind === 'carry')) {
+      if (!celebrating && !scriptedPending && st.holder && (!st.active || st.active.step.kind === 'carry') && !(st.active && st.active.step.dribble)) {
         const h = get(st.holder);
         if (h && h.pos !== 'GK') {
           const near = nearestOpp(all, h.side, h);
@@ -529,6 +625,14 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
                 },
               });
             }
+          } else if (
+            h.pos !== 'GK' &&
+            toGoal > 70 &&
+            aheadOpp(all, h) &&
+            Math.random() < 0.6
+          ) {
+            const opp = aheadOpp(all, h) as Slot;
+            st.queue.push(...dribbleSteps(h, opp, true, false));
           } else if (h.pos !== 'GK' && toGoal > 190 && near.d > 42 && Math.random() < 0.55) {
             st.queue.push({
               kind: 'carry',
