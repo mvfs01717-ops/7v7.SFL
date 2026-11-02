@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, ArrowRight, BarChart3, ChevronDown, CircleUserRound, Crown, Database, Filter, Flame,
-  Goal, LogIn, Menu, Play, RefreshCw, Search, Shield, SkipForward, Swords, Trophy, UserRound,
+  Goal, LogIn, Menu, MessageCircle, Play, RefreshCw, Search, Send, Shield, SkipForward, Swords, Trophy, UserRound,
   Users, X, Zap,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import AdminScreen from '@/components/AdminScreen';
 import MatchPitch from '@/components/MatchPitch';
 import {
-  createRoom, joinRoom, fetchRoom, patchRoom, generatePlan, recordResult,
-  type Room, type PlanItem,
+  createRoom, joinRoom, fetchRoom, patchRoom, generatePlan, recordResult, openRoomChat,
+  type Room, type PlanItem, type ChatMessage,
 } from '@/lib/multiplayer';
 
 type Position = 'GK' | 'LB' | 'RB' | 'CM' | 'LF' | 'RF' | 'CF';
@@ -250,6 +250,8 @@ function App() {
   const mpPlanRoom = useRef<string | null>(null);
   const mpMatchRoom = useRef<string | null>(null);
   const mpRecorded = useRef<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const chatRef = useRef<ReturnType<typeof openRoomChat> | null>(null);
   // Cartas sorteadas para cada posição no draft clássico (ficam fixas até escolher)
   const drawRef = useRef<Partial<Record<Position, string[]>>>({});
   // Placar mostrado na tela: só sobe quando a bola entra no gol na animação
@@ -375,6 +377,16 @@ function App() {
     setRoom((current) => (current ? { ...current, ...patch } : current));
     void patchRoom(room.id, patch);
   }
+  function sendChat(text: string) {
+    if (!userId || !chatRef.current) return false;
+    return chatRef.current.send({
+      id: `${userId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      senderId: userId,
+      nick: nickname,
+      text: text.slice(0, 200),
+      at: Date.now(),
+    });
+  }
   function leaveRoom() {
     const current = roomRef.current;
     if (!current) return;
@@ -431,6 +443,23 @@ function App() {
     }));
     beginMatch(mine, theirs);
   }
+
+  // Chat da sala: abre quando os dois jogadores estão na sala e fecha ao sair
+  const chatActive = !!room?.id && !!room?.guest_id;
+  useEffect(() => {
+    if (!room?.id || !chatActive) return;
+    setChatMessages([]);
+    const chat = openRoomChat(room.id, (message) => {
+      setChatMessages((current) =>
+        current.some((item) => item.id === message.id) ? current : [...current, message].slice(-100),
+      );
+    });
+    chatRef.current = chat;
+    return () => {
+      chat.close();
+      chatRef.current = null;
+    };
+  }, [room?.id, chatActive]);
 
   // Mantém a sala atualizada (tempo real + consulta a cada 2,5 s como reforço)
   useEffect(() => {
@@ -785,6 +814,9 @@ function App() {
             leaveRoom();
             setMpError('');
           }}
+          userId={userId}
+          chatMessages={chatMessages}
+          onSendChat={sendChat}
         />
       )}
 
@@ -839,6 +871,10 @@ function App() {
           shownGoalIds={shownGoalIds}
           onGoal={handleGoal}
           onSkip={skipMatch}
+          multiplayer={!!room}
+          userId={userId}
+          chatMessages={chatMessages}
+          onSendChat={sendChat}
         />
       )}
 
@@ -1245,6 +1281,9 @@ function LobbyScreen({
   onJoin,
   onResume,
   onCancel,
+  userId,
+  chatMessages,
+  onSendChat,
 }: {
   teams: Team[];
   room: Room | null;
@@ -1256,6 +1295,9 @@ function LobbyScreen({
   onJoin: (code: string) => void;
   onResume: () => void;
   onCancel: () => void;
+  userId: string | null;
+  chatMessages: ChatMessage[];
+  onSendChat: (text: string) => boolean;
 }) {
   const [teamId, setTeamId] = useState('');
   const [roomMode, setRoomMode] = useState<'classic' | 'dice'>('classic');
@@ -1412,6 +1454,7 @@ function LobbyScreen({
               Sair da sala
             </button>
           </div>
+          <ChatBox messages={chatMessages} myId={userId} onSend={onSendChat} />
         </div>
       )}
 
@@ -1708,6 +1751,80 @@ function DraftPitch({ club, selected }: { club: Team; selected: Partial<Record<P
   );
 }
 
+const chatCss = `
+.mp-chat { width: min(560px, 100%); margin: 14px auto; text-align: left; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); border-radius: 14px; overflow: hidden; }
+.mp-chat-title { display: flex; align-items: center; gap: 8px; padding: 10px 14px; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; color: #F5B800; border-bottom: 1px solid rgba(255,255,255,.08); }
+.mp-chat-list { height: 150px; overflow-y: auto; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; }
+.mp-chat-empty { margin: auto; font-size: 13px; opacity: .55; text-align: center; }
+.mp-msg { max-width: 85%; padding: 6px 10px; border-radius: 10px; font-size: 14px; line-height: 1.35; background: rgba(255,255,255,.08); align-self: flex-start; word-break: break-word; }
+.mp-msg.mine { align-self: flex-end; background: rgba(245,184,0,.18); }
+.mp-msg b { display: block; font-size: 11px; opacity: .65; margin-bottom: 2px; }
+.mp-chat-form { display: flex; gap: 8px; padding: 10px; border-top: 1px solid rgba(255,255,255,.08); }
+.mp-chat-form input { flex: 1; min-width: 0; padding: 9px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.15); background: rgba(0,0,0,.25); color: inherit; font-size: 14px; }
+.mp-chat-form button { display: grid; place-items: center; width: 40px; border: 0; border-radius: 10px; background: #F5B800; color: #0B1016; cursor: pointer; }
+.mp-chat-form button:disabled { opacity: .45; cursor: default; }
+`;
+
+// Chat do multiplayer: aparece na sala (draft) e durante a partida
+function ChatBox({
+  messages,
+  myId,
+  onSend,
+}: {
+  messages: ChatMessage[];
+  myId: string | null;
+  onSend: (text: string) => boolean;
+}) {
+  const [text, setText] = useState('');
+  const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const list = listRef.current;
+    if (list) list.scrollTop = list.scrollHeight;
+  }, [messages.length]);
+
+  function submit() {
+    const clean = text.trim();
+    if (!clean) return;
+    if (onSend(clean)) setText('');
+  }
+
+  return (
+    <section className="mp-chat">
+      <style>{chatCss}</style>
+      <div className="mp-chat-title">
+        <MessageCircle size={14} /> CHAT DA SALA
+      </div>
+      <div className="mp-chat-list" ref={listRef}>
+        {messages.length ? (
+          messages.map((message) => (
+            <div key={message.id} className={`mp-msg ${message.senderId === myId ? 'mine' : ''}`}>
+              <b>{message.senderId === myId ? 'Você' : message.nick}</b>
+              {message.text}
+            </div>
+          ))
+        ) : (
+          <div className="mp-chat-empty">Nenhuma mensagem ainda. Mande um oi pro rival!</div>
+        )}
+      </div>
+      <div className="mp-chat-form">
+        <input
+          value={text}
+          maxLength={200}
+          placeholder="Digite uma mensagem..."
+          onChange={(event) => setText(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') submit();
+          }}
+        />
+        <button type="button" aria-label="Enviar mensagem" onClick={submit} disabled={!text.trim()}>
+          <Send size={16} />
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function MatchScreen({
   club,
   opponent,
@@ -1719,6 +1836,10 @@ function MatchScreen({
   shownGoalIds,
   onGoal,
   onSkip,
+  multiplayer,
+  userId,
+  chatMessages,
+  onSendChat,
 }: {
   club: Team;
   opponent: Team;
@@ -1730,6 +1851,10 @@ function MatchScreen({
   shownGoalIds: number[];
   onGoal: (id: number, side: 'user' | 'bot') => void;
   onSkip: () => void;
+  multiplayer: boolean;
+  userId: string | null;
+  chatMessages: ChatMessage[];
+  onSendChat: (text: string) => boolean;
 }) {
   // O lance do gol só aparece no feed depois que a bola entrou na animação
   const feed = events.filter((event) => event.type !== 'gol' || shownGoalIds.includes(event.id));
@@ -1739,9 +1864,11 @@ function MatchScreen({
         <div className="match-status">
           <span className="live-dot" /> AO VIVO · {minute}'
         </div>
-        <button className="skip-button" onClick={onSkip}>
-          <SkipForward size={15} /> Pular partida
-        </button>
+        {!multiplayer && (
+          <button className="skip-button" onClick={onSkip}>
+            <SkipForward size={15} /> Pular partida
+          </button>
+        )}
         <div className="scoreboard">
           <div>
             <TeamMark team={club} />
@@ -1767,6 +1894,8 @@ function MatchScreen({
         events={events}
         onGoal={onGoal}
       />
+
+      {multiplayer && <ChatBox messages={chatMessages} myId={userId} onSend={onSendChat} />}
 
       <div className="match-columns">
         <section className="match-feed">
