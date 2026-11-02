@@ -86,6 +86,28 @@ export async function fetchRoom(id: string): Promise<Room | null> {
   return (data as Room | null) ?? null;
 }
 
+// Partidas que estão rolando agora (para a galera assistir)
+export async function listLiveRooms(): Promise<Room[]> {
+  let data: unknown[] | null = null;
+  const ordered = await supabase
+    .from('rooms')
+    .select('*')
+    .eq('status', 'playing')
+    .order('created_at', { ascending: false })
+    .limit(30);
+  if (!ordered.error) {
+    data = ordered.data;
+  } else {
+    // Se a tabela não tiver created_at, busca sem ordenar
+    const plain = await supabase.from('rooms').select('*').eq('status', 'playing').limit(30);
+    if (plain.error) return [];
+    data = plain.data;
+  }
+  return ((data ?? []) as Room[])
+    .filter((room) => room.guest_id && room.plan && room.plan.length > 0)
+    .slice(0, 12);
+}
+
 export async function patchRoom(id: string, patch: Partial<Room>) {
   const { error } = await supabase.from('rooms').update(patch).eq('id', id);
   return error ? error.message : '';
