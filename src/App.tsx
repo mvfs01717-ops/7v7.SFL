@@ -8,7 +8,7 @@ import { supabase } from '@/lib/supabase';
 import AdminScreen from '@/components/AdminScreen';
 import MatchPitch from '@/components/MatchPitch';
 import {
-  createRoom, joinRoom, fetchRoom, patchRoom, generatePlan, recordResult, openRoomChat,
+  createRoom, joinRoom, fetchRoom, patchRoom, listLiveRooms, generatePlan, recordResult, openRoomChat,
   type Room, type PlanItem, type ChatMessage,
 } from '@/lib/multiplayer';
 
@@ -243,6 +243,7 @@ function App() {
   const [mpBusy, setMpBusy] = useState(false);
   const [mpError, setMpError] = useState('');
   const [mpNotice, setMpNotice] = useState('');
+  const [spectating, setSpectating] = useState<{ host: string; guest: string } | null>(null);
   const planRef = useRef<{ minute: number; type: MatchEvent['type']; side: 'user' | 'bot' }[] | null>(null);
   const roomRef = useRef<Room | null>(null);
   roomRef.current = room;
@@ -430,6 +431,25 @@ function App() {
     setMode(room.mode);
     navigate('draft');
   }
+  // Assistir a partida de outras pessoas (sem entrar na sala). O anfitrião é o lado "user".
+  function watchRoom(target: Room) {
+    if (!target.plan || !target.plan.length) return;
+    const team = teams.find((item) => item.id === target.host_team_id);
+    if (!team) return;
+    setSelectedClub(team);
+    planRef.current = target.plan.map((item: PlanItem) => ({
+      minute: item.minute,
+      type: item.type,
+      side: item.side === 'host' ? 'user' : 'bot',
+    }));
+    setSpectating({ host: target.host_nick, guest: target.guest_nick ?? 'Jogador' });
+    beginMatch(squadPlayers(target.host_squad), squadPlayers(target.guest_squad));
+  }
+  // Sai do modo espectador quando sair da partida/resultado
+  useEffect(() => {
+    if (screen !== 'match' && screen !== 'results') setSpectating(null);
+  }, [screen]);
+
   function beginMpMatch(current: Room) {
     const role = current.host_id === userId ? 'host' : 'guest';
     const mine = squadPlayers(role === 'host' ? current.host_squad : current.guest_squad);
@@ -810,6 +830,7 @@ function App() {
           onCreate={handleCreateRoom}
           onJoin={handleJoinRoom}
           onResume={resumeMpDraft}
+          onWatch={watchRoom}
           onCancel={() => {
             leaveRoom();
             setMpError('');
@@ -859,6 +880,12 @@ function App() {
         />
       )}
 
+      {screen === 'match' && spectating && (
+        <div className="lobby-error" style={{ maxWidth: 560, margin: '8px auto', borderColor: '#F5B800', background: 'rgba(245,184,0,.1)', color: '#F5B800' }}>
+          👁 Assistindo: {spectating.host} x {spectating.guest}
+        </div>
+      )}
+
       {screen === 'match' && selectedClub && opponentTeam && (
         <MatchScreen
           club={selectedClub}
@@ -887,7 +914,9 @@ function App() {
           score={score}
           stats={stats}
           onAgain={() => {
-            if (room) {
+            if (spectating) {
+              navigate('lobby', true);
+            } else if (room) {
               leaveRoom();
               navigate('lobby', true);
             } else goBack('club');
@@ -1306,6 +1335,58 @@ const lobbyCss = `
 }
 `;
 
+function LiveMatches({ teams, onWatch }: { teams: Team[]; onWatch: (room: Room) => void }) {
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    async function load() {
+      const list = await listLiveRooms();
+      if (alive) {
+        setRooms(list);
+        setLoaded(true);
+      }
+    }
+    void load();
+    const timer = window.setInterval(() => void load(), 8000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+  const abbr = (id: string | null) => teams.find((team) => team.id === id)?.abbreviation ?? '';
+  return (
+    <section className="lobby-card">
+      <div className="lobby-step">
+        <b>3</b>
+        <div>
+          <h3>Assistir ao vivo</h3>
+          <p>Veja as partidas que estão rolando agora. A lista atualiza sozinha.</p>
+        </div>
+      </div>
+      {!loaded && <p style={{ margin: 0, opacity: 0.6, fontSize: 14 }}>Buscando partidas...</p>}
+      {loaded && rooms.length === 0 && (
+        <p style={{ margin: 0, opacity: 0.6, fontSize: 14 }}>Nenhuma partida em andamento no momento.</p>
+      )}
+      <div style={{ display: 'grid', gap: 8 }}>
+        {rooms.map((item) => (
+          <button
+            key={item.id}
+            className="lobby-club"
+            style={{ justifyContent: 'space-between', width: '100%' }}
+            onClick={() => onWatch(item)}
+          >
+            <span>
+              {item.host_nick} ({abbr(item.host_team_id)}) x {item.guest_nick ?? 'Jogador'} ({abbr(item.guest_team_id)})
+            </span>
+            <b style={{ color: '#F5B800', fontSize: 12 }}>👁 ASSISTIR</b>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function LobbyScreen({
   teams,
   room,
@@ -1316,6 +1397,7 @@ function LobbyScreen({
   onCreate,
   onJoin,
   onResume,
+  onWatch,
   onCancel,
   userId,
   chatMessages,
@@ -1330,6 +1412,7 @@ function LobbyScreen({
   onCreate: (teamId: string, mode: 'classic' | 'dice') => void;
   onJoin: (code: string) => void;
   onResume: () => void;
+  onWatch: (room: Room) => void;
   onCancel: () => void;
   userId: string | null;
   chatMessages: ChatMessage[];
@@ -1452,6 +1535,11 @@ function LobbyScreen({
             </div>
           </section>
           {error && <div className="lobby-error">{error}</div>}
+
+          <div className="lobby-or">
+            <i /> <span>OU</span> <i />
+          </div>
+          <LiveMatches teams={teams} onWatch={onWatch} />
         </div>
       )}
 
