@@ -1766,6 +1766,14 @@ function ResultsScreen({
   onHome: () => void;
 }) {
   const userWon = score.user > score.bot;
+  // Calculado uma vez por partida (não muda quando a tela é redesenhada)
+  const ratings = useMemo(
+    () => ({
+      user: rateTeam(userTeam, score.user, score.bot, stats.userSaves, stats.userPossession),
+      bot: rateTeam(botTeam, score.bot, score.user, stats.botSaves, stats.botPossession),
+    }),
+    [],
+  );
   return (
     <main className="results-page">
       <div className={`result-banner ${userWon ? 'win' : 'loss'}`}>
@@ -1802,8 +1810,8 @@ function ResultsScreen({
             </div>
             <Crown color="#f5b800" />
           </div>
-          <RatingList players={userTeam} own />
-          <RatingList players={botTeam} />
+          <RatingList players={userTeam} ratings={ratings.user} own />
+          <RatingList players={botTeam} ratings={ratings.bot} />
         </section>
       </div>
       <div className="result-actions">
@@ -1851,19 +1859,92 @@ function ResultBar({
   );
 }
 
-function RatingList({ players, own = false }: { players: Player[]; own?: boolean }) {
+type PlayerRating = { rating: number; goals: number; assists: number };
+
+function pickWeighted(list: Player[], weight: (player: Player) => number) {
+  const total = list.reduce((sum, player) => sum + weight(player), 0);
+  let roll = Math.random() * total;
+  for (const player of list) {
+    roll -= weight(player);
+    if (roll <= 0) return player;
+  }
+  return list[list.length - 1];
+}
+
+// Nota de cada jogador: depende do resultado, de gols, defesas e de um pouco de sorte
+function rateTeam(
+  team: Player[],
+  goalsFor: number,
+  goalsAgainst: number,
+  saves: number,
+  possession: number,
+): Record<string, PlayerRating> {
+  const out: Record<string, PlayerRating> = {};
+  team.forEach((player) => {
+    out[player.id] = { rating: 0, goals: 0, assists: 0 };
+  });
+  const attackers = team.filter((player) => ['LF', 'RF', 'CF'].includes(player.primary_position));
+  const outfield = team.filter((player) => player.primary_position !== 'GK');
+  for (let i = 0; i < goalsFor && outfield.length; i += 1) {
+    const pool = attackers.length && Math.random() < 0.85 ? attackers : outfield;
+    const scorer = pickWeighted(pool, (player) => player.overall);
+    out[scorer.id].goals += 1;
+    const others = outfield.filter((player) => player.id !== scorer.id);
+    if (others.length && Math.random() < 0.75) {
+      out[pickWeighted(others, (player) => player.overall).id].assists += 1;
+    }
+  }
+  const result = goalsFor > goalsAgainst ? 0.4 : goalsFor < goalsAgainst ? -0.3 : 0;
+  const cleanSheet = goalsAgainst === 0;
+  team.forEach((player) => {
+    const position = player.primary_position;
+    let value = 6.1 + (player.overall - 70) / 25 + result;
+    value += (Math.random() + Math.random() - 1) * 0.9;
+    value += out[player.id].goals * 1.1 + out[player.id].assists * 0.5;
+    if (position === 'GK') {
+      value += saves * 0.3 - goalsAgainst * 0.35 + (cleanSheet ? 0.7 : 0);
+    } else if (position === 'LB' || position === 'RB') {
+      value += (cleanSheet ? 0.5 : 0) - goalsAgainst * 0.15;
+    } else if (position === 'CM') {
+      value += (possession - 50) / 40;
+    }
+    out[player.id].rating = Math.max(4.5, Math.min(10, Math.round(value * 10) / 10));
+  });
+  return out;
+}
+
+function RatingList({
+  players,
+  ratings,
+  own = false,
+}: {
+  players: Player[];
+  ratings: Record<string, PlayerRating>;
+  own?: boolean;
+}) {
+  const bestId = players.reduce(
+    (best, player) => ((ratings[player.id]?.rating ?? 0) > (ratings[best]?.rating ?? 0) ? player.id : best),
+    players[0]?.id ?? '',
+  );
   return (
     <div className="rating-list">
       <span className="rating-team">{own ? 'SEU TIME' : 'RIVAL'}</span>
-      {players.map((player, index) => (
-        <div key={player.id} className={index === 0 ? 'best-player' : ''}>
-          <span>
-            {index === 0 && <Crown size={13} />} {player.primary_position}
-          </span>
-          <b>{player.name}</b>
-          <strong>{(6.5 + (player.overall - 75) / 20 + (index === 0 ? 0.8 : 0)).toFixed(1)}</strong>
-        </div>
-      ))}
+      {players.map((player) => {
+        const info = ratings[player.id] ?? { rating: 6, goals: 0, assists: 0 };
+        return (
+          <div key={player.id} className={player.id === bestId ? 'best-player' : ''}>
+            <span>
+              {player.id === bestId && <Crown size={13} />} {player.primary_position}
+            </span>
+            <b>
+              {player.name}
+              {info.goals > 0 && <small> ⚽{info.goals > 1 ? ` x${info.goals}` : ''}</small>}
+              {info.assists > 0 && <small> 🅰️{info.assists > 1 ? ` x${info.assists}` : ''}</small>}
+            </b>
+            <strong>{info.rating.toFixed(1)}</strong>
+          </div>
+        );
+      })}
     </div>
   );
 }
