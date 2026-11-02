@@ -432,19 +432,45 @@ function App() {
     navigate('draft');
   }
   // Assistir a partida de outras pessoas (sem entrar na sala). O anfitrião é o lado "user".
-  function watchRoom(target: Room) {
-    if (!target.plan || !target.plan.length) return;
+  // Entra na partida no minuto em que ela está agora (tempo real), não do começo.
+  async function watchRoom(listed: Room) {
+    const target = (await fetchRoom(listed.id)) ?? listed;
+    if (target.status !== 'playing' || !target.plan || !target.plan.length) {
+      setMpNotice('Essa partida já terminou. Atualize a lista.');
+      return;
+    }
     const team = teams.find((item) => item.id === target.host_team_id);
     if (!team) return;
     setSelectedClub(team);
-    planRef.current = target.plan.map((item: PlanItem) => ({
-      minute: item.minute,
-      type: item.type,
-      side: item.side === 'host' ? 'user' : 'bot',
-    }));
+    const startedAt = target.plan.find((item) => item.startedAt)?.startedAt;
+    // Cada minuto da partida dura 900 ms. Sem hora de início (partida antiga), começa do zero.
+    const liveMinute = startedAt ? Math.max(0, Math.min(90, Math.floor((Date.now() - startedAt) / 900))) : 0;
+    spectateFrom.current = liveMinute;
+    planRef.current = target.plan
+      .filter((item: PlanItem) => item.minute > 0)
+      .map((item: PlanItem) => ({
+        minute: item.minute,
+        type: item.type,
+        side: item.side === 'host' ? 'user' : 'bot',
+      }));
     setSpectating({ host: target.host_nick, guest: target.guest_nick ?? 'Jogador' });
     beginMatch(squadPlayers(target.host_squad), squadPlayers(target.guest_squad));
   }
+  // Ao entrar como espectador, reconstrói o que já aconteceu até o minuto atual
+  const spectateFrom = useRef<number | null>(null);
+  useEffect(() => {
+    if (screen !== 'match' || spectateFrom.current === null || !userTeam.length || !botTeam.length) return;
+    const target = spectateFrom.current;
+    spectateFrom.current = null;
+    (planRef.current ?? [])
+      .filter((item) => item.minute <= target)
+      .forEach((item) => {
+        createEvent(item.minute, item);
+        // Gols que já aconteceram entram direto no placar, sem esperar a animação
+        if (item.type === 'gol') handleGoal(eventSeq.current, item.side);
+      });
+    setMinute(target);
+  }, [screen, userTeam, botTeam]);
   // Sai do modo espectador quando sair da partida/resultado
   useEffect(() => {
     if (screen !== 'match' && screen !== 'results') setSpectating(null);
@@ -1312,6 +1338,7 @@ const lobbyCss = `
 .lobby-join input { border: 1px solid rgba(255,255,255,.18); background: rgba(0,0,0,.4); color: #fff; }
 .lobby-join input::placeholder { color: rgba(255,255,255,.25); }
 .lobby-join input:focus { border-color: #F5B800; }
+@keyframes lb-spin { to { transform: rotate(360deg); } }
 .lobby-error { padding: 10px 14px; border-radius: 10px; border: 1px solid #ff6b6b; background: rgba(255,107,107,.1); color: #ffb3b3; font-size: 14px; text-align: center; }
 @media (max-width: 720px) {
 .lobby-page .flow-heading p { display: none; }
@@ -1339,19 +1366,26 @@ const lobbyCss = `
 function LiveMatches({ teams, onWatch }: { teams: Team[]; onWatch: (room: Room) => void }) {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [loaded, setLoaded] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    async function load() {
-      const list = await listLiveRooms();
-      if (alive) {
-        setRooms(list);
-        setLoaded(true);
-      }
+  const [reloading, setReloading] = useState(false);
+  const alive = useRef(true);
+  async function load() {
+    const list = await listLiveRooms();
+    if (alive.current) {
+      setRooms(list);
+      setLoaded(true);
     }
+  }
+  async function reload() {
+    setReloading(true);
+    await load();
+    if (alive.current) setReloading(false);
+  }
+  useEffect(() => {
+    alive.current = true;
     void load();
     const timer = window.setInterval(() => void load(), 8000);
     return () => {
-      alive = false;
+      alive.current = false;
       window.clearInterval(timer);
     };
   }, []);
@@ -1362,8 +1396,19 @@ function LiveMatches({ teams, onWatch }: { teams: Team[]; onWatch: (room: Room) 
         <b>3</b>
         <div>
           <h3>Assistir ao vivo</h3>
-          <p>Veja as partidas que estão rolando agora. A lista atualiza sozinha.</p>
+          <p>Veja as partidas que estão rolando agora. Você entra no minuto atual do jogo.</p>
         </div>
+        <button
+          type="button"
+          className="outline-button"
+          onClick={() => void reload()}
+          disabled={reloading}
+          aria-label="Recarregar partidas"
+          style={{ marginLeft: 'auto', flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+        >
+          <RefreshCw size={14} style={reloading ? { animation: 'lb-spin .8s linear infinite' } : undefined} />
+          {reloading ? 'Buscando...' : 'Recarregar'}
+        </button>
       </div>
       {!loaded && <p style={{ margin: 0, opacity: 0.6, fontSize: 14 }}>Buscando partidas...</p>}
       {loaded && rooms.length === 0 && (
