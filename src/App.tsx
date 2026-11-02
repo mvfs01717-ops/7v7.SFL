@@ -8,7 +8,7 @@ import { supabase } from '@/lib/supabase';
 import AdminScreen from '@/components/AdminScreen';
 import MatchPitch from '@/components/MatchPitch';
 import {
-  createRoom, joinRoom, fetchRoom, patchRoom, listLiveRooms, isRoomLive, generatePlan, recordResult, openRoomChat,
+  createRoom, joinRoom, fetchRoom, patchRoom, listLiveRooms, isRoomLive, lookupRoom, generatePlan, recordResult, openRoomChat,
   type Room, type PlanItem, type ChatMessage,
 } from '@/lib/multiplayer';
 
@@ -414,11 +414,11 @@ function App() {
     if (result.error || !result.room) setMpError(result.error ?? 'Erro ao criar a sala.');
     else setRoom(result.room);
   }
-  async function handleJoinRoom(code: string) {
+  async function handleJoinRoom(code: string, teamId: string) {
     if (!userId) return;
     setMpBusy(true);
     setMpError('');
-    const result = await joinRoom(code, userId, nickname, teams.map((team) => team.id));
+    const result = await joinRoom(code, userId, nickname, teamId);
     setMpBusy(false);
     if (result.error || !result.room) setMpError(result.error ?? 'Erro ao entrar na sala.');
     else setRoom(result.room);
@@ -1456,7 +1456,7 @@ function LobbyScreen({
   error: string;
   onBack: () => void;
   onCreate: (teamId: string, mode: 'classic' | 'dice') => void;
-  onJoin: (code: string) => void;
+  onJoin: (code: string, teamId: string) => void;
   onResume: () => void;
   onWatch: (room: Room) => void;
   onCancel: () => void;
@@ -1468,7 +1468,28 @@ function LobbyScreen({
   const [roomMode, setRoomMode] = useState<'classic' | 'dice'>('classic');
   const [code, setCode] = useState('');
   const [copied, setCopied] = useState(false);
+  // Convidado: depois de digitar o código, escolhe o clube antes de entrar
+  const [found, setFound] = useState<Room | null>(null);
+  const [joinTeamId, setJoinTeamId] = useState('');
+  const [looking, setLooking] = useState(false);
+  const [lookError, setLookError] = useState('');
   const chosenTeam = teamId || teams[0]?.id || '';
+  const joinTeams = found ? teams.filter((team) => team.id !== found.host_team_id) : [];
+  const chosenJoinTeam = joinTeams.some((team) => team.id === joinTeamId) ? joinTeamId : joinTeams[0]?.id || '';
+
+  async function findRoom() {
+    if (!userId) return;
+    setLooking(true);
+    setLookError('');
+    const result = await lookupRoom(code, userId);
+    setLooking(false);
+    if (result.error || !result.room) {
+      setLookError(result.error ?? 'Sala não encontrada.');
+      return;
+    }
+    setFound(result.room);
+    setJoinTeamId('');
+  }
   const myReady = room && myRole ? (myRole === 'host' ? room.host_ready : room.guest_ready) : false;
   const rivalName = room && myRole ? (myRole === 'host' ? room.guest_nick : room.host_nick) : null;
 
@@ -1562,25 +1583,68 @@ function LobbyScreen({
                 <p>Recebeu um código de um amigo? Digite aqui.</p>
               </div>
             </div>
-            <div className="lobby-join">
-              <input
-                value={code}
-                onChange={(event) => setCode(event.target.value.toUpperCase().slice(0, 4))}
-                placeholder="K7QX"
-                maxLength={4}
-                autoCapitalize="characters"
-                autoComplete="off"
-              />
-              <button
-                className="gold-button"
-                disabled={busy || code.length < 4}
-                onClick={() => onJoin(code)}
-              >
-                {busy ? 'Entrando...' : 'Entrar'}
-              </button>
-            </div>
+            {!found ? (
+              <div className="lobby-join">
+                <input
+                  value={code}
+                  onChange={(event) => {
+                    setCode(event.target.value.toUpperCase().slice(0, 4));
+                    setLookError('');
+                  }}
+                  placeholder="K7QX"
+                  maxLength={4}
+                  autoCapitalize="characters"
+                  autoComplete="off"
+                />
+                <button
+                  className="gold-button"
+                  disabled={looking || code.length < 4}
+                  onClick={() => void findRoom()}
+                >
+                  {looking ? 'Buscando...' : 'Entrar'}
+                </button>
+              </div>
+            ) : (
+              <>
+                <span className="lobby-label">
+                  SALA {found.code} · ANFITRIÃO: {found.host_nick.toUpperCase()}
+                </span>
+                <span className="lobby-label" style={{ marginTop: 0 }}>SEU CLUBE</span>
+                <div className="lobby-clubs">
+                  {joinTeams.map((team) => (
+                    <button
+                      key={team.id}
+                      type="button"
+                      className={chosenJoinTeam === team.id ? 'lobby-club on' : 'lobby-club'}
+                      onClick={() => setJoinTeamId(team.id)}
+                      style={{ '--club': team.primary_color } as React.CSSProperties}
+                    >
+                      <i>{team.abbreviation}</i>
+                      <span>{team.name}</span>
+                    </button>
+                  ))}
+                </div>
+                <button
+                  className="gold-button large lobby-main"
+                  disabled={busy || !chosenJoinTeam}
+                  onClick={() => onJoin(found.code, chosenJoinTeam)}
+                >
+                  {busy ? 'Entrando...' : 'Entrar na sala'}
+                </button>
+                <button
+                  className="outline-button lobby-main"
+                  style={{ marginTop: 8 }}
+                  onClick={() => {
+                    setFound(null);
+                    setLookError('');
+                  }}
+                >
+                  Trocar código
+                </button>
+              </>
+            )}
           </section>
-          {error && <div className="lobby-error">{error}</div>}
+          {(error || lookError) && <div className="lobby-error">{lookError || error}</div>}
 
           <div className="lobby-or">
             <i /> <span>OU</span> <i />
