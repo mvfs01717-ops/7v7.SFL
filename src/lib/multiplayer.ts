@@ -127,3 +127,34 @@ export async function recordResult(room: Room, hostGoals: number, guestGoals: nu
   if (error && error.code !== '23505') console.warn('Não foi possível salvar o resultado:', error.message);
   await supabase.from('rooms').update({ status: 'finished' }).eq('id', room.id);
 }
+
+// ---------- Chat da sala ----------
+// Usa o canal "broadcast" do Supabase Realtime: não precisa de tabela nova.
+// As mensagens valem só durante a sala (não ficam salvas no banco).
+export type ChatMessage = {
+  id: string;
+  senderId: string;
+  nick: string;
+  text: string;
+  at: number;
+};
+
+export function openRoomChat(roomId: string, onMessage: (message: ChatMessage) => void) {
+  const channel = supabase.channel(`chat-${roomId}`, { config: { broadcast: { self: true } } });
+  let ready = false;
+  channel
+    .on('broadcast', { event: 'msg' }, ({ payload }) => onMessage(payload as ChatMessage))
+    .subscribe((status) => {
+      ready = status === 'SUBSCRIBED';
+    });
+  return {
+    send(message: ChatMessage) {
+      if (!ready) return false;
+      void channel.send({ type: 'broadcast', event: 'msg', payload: message });
+      return true;
+    },
+    close() {
+      void supabase.removeChannel(channel);
+    },
+  };
+}
