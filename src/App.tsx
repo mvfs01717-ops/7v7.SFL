@@ -8,7 +8,7 @@ import { supabase } from '@/lib/supabase';
 import AdminScreen from '@/components/AdminScreen';
 import MatchPitch from '@/components/MatchPitch';
 import {
-  createRoom, joinRoom, fetchRoom, patchRoom, listLiveRooms, generatePlan, recordResult, openRoomChat,
+  createRoom, joinRoom, fetchRoom, patchRoom, listLiveRooms, isRoomLive, generatePlan, recordResult, openRoomChat,
   type Room, type PlanItem, type ChatMessage,
 } from '@/lib/multiplayer';
 
@@ -435,7 +435,7 @@ function App() {
   // Entra na partida no minuto em que ela está agora (tempo real), não do começo.
   async function watchRoom(listed: Room) {
     const target = (await fetchRoom(listed.id)) ?? listed;
-    if (target.status !== 'playing' || !target.plan || !target.plan.length) {
+    if (!isRoomLive(target)) {
       setMpNotice('Essa partida já terminou. Atualize a lista.');
       return;
     }
