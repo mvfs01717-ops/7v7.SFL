@@ -197,6 +197,20 @@ function TeamMark({ team }: { team: Team }) {
   );
 }
 
+// Evita a rolagem para os lados no celular e deixa a tela inicial mais compacta
+const globalCss = `
+html, body { max-width: 100%; overflow-x: hidden; overflow-x: clip; }
+body { overscroll-behavior-x: none; }
+.app-shell { max-width: 100vw; overflow-x: hidden; overflow-x: clip; }
+@media (max-width: 720px) {
+  .hero-actions { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
+  .hero-actions { width: min(100%, 340px); margin-left: auto; margin-right: auto; }
+  .hero-actions button { width: 100%; justify-content: center; }
+  .hero p { font-size: 15px; }
+  .hero { padding-bottom: 8px; }
+}
+`;
+
 function App() {
   const initialScreen: Screen = window.location.pathname === '/admin' ? 'admin' : 'home';
   const [screen, setScreenState] = useState<Screen>(initialScreen);
@@ -715,6 +729,7 @@ function App() {
 
   return (
     <div className="app-shell">
+      <style>{globalCss}</style>
       <Header
         nickname={nickname}
         isAdmin={isAdmin}
@@ -885,8 +900,22 @@ function Header({
   onSquad: () => void;
   onLogin: () => void;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const go = (action: () => void) => {
+    setMenuOpen(false);
+    action();
+  };
   return (
-    <header className="topbar">
+    <header className="topbar" style={{ position: 'relative' }}>
+      <style>{`
+        .m-menu { position: absolute; top: 100%; right: 8px; z-index: 50; min-width: 200px; display: grid; gap: 4px; }
+        .m-menu { padding: 8px; border-radius: 14px; background: #0d131a; border: 1px solid rgba(255,255,255,.14); }
+        .m-menu { box-shadow: 0 14px 30px rgba(0,0,0,.6); }
+        .m-menu button { padding: 12px 14px; border: 0; border-radius: 10px; background: transparent; }
+        .m-menu button { color: #fff; font-weight: 700; text-align: left; font-size: 15px; cursor: pointer; }
+        .m-menu button:hover { background: rgba(245,184,0,.12); }
+        @media (min-width: 721px) { .m-menu { display: none; } }
+      `}</style>
       <button className="brand" onClick={onHome}>
         <LogoMark size={52} variant="full" />
         <span>
@@ -901,9 +930,22 @@ function Header({
       <button className="profile-button" onClick={onLogin}>
         <CircleUserRound size={17} /> {nickname}
       </button>
-      <button className="mobile-menu">
-        <Menu size={20} />
+      <button
+        className="mobile-menu"
+        aria-label="Menu"
+        aria-expanded={menuOpen}
+        onClick={() => setMenuOpen((open) => !open)}
+      >
+        {menuOpen ? <X size={20} /> : <Menu size={20} />}
       </button>
+      {menuOpen && (
+        <div className="m-menu">
+          <button onClick={() => go(onHome)}>Início</button>
+          <button onClick={() => go(onSquad)}>Cartas</button>
+          <button onClick={() => go(onLeaderboard)}>Leaderboard</button>
+          {isAdmin && <button onClick={() => go(onAdmin)}>Admin</button>}
+        </div>
+      )}
     </header>
   );
 }
