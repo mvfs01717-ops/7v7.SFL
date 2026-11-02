@@ -726,7 +726,18 @@ function App() {
         </div>
       )}
 
-      {screen === 'lobby' && (
+      {screen === 'lobby' && !userId && (
+        <main className="flow-page">
+          <div className="empty-state">
+            <p>🔒 Entre na sua conta para jogar online.</p>
+            <button className="gold-button" onClick={() => setShowLogin(true)}>
+              Entrar ou criar conta
+            </button>
+          </div>
+        </main>
+      )}
+
+      {screen === 'lobby' && !!userId && (
         <LobbyScreen
           teams={teams}
           room={room}
@@ -750,6 +761,8 @@ function App() {
           onAdmin={() => navigate('admin')}
           onPlay={() => startClubChoice('classic')}
           onMultiplayer={openMultiplayer}
+          loggedIn={!!userId}
+          onLogin={() => setShowLogin(true)}
           onLeaderboard={() => navigate('leaderboard')}
         />
       )}
@@ -882,12 +895,16 @@ function Home({
   onAdmin,
   onPlay,
   onMultiplayer,
+  loggedIn,
+  onLogin,
   onLeaderboard,
 }: {
   isAdmin: boolean;
   onAdmin: () => void;
   onPlay: () => void;
   onMultiplayer: () => void;
+  loggedIn: boolean;
+  onLogin: () => void;
   onLeaderboard: () => void;
 }) {
   return (
@@ -907,10 +924,25 @@ function Home({
           <button className="gold-button large" onClick={onPlay}>
             <Play size={17} fill="currentColor" /> Jogar vs Bots
           </button>
-          <button className="outline-button large" onClick={onMultiplayer}>
-            <Swords size={17} /> Multiplayer <small>NOVO</small>
+          <button
+            className="outline-button large"
+            onClick={onMultiplayer}
+            disabled={!loggedIn}
+            aria-disabled={!loggedIn}
+            title={loggedIn ? undefined : 'Entre na sua conta para jogar online'}
+            style={loggedIn ? undefined : { opacity: 0.6, cursor: 'not-allowed' }}
+          >
+            <Swords size={17} /> Multiplayer <small>{loggedIn ? 'NOVO' : 'PRECISA DE CONTA'}</small>
           </button>
         </div>
+        {!loggedIn && (
+          <p style={{ margin: '12px 0 0', fontSize: 14, opacity: 0.85 }}>
+            🔒 O multiplayer é só para quem tem conta.{' '}
+            <button className="text-button" onClick={onLogin} style={{ display: 'inline', padding: 0 }}>
+              Entrar ou criar conta
+            </button>
+          </p>
+        )}
         {isAdmin && (
           <button className="outline-button" onClick={onAdmin} style={{ marginTop: 14 }}>
             <Shield size={16} /> Painel Admin: editar e adicionar jogadores
