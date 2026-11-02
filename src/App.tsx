@@ -7,9 +7,13 @@ import {
 import { supabase } from '@/lib/supabase';
 import AdminScreen from '@/components/AdminScreen';
 import MatchPitch from '@/components/MatchPitch';
+import {
+  createRoom, joinRoom, fetchRoom, patchRoom, generatePlan,
+  type Room, type PlanItem,
+} from '@/lib/multiplayer';
 
 type Position = 'GK' | 'LB' | 'RB' | 'CM' | 'LF' | 'RF' | 'CF';
-type Screen = 'home' | 'club' | 'draft' | 'match' | 'results' | 'leaderboard' | 'squad' | 'admin';
+type Screen = 'home' | 'club' | 'draft' | 'match' | 'results' | 'leaderboard' | 'squad' | 'admin' | 'lobby';
 type Team = { id: string; name: string; abbreviation: string; primary_color: string; secondary_color: string };
 type Player = {
   id: string;
@@ -219,6 +223,18 @@ function App() {
   const [password, setPassword] = useState('');
   const [authMessage, setAuthMessage] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+  // Multiplayer
+  const [room, setRoom] = useState<Room | null>(null);
+  const [mpBusy, setMpBusy] = useState(false);
+  const [mpError, setMpError] = useState('');
+  const [mpNotice, setMpNotice] = useState('');
+  const planRef = useRef<{ minute: number; type: MatchEvent['type']; side: 'user' | 'bot' }[] | null>(null);
+  const roomRef = useRef<Room | null>(null);
+  roomRef.current = room;
+  const mpDraftRoom = useRef<string | null>(null);
+  const mpPlanRoom = useRef<string | null>(null);
+  const mpMatchRoom = useRef<string | null>(null);
   // Placar mostrado na tela: só sobe quando a bola entra no gol na animação
   const [shownScore, setShownScore] = useState({ user: 0, bot: 0 });
   const [shownGoalIds, setShownGoalIds] = useState<number[]>([]);
@@ -238,9 +254,11 @@ function App() {
       } = await supabase.auth.getUser();
       if (!user) {
         setIsAdmin(false);
+        setUserId(null);
         setNickname('Visitante');
         return;
       }
+      setUserId(user.id);
       const { data } = await supabase
         .from('profiles')
         .select('role,nickname')
@@ -312,6 +330,162 @@ function App() {
     setLoading(false);
   }
 
+  const myRole: 'host' | 'guest' | null = room && userId ? (room.host_id === userId ? 'host' : 'guest') : null;
+  const theirSquad = room ? (myRole === 'host' ? room.guest_squad : room.host_squad) : null;
+  // Jogadores que o adversário já escolheu no draft multiplayer
+  const blockedIds = new Set<string>(theirSquad ? Object.values(theirSquad) : []);
+
+  function squadIds(source: Partial<Record<Position, Player>>) {
+    const out: Record<string, string> = {};
+    positions.forEach((position) => {
+      const player = source[position];
+      if (player) out[position] = player.id;
+    });
+    return out;
+  }
+  function squadPlayers(squad: Record<string, string> | null | undefined) {
+    return positions
+      .map((position) => players.find((player) => player.id === squad?.[position]))
+      .filter(Boolean) as Player[];
+  }
+  // Envia as escolhas do draft para a sala (e marca como pronto no fim)
+  function syncSquad(source: Partial<Record<Position, Player>>, ready = false) {
+    if (!room || !myRole) return;
+    const patch: Partial<Room> =
+      myRole === 'host'
+        ? { host_squad: squadIds(source), ...(ready ? { host_ready: true } : {}) }
+        : { guest_squad: squadIds(source), ...(ready ? { guest_ready: true } : {}) };
+    setRoom((current) => (current ? { ...current, ...patch } : current));
+    void patchRoom(room.id, patch);
+  }
+  function leaveRoom() {
+    const current = roomRef.current;
+    if (!current) return;
+    if (current.status === 'waiting' || current.status === 'drafting') {
+      void patchRoom(current.id, { status: 'cancelled' });
+    }
+    setRoom(null);
+  }
+  function openMultiplayer() {
+    if (!userId) {
+      setAuthMessage('Entre na sua conta para jogar o multiplayer.');
+      setShowLogin(true);
+      return;
+    }
+    setMpError('');
+    navigate('lobby');
+  }
+  async function handleCreateRoom(teamId: string, roomMode: 'classic' | 'dice') {
+    if (!userId) return;
+    setMpBusy(true);
+    setMpError('');
+    const result = await createRoom(userId, nickname, teamId, roomMode);
+    setMpBusy(false);
+    if (result.error || !result.room) setMpError(result.error ?? 'Erro ao criar a sala.');
+    else setRoom(result.room);
+  }
+  async function handleJoinRoom(code: string) {
+    if (!userId) return;
+    setMpBusy(true);
+    setMpError('');
+    const result = await joinRoom(code, userId, nickname, teams.map((team) => team.id));
+    setMpBusy(false);
+    if (result.error || !result.room) setMpError(result.error ?? 'Erro ao entrar na sala.');
+    else setRoom(result.room);
+  }
+  function resumeMpDraft() {
+    if (!room || !myRole) return;
+    const team = teams.find((item) => item.id === (myRole === 'host' ? room.host_team_id : room.guest_team_id));
+    if (!team) return;
+    setSelectedClub(team);
+    setMode(room.mode);
+    navigate('draft');
+  }
+  function beginMpMatch(current: Room) {
+    const role = current.host_id === userId ? 'host' : 'guest';
+    const mine = squadPlayers(role === 'host' ? current.host_squad : current.guest_squad);
+    const theirs = squadPlayers(role === 'host' ? current.guest_squad : current.host_squad);
+    const team = teams.find((item) => item.id === (role === 'host' ? current.host_team_id : current.guest_team_id));
+    if (team) setSelectedClub(team);
+    planRef.current = (current.plan ?? []).map((item: PlanItem) => ({
+      minute: item.minute,
+      type: item.type,
+      side: item.side === role ? 'user' : 'bot',
+    }));
+    beginMatch(mine, theirs);
+  }
+
+  // Mantém a sala atualizada (tempo real + consulta a cada 2,5 s como reforço)
+  useEffect(() => {
+    if (!room?.id) return;
+    const id = room.id;
+    let alive = true;
+    async function refresh() {
+      const next = await fetchRoom(id);
+      if (!alive || !next) return;
+      setRoom((current) => (current && JSON.stringify(current) !== JSON.stringify(next) ? next : current));
+    }
+    const timer = window.setInterval(() => void refresh(), 2500);
+    let channel: any = null;
+    try {
+      channel = supabase
+        .channel(`room-${id}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${id}` }, () => {
+          void refresh();
+        })
+        .subscribe();
+    } catch {
+      channel = null;
+    }
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+      if (channel) void supabase.removeChannel(channel);
+    };
+  }, [room?.id]);
+
+  // Reage às mudanças da sala: draft, início da partida, saída do adversário
+  useEffect(() => {
+    if (!room || !myRole) return;
+    if (room.status === 'cancelled') {
+      setRoom(null);
+      setMpNotice('O adversário saiu da sala.');
+      if (screen === 'lobby' || screen === 'draft') navigate('home', true);
+      return;
+    }
+    if (room.status === 'drafting' && mpDraftRoom.current !== room.id) {
+      mpDraftRoom.current = room.id;
+      const team = teams.find((item) => item.id === (myRole === 'host' ? room.host_team_id : room.guest_team_id));
+      if (team) {
+        setSelectedClub(team);
+        setMode(room.mode);
+        setDraft({});
+        setDraftPosition('GK');
+        navigate('draft');
+      }
+    }
+    if (
+      myRole === 'host' &&
+      room.status === 'drafting' &&
+      room.host_ready &&
+      room.guest_ready &&
+      mpPlanRoom.current !== room.id
+    ) {
+      mpPlanRoom.current = room.id;
+      const plan = generatePlan(squadPlayers(room.host_squad), squadPlayers(room.guest_squad));
+      void patchRoom(room.id, { plan, status: 'playing' });
+    }
+    if (room.status === 'playing' && room.plan && mpMatchRoom.current !== room.id) {
+      mpMatchRoom.current = room.id;
+      beginMpMatch(room);
+    }
+  }, [room, screen]);
+
+  // Ao voltar para o início, sai da sala
+  useEffect(() => {
+    if (screen === 'home' && room) leaveRoom();
+  }, [screen, room]);
+
   function startClubChoice(next: 'classic' | 'dice' = 'classic') {
     setMode(next);
     navigate('club');
@@ -326,13 +500,16 @@ function App() {
     const selectedIds = Object.values(draft)
       .filter(Boolean)
       .map((player) => (player as Player).id);
-    return players
-      .filter((player) => getPlayerPositions(player).includes(position) && !selectedIds.includes(player.id))
-      .slice(0, 5);
+    const fits = players.filter(
+      (player) => getPlayerPositions(player).includes(position) && !selectedIds.includes(player.id),
+    );
+    const free = fits.filter((player) => !blockedIds.has(player.id));
+    return (free.length ? free : fits).slice(0, 5);
   }
   function chooseDraftPlayer(player: Player) {
     const nextDraft = { ...draft, [draftPosition]: player };
     setDraft(nextDraft);
+    syncSquad(nextDraft);
     const nextPosition = positions.find((position) => !nextDraft[position]);
     if (nextPosition) setDraftPosition(nextPosition);
     else finishDraft(nextDraft);
@@ -341,9 +518,17 @@ function App() {
   function pickDicePlayer(player: Player, position: Position) {
     const nextDraft = { ...draft, [position]: player };
     setDraft(nextDraft);
+    syncSquad(nextDraft);
     if (positions.every((item) => nextDraft[item])) finishDraft(nextDraft);
   }
   function finishDraft(finalDraft: Partial<Record<Position, Player>>) {
+    if (room) {
+      // Multiplayer: marca como pronto e espera o adversário
+      syncSquad(finalDraft, true);
+      navigate('lobby', true);
+      return;
+    }
+    planRef.current = null;
     const chosen = positions.map((position) => finalDraft[position]).filter(Boolean) as Player[];
     const chosenIds = new Set(chosen.map((player) => player.id));
     const botClub = teams.find((team) => team.id !== selectedClub?.id);
@@ -361,6 +546,9 @@ function App() {
         botPlayers.push(choice);
       }
     });
+    beginMatch(chosen, botPlayers);
+  }
+  function beginMatch(chosen: Player[], botPlayers: Player[]) {
     setUserTeam(chosen);
     setBotTeam(botPlayers);
     setMinute(0);
@@ -393,7 +581,10 @@ function App() {
   function advanceMatch() {
     const next = minute + 1;
     setMinute(next);
-    if (next % 4 === 0 || next % 7 === 0) createEvent(next);
+    if (planRef.current) {
+      const planned = planRef.current.find((item) => item.minute === next);
+      if (planned) createEvent(next, planned);
+    } else if (next % 4 === 0 || next % 7 === 0) createEvent(next);
   }
 
   function handleGoal(id: number, side: 'user' | 'bot') {
@@ -403,19 +594,20 @@ function App() {
     setShownScore((current) => ({ ...current, [side]: current[side] + 1 }));
   }
 
-  function createEvent(currentMinute: number) {
+  function createEvent(currentMinute: number, forced?: { type: MatchEvent['type']; side: MatchEvent['team'] }) {
     const userAttack = average(userTeam.filter((player) => ['LF', 'RF', 'CF'].includes(player.primary_position)));
     const botAttack = average(botTeam.filter((player) => ['LF', 'RF', 'CF'].includes(player.primary_position)));
     const userWins = userAttack + Math.random() * 20 >= botAttack + Math.random() * 20;
-    const type: MatchEvent['type'] =
-      currentMinute % 11 === 0
+    const type: MatchEvent['type'] = forced
+      ? forced.type
+      : currentMinute % 11 === 0
         ? 'gol'
         : currentMinute % 5 === 0
           ? 'finalização'
           : currentMinute % 3 === 0
             ? 'defesa'
             : 'posse';
-    const side: MatchEvent['team'] = userWins ? 'user' : 'bot';
+    const side: MatchEvent['team'] = forced ? forced.side : userWins ? 'user' : 'bot';
     const attackPlayer =
       (side === 'user' ? userTeam : botTeam).find((player) => ['LF', 'RF', 'CF'].includes(player.primary_position)) ??
       (side === 'user' ? userTeam[0] : botTeam[0]);
@@ -452,8 +644,14 @@ function App() {
   }
 
   function skipMatch() {
-    for (let i = minute; i < 90; i += 1) {
-      if (i % 4 === 0 || i % 7 === 0) createEvent(i);
+    if (planRef.current) {
+      planRef.current.forEach((item) => {
+        if (item.minute > minute) createEvent(item.minute, item);
+      });
+    } else {
+      for (let i = minute; i < 90; i += 1) {
+        if (i % 4 === 0 || i % 7 === 0) createEvent(i);
+      }
     }
     setSkipped(true);
     setMinute(90);
@@ -498,11 +696,49 @@ function App() {
         onLogin={() => setShowLogin(true)}
       />
 
+      {mpNotice && (
+        <div
+          role="status"
+          onClick={() => setMpNotice('')}
+          style={{
+            margin: '12px auto 0',
+            maxWidth: 520,
+            padding: '10px 14px',
+            borderRadius: 10,
+            border: '1px solid #F5B800',
+            background: 'rgba(245,184,0,.12)',
+            textAlign: 'center',
+            cursor: 'pointer',
+          }}
+        >
+          {mpNotice} <small>(toque para fechar)</small>
+        </div>
+      )}
+
+      {screen === 'lobby' && (
+        <LobbyScreen
+          teams={teams}
+          room={room}
+          myRole={myRole}
+          busy={mpBusy}
+          error={mpError}
+          onBack={reset}
+          onCreate={handleCreateRoom}
+          onJoin={handleJoinRoom}
+          onResume={resumeMpDraft}
+          onCancel={() => {
+            leaveRoom();
+            setMpError('');
+          }}
+        />
+      )}
+
       {screen === 'home' && (
         <Home
           isAdmin={isAdmin}
           onAdmin={() => navigate('admin')}
           onPlay={() => startClubChoice('classic')}
+          onMultiplayer={openMultiplayer}
           onLeaderboard={() => navigate('leaderboard')}
         />
       )}
@@ -528,6 +764,7 @@ function App() {
           teams={teams}
           players={players}
           selected={draft}
+          blockedIds={blockedIds}
           onPick={pickDicePlayer}
           onBack={() => goBack('club')}
         />
@@ -556,7 +793,12 @@ function App() {
           botTeam={botTeam}
           score={score}
           stats={stats}
-          onAgain={() => goBack('club')}
+          onAgain={() => {
+            if (room) {
+              leaveRoom();
+              navigate('lobby', true);
+            } else goBack('club');
+          }}
           onHome={reset}
         />
       )}
@@ -628,11 +870,13 @@ function Home({
   isAdmin,
   onAdmin,
   onPlay,
+  onMultiplayer,
   onLeaderboard,
 }: {
   isAdmin: boolean;
   onAdmin: () => void;
   onPlay: () => void;
+  onMultiplayer: () => void;
   onLeaderboard: () => void;
 }) {
   return (
@@ -652,14 +896,8 @@ function Home({
           <button className="gold-button large" onClick={onPlay}>
             <Play size={17} fill="currentColor" /> Jogar vs Bots
           </button>
-          <button
-            className="outline-button large"
-            disabled
-            aria-disabled="true"
-            title="Em breve"
-            style={{ opacity: 0.65, cursor: 'not-allowed', pointerEvents: 'none' }}
-          >
-            <Swords size={17} /> Multiplayer <small>EM BREVE</small>
+          <button className="outline-button large" onClick={onMultiplayer}>
+            <Swords size={17} /> Multiplayer <small>NOVO</small>
           </button>
         </div>
         {isAdmin && (
@@ -859,6 +1097,230 @@ function DraftScreen({
   );
 }
 
+const lobbyCss = `
+.lobby-wrap { width: min(560px, calc(100% - 32px)); margin: 0 auto 40px; display: grid; gap: 16px; }
+.lobby-card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); border-radius: 16px; padding: 20px; }
+.lobby-step { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 16px; }
+.lobby-step b { flex: 0 0 34px; height: 34px; border-radius: 50%; background: #F5B800; color: #0B1016; display: grid; place-items: center; font-size: 16px; }
+.lobby-step h3 { margin: 0 0 2px; font-size: 20px; letter-spacing: .5px; }
+.lobby-step p { margin: 0; font-size: 14px; opacity: .7; }
+.lobby-label { display: block; margin: 14px 0 8px; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; color: #F5B800; }
+.lobby-clubs { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+.lobby-club { display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
+.lobby-club { border-radius: 12px; border: 1px solid rgba(255,255,255,.12); }
+.lobby-club { background: rgba(255,255,255,.03); color: inherit; }
+.lobby-club { cursor: pointer; text-align: left; min-width: 0; }
+.lobby-club i { flex: 0 0 30px; height: 30px; border-radius: 8px; }
+.lobby-club i { background: var(--club, #444); display: grid; place-items: center; }
+.lobby-club i { font-style: normal; font-size: 10px; font-weight: 900; color: #fff; }
+.lobby-club span { font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lobby-club.on { border-color: #F5B800; background: rgba(245,184,0,.14); box-shadow: 0 0 0 1px #F5B800 inset; }
+.lobby-seg { display: grid; grid-template-columns: 1fr 1fr; padding: 4px; border-radius: 12px; background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.1); gap: 4px; }
+.lobby-seg button { padding: 10px; border: 0; border-radius: 9px; background: transparent; color: inherit; font-weight: 700; cursor: pointer; }
+.lobby-seg button.on { background: #F5B800; color: #0B1016; }
+.lobby-main { width: 100%; margin-top: 18px; justify-content: center; }
+.lobby-or { display: flex; align-items: center; gap: 12px; font-size: 12px; letter-spacing: 2px; opacity: .55; }
+.lobby-or i { flex: 1; height: 1px; background: rgba(255,255,255,.2); }
+.lobby-join { display: flex; gap: 10px; }
+.lobby-join input { flex: 1; min-width: 0; font-size: 26px; font-weight: 800; }
+.lobby-join input { letter-spacing: 10px; text-align: center; text-transform: uppercase; }
+.lobby-join input { padding: 10px 12px; border-radius: 12px; outline: none; }
+.lobby-join input { border: 1px solid rgba(255,255,255,.18); background: rgba(0,0,0,.4); color: #fff; }
+.lobby-join input::placeholder { color: rgba(255,255,255,.25); }
+.lobby-join input:focus { border-color: #F5B800; }
+.lobby-error { padding: 10px 14px; border-radius: 10px; border: 1px solid #ff6b6b; background: rgba(255,107,107,.1); color: #ffb3b3; font-size: 14px; text-align: center; }
+`;
+
+function LobbyScreen({
+  teams,
+  room,
+  myRole,
+  busy,
+  error,
+  onBack,
+  onCreate,
+  onJoin,
+  onResume,
+  onCancel,
+}: {
+  teams: Team[];
+  room: Room | null;
+  myRole: 'host' | 'guest' | null;
+  busy: boolean;
+  error: string;
+  onBack: () => void;
+  onCreate: (teamId: string, mode: 'classic' | 'dice') => void;
+  onJoin: (code: string) => void;
+  onResume: () => void;
+  onCancel: () => void;
+}) {
+  const [teamId, setTeamId] = useState('');
+  const [roomMode, setRoomMode] = useState<'classic' | 'dice'>('classic');
+  const [code, setCode] = useState('');
+  const [copied, setCopied] = useState(false);
+  const chosenTeam = teamId || teams[0]?.id || '';
+  const myReady = room && myRole ? (myRole === 'host' ? room.host_ready : room.guest_ready) : false;
+  const rivalName = room && myRole ? (myRole === 'host' ? room.guest_nick : room.host_nick) : null;
+
+  async function copyCode() {
+    if (!room) return;
+    try {
+      await navigator.clipboard.writeText(room.code);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <main className="flow-page">
+      <button className="back-button" onClick={onBack}>
+        <ArrowLeft size={16} /> Voltar
+      </button>
+      <div className="flow-heading">
+        <div className="eyebrow">
+          <Swords size={14} /> MULTIPLAYER
+        </div>
+        <h2>
+          SALA DE <em>PARTIDA</em>
+        </h2>
+        <p>Jogue contra um amigo. Cada um faz o seu draft e a partida roda igual para os dois.</p>
+      </div>
+
+      {!room && (
+        <div className="lobby-wrap">
+          <style>{lobbyCss}</style>
+          <section className="lobby-card">
+            <div className="lobby-step">
+              <b>1</b>
+              <div>
+                <h3>Criar sala</h3>
+                <p>Escolha seu clube e o modo. Depois passe o código para seu amigo.</p>
+              </div>
+            </div>
+            <span className="lobby-label">SEU CLUBE</span>
+            <div className="lobby-clubs">
+              {teams.map((team) => (
+                <button
+                  key={team.id}
+                  type="button"
+                  className={chosenTeam === team.id ? 'lobby-club on' : 'lobby-club'}
+                  onClick={() => setTeamId(team.id)}
+                  style={{ '--club': team.primary_color } as React.CSSProperties}
+                >
+                  <i>{team.abbreviation}</i>
+                  <span>{team.name}</span>
+                </button>
+              ))}
+            </div>
+            <span className="lobby-label">MODO DO DRAFT</span>
+            <div className="lobby-seg">
+              <button
+                type="button"
+                className={roomMode === 'classic' ? 'on' : ''}
+                onClick={() => setRoomMode('classic')}
+              >
+                Draft clássico
+              </button>
+              <button
+                type="button"
+                className={roomMode === 'dice' ? 'on' : ''}
+                onClick={() => setRoomMode('dice')}
+              >
+                <span aria-hidden="true">🎲</span> Modo Dado
+              </button>
+            </div>
+            <button
+              className="gold-button large lobby-main"
+              disabled={busy || !chosenTeam}
+              onClick={() => onCreate(chosenTeam, roomMode)}
+            >
+              {busy ? 'Criando...' : 'Criar sala'}
+            </button>
+          </section>
+
+          <div className="lobby-or">
+            <i /> <span>OU</span> <i />
+          </div>
+
+          <section className="lobby-card">
+            <div className="lobby-step">
+              <b>2</b>
+              <div>
+                <h3>Entrar com código</h3>
+                <p>Recebeu um código de um amigo? Digite aqui.</p>
+              </div>
+            </div>
+            <div className="lobby-join">
+              <input
+                value={code}
+                onChange={(event) => setCode(event.target.value.toUpperCase().slice(0, 4))}
+                placeholder="K7QX"
+                maxLength={4}
+                autoCapitalize="characters"
+                autoComplete="off"
+              />
+              <button
+                className="gold-button"
+                disabled={busy || code.length < 4}
+                onClick={() => onJoin(code)}
+              >
+                {busy ? 'Entrando...' : 'Entrar'}
+              </button>
+            </div>
+          </section>
+          {error && <div className="lobby-error">{error}</div>}
+        </div>
+      )}
+
+      {room && room.status === 'waiting' && (
+        <div className="draft-picker" style={{ maxWidth: 520, margin: '0 auto', textAlign: 'center' }}>
+          <span className="eyebrow">CÓDIGO DA SALA</span>
+          <div style={{ fontSize: 56, fontWeight: 900, letterSpacing: 12, margin: '10px 0', color: '#F5B800' }}>
+            {room.code}
+          </div>
+          <button className="outline-button" onClick={() => void copyCode()}>
+            {copied ? 'Copiado!' : 'Copiar código'}
+          </button>
+          <p style={{ margin: '16px 0', opacity: 0.8 }}>Aguardando seu amigo entrar na sala...</p>
+          <button className="outline-button" onClick={onCancel}>
+            Cancelar sala
+          </button>
+        </div>
+      )}
+
+      {room && room.status === 'drafting' && (
+        <div className="draft-picker" style={{ maxWidth: 520, margin: '0 auto', textAlign: 'center' }}>
+          <span className="eyebrow">SALA {room.code}</span>
+          <h3 style={{ margin: '8px 0' }}>Rival: {rivalName ?? 'Jogador'}</h3>
+          {myReady ? (
+            <p style={{ opacity: 0.85 }}>Seu draft está pronto. Aguardando o rival terminar o dele...</p>
+          ) : (
+            <>
+              <p style={{ opacity: 0.85 }}>Monte seu time. A partida começa quando os dois terminarem.</p>
+              <button className="gold-button" onClick={onResume}>
+                Ir para o draft
+              </button>
+            </>
+          )}
+          <div style={{ marginTop: 14 }}>
+            <button className="outline-button" onClick={onCancel}>
+              Sair da sala
+            </button>
+          </div>
+        </div>
+      )}
+
+      {room && room.status === 'playing' && (
+        <div className="draft-picker" style={{ maxWidth: 520, margin: '0 auto', textAlign: 'center' }}>
+          <p>A partida está começando...</p>
+        </div>
+      )}
+    </main>
+  );
+}
+
 const DIE_PIPS: Record<number, number[]> = {
   1: [4],
   2: [0, 8],
@@ -874,6 +1336,7 @@ function DiceDraftScreen({
   teams,
   players,
   selected,
+  blockedIds,
   onPick,
   onBack,
 }: {
@@ -881,6 +1344,7 @@ function DiceDraftScreen({
   teams: Team[];
   players: Player[];
   selected: Partial<Record<Position, Player>>;
+  blockedIds?: Set<string>;
   onPick: (player: Player, position: Position) => void;
   onBack: () => void;
 }) {
@@ -897,8 +1361,16 @@ function DiceDraftScreen({
   const openPositions = positions.filter((position) => !selected[position]);
   const slotsFor = (player: Player) =>
     openPositions.filter((position) => getPlayerPositions(player).includes(position));
+  // No multiplayer, esconde quem o adversário já escolheu (se ainda sobrar opção)
+  const avoid = blockedIds ?? new Set<string>();
+  const hasFree = players.some(
+    (player) => !pickedIds.has(player.id) && !avoid.has(player.id) && slotsFor(player).length > 0,
+  );
   const squadOf = (team: Team) =>
-    players.filter((player) => player.team_id === team.id && !pickedIds.has(player.id));
+    players.filter(
+      (player) =>
+        player.team_id === team.id && !pickedIds.has(player.id) && !(hasFree && avoid.has(player.id)),
+    );
   const rollable = teams.filter((team) => squadOf(team).some((player) => slotsFor(player).length > 0));
   const rolled = teams.find((team) => team.id === rolledId) ?? null;
   const cards = rolled ? squadOf(rolled) : [];
@@ -1020,6 +1492,11 @@ function DiceDraftScreen({
                     ? 'Role o dado para sortear de qual clube vêm as cartas desta escolha.'
                     : 'Não há mais jogadores disponíveis para as posições que faltam.'}
                 </p>
+              )}
+              {rolled && !cards.some((player) => slotsFor(player).length > 0) && (
+                <button className="outline-button" style={{ marginTop: 8 }} onClick={() => setRolledId(null)}>
+                  Sem cartas disponíveis, rolar de novo
+                </button>
               )}
               {!rolled && (
                 <button className="gold-button" onClick={rollDice} disabled={rolling || !rollable.length}>
