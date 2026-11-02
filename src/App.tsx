@@ -898,6 +898,7 @@ function App() {
           shownGoalIds={shownGoalIds}
           onGoal={handleGoal}
           onSkip={skipMatch}
+          canSkip={!room && !spectating}
           multiplayer={!!room}
           userId={userId}
           chatMessages={chatMessages}
@@ -1960,6 +1961,7 @@ function MatchScreen({
   shownGoalIds,
   onGoal,
   onSkip,
+  canSkip,
   multiplayer,
   userId,
   chatMessages,
@@ -1975,6 +1977,7 @@ function MatchScreen({
   shownGoalIds: number[];
   onGoal: (id: number, side: 'user' | 'bot') => void;
   onSkip: () => void;
+  canSkip: boolean;
   multiplayer: boolean;
   userId: string | null;
   chatMessages: ChatMessage[];
@@ -1988,7 +1991,7 @@ function MatchScreen({
         <div className="match-status">
           <span className="live-dot" /> AO VIVO · {minute}'
         </div>
-        {!multiplayer && (
+        {canSkip && (
           <button className="skip-button" onClick={onSkip}>
             <SkipForward size={15} /> Pular partida
           </button>
