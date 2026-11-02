@@ -138,25 +138,99 @@ export async function patchRoom(id: string, patch: Partial<Room>) {
   return error ? error.message : '';
 }
 
-function attackAverage(squad: Lite[]) {
-  const attackers = squad.filter((player) => ['LF', 'RF', 'CF'].includes(player.primary_position));
-  if (!attackers.length) return 70;
-  return attackers.reduce((sum, player) => sum + player.overall, 0) / attackers.length;
+const clampNum = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+// Força de um time: o ataque pesa mais, mas meio-campo, laterais e goleiro também contam
+function teamStrength(squad: Lite[]) {
+  const avg = (positions: string[]) => {
+    const list = squad.filter((player) => positions.includes(player.primary_position));
+    return list.length ? list.reduce((sum, player) => sum + player.overall, 0) / list.length : 70;
+  };
+  return avg(['LF', 'RF', 'CF']) * 0.45 + avg(['CM']) * 0.2 + avg(['LB', 'RB']) * 0.2 + avg(['GK']) * 0.15;
 }
 
+// Número aleatório de gols (distribuição de Poisson): média `lambda`
+function poisson(lambda: number) {
+  const limit = Math.exp(-lambda);
+  let k = 0;
+  let p = 1;
+  do {
+    k += 1;
+    p *= Math.random();
+  } while (p > limit);
+  return k - 1;
+}
+
+function shuffled<T>(list: T[]): T[] {
+  const out = [...list];
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+// Escolhe os minutos dos gols, com um intervalo mínimo entre eles para a animação dar conta
+function pickGoalMinutes(count: number, slots: number[]): number[] {
+  for (const gap of [8, 6, 4]) {
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      const chosen: number[] = [];
+      for (const minute of shuffled(slots)) {
+        if (chosen.every((other) => Math.abs(other - minute) >= gap)) chosen.push(minute);
+        if (chosen.length === count) return chosen.sort((a, b) => a - b);
+      }
+    }
+  }
+  const step = slots.length / count;
+  return Array.from({ length: count }, (_, i) => slots[Math.floor(i * step)]);
+}
+
+const MIN_GOALS = 3;
+const MAX_GOALS = 7;
+
 // O anfitrião sorteia a partida inteira uma vez. Os dois lados reproduzem a mesma lista.
+// Time mais forte faz mais gols e ganha com mais frequência; a partida nunca termina empatada.
 export function generatePlan(hostSquad: Lite[], guestSquad: Lite[]): PlanItem[] {
-  const hostAttack = attackAverage(hostSquad);
-  const guestAttack = attackAverage(guestSquad);
+  const diff = teamStrength(hostSquad) - teamStrength(guestSquad);
+  const hostChance = clampNum(0.5 + diff * 0.04, 0.2, 0.8);
+
+  let hostGoals = poisson(clampNum(2.4 + diff * 0.12, 0.8, 5));
+  let guestGoals = poisson(clampNum(2.4 - diff * 0.12, 0.8, 5));
+  while (hostGoals + guestGoals > MAX_GOALS) {
+    if (hostGoals >= guestGoals) hostGoals -= 1;
+    else guestGoals -= 1;
+  }
+  while (hostGoals + guestGoals < MIN_GOALS) {
+    if (Math.random() < hostChance) hostGoals += 1;
+    else guestGoals += 1;
+  }
+  // Sem empate: o gol que desempata vai, na maioria das vezes, para o time mais forte
+  if (hostGoals === guestGoals) {
+    if (Math.random() < hostChance) hostGoals += 1;
+    else guestGoals += 1;
+  }
+
+  const slots: number[] = [];
+  for (let minute = 1; minute <= 90; minute += 1) {
+    if (minute % 4 === 0 || minute % 7 === 0) slots.push(minute);
+  }
+  const goalMinutes = pickGoalMinutes(hostGoals + guestGoals, slots);
+  const goalSides = shuffled<PlanItem['side']>([
+    ...Array.from({ length: hostGoals }, () => 'host' as const),
+    ...Array.from({ length: guestGoals }, () => 'guest' as const),
+  ]);
+
   // Item "meta" no minuto 0: nunca é um lance, só guarda a hora de início da partida
   const plan: PlanItem[] = [{ minute: 0, type: 'posse', side: 'host', startedAt: Date.now() }];
-  for (let minute = 1; minute <= 90; minute += 1) {
-    if (minute % 4 !== 0 && minute % 7 !== 0) continue;
-    const hostWins = hostAttack + Math.random() * 20 >= guestAttack + Math.random() * 20;
-    const type: PlanItem['type'] =
-      minute % 11 === 0 ? 'gol' : minute % 5 === 0 ? 'finalização' : minute % 3 === 0 ? 'defesa' : 'posse';
-    plan.push({ minute, type, side: hostWins ? 'host' : 'guest' });
-  }
+  slots.forEach((minute) => {
+    const goalIndex = goalMinutes.indexOf(minute);
+    if (goalIndex >= 0) {
+      plan.push({ minute, type: 'gol', side: goalSides[goalIndex] });
+      return;
+    }
+    const type: PlanItem['type'] = minute % 5 === 0 ? 'finalização' : minute % 3 === 0 ? 'defesa' : 'posse';
+    plan.push({ minute, type, side: Math.random() < hostChance ? 'host' : 'guest' });
+  });
   return plan;
 }
 
