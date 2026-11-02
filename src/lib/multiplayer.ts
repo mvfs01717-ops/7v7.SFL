@@ -6,6 +6,8 @@ export type PlanItem = {
   minute: number;
   type: 'posse' | 'finalização' | 'defesa' | 'gol';
   side: 'host' | 'guest';
+  // Só no item "meta" (minuto 0): hora em que a partida começou, para o modo espectador entrar ao vivo
+  startedAt?: number;
 };
 export type Room = {
   id: string;
@@ -123,7 +125,8 @@ function attackAverage(squad: Lite[]) {
 export function generatePlan(hostSquad: Lite[], guestSquad: Lite[]): PlanItem[] {
   const hostAttack = attackAverage(hostSquad);
   const guestAttack = attackAverage(guestSquad);
-  const plan: PlanItem[] = [];
+  // Item "meta" no minuto 0: nunca é um lance, só guarda a hora de início da partida
+  const plan: PlanItem[] = [{ minute: 0, type: 'posse', side: 'host', startedAt: Date.now() }];
   for (let minute = 1; minute <= 90; minute += 1) {
     if (minute % 4 !== 0 && minute % 7 !== 0) continue;
     const hostWins = hostAttack + Math.random() * 20 >= guestAttack + Math.random() * 20;
