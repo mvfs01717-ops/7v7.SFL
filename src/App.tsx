@@ -912,6 +912,18 @@ function App() {
           setPassword={setPassword}
           setNickname={setNickname}
           setMessage={setAuthMessage}
+          loggedIn={Boolean(userId)}
+          onLogout={async () => {
+            await supabase.auth.signOut();
+            setIsAdmin(false);
+            setUserId(null);
+            setNickname('Visitante');
+            setEmail('');
+            setPassword('');
+            setAuthMessage('');
+            setShowLogin(false);
+            if (screen === 'admin') reset();
+          }}
           onClose={() => setShowLogin(false)}
         />
       )}
@@ -2469,6 +2481,8 @@ function LoginModal({
   setPassword,
   setNickname,
   setMessage,
+  loggedIn,
+  onLogout,
   onClose,
 }: {
   email: string;
@@ -2479,6 +2493,8 @@ function LoginModal({
   setPassword: (value: string) => void;
   setNickname: (value: string) => void;
   setMessage: (value: string) => void;
+  loggedIn: boolean;
+  onLogout: () => void | Promise<void>;
   onClose: () => void;
 }) {
   const submit = async (signUp: boolean) => {
@@ -2500,6 +2516,32 @@ function LoginModal({
     setMessage(signUp ? 'Conta criada. Você já pode jogar.' : 'Login realizado.');
     onClose();
   };
+  if (loggedIn) {
+    return (
+      <div className="modal-backdrop">
+        <div className="login-modal">
+          <button className="close-button" onClick={onClose}>
+            <X size={18} />
+          </button>
+          <div className="eyebrow">
+            <LogIn size={14} /> SUA CONTA
+          </div>
+          <h2>
+            OLÁ, <em>{nickname.toUpperCase()}</em>
+          </h2>
+          <p>Você está conectado.</p>
+          <div className="modal-actions">
+            <button className="outline-button" onClick={onClose}>
+              Fechar
+            </button>
+            <button className="gold-button" onClick={() => void onLogout()}>
+              Sair da conta
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="modal-backdrop">
       <div className="login-modal">
