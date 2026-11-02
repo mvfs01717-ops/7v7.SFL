@@ -335,8 +335,6 @@ function App() {
   const [stats, setStats] = useState<MatchStats>(emptyStats);
   const [goalLog, setGoalLog] = useState<GoalRecord[]>([]);
   const [shootout, setShootout] = useState<Shootout | null>(null);
-  // Botão de teste: força a próxima partida contra o bot a terminar empatada (vai para os pênaltis)
-  const [forceShootout, setForceShootout] = useState(false);
   const [shootoutShown, setShootoutShown] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -782,7 +780,7 @@ function App() {
         side: (item.side === 'host' ? 'user' : 'bot') as 'user' | 'bot',
       }));
     // De vez em quando a partida termina empatada e vai para os pênaltis
-    planRef.current = forceShootout || Math.random() < SHOOTOUT_CHANCE ? forceDrawPlan(basePlan) : basePlan;
+    planRef.current = Math.random() < SHOOTOUT_CHANCE ? forceDrawPlan(basePlan) : basePlan;
     beginMatch(chosen, botPlayers);
   }
   function beginMatch(chosen: Player[], botPlayers: Player[]) {
@@ -1043,18 +1041,7 @@ function App() {
         />
       )}
 
-      {screen === 'club' && (
-        <ClubChoice
-          teams={teams}
-          mode={mode}
-          onMode={setMode}
-          onBack={reset}
-          onChoose={chooseClub}
-          showTestTools={isAdmin || window.location.search.includes('teste')}
-          forceShootout={forceShootout}
-          onForceShootout={setForceShootout}
-        />
-      )}
+      {screen === 'club' && <ClubChoice teams={teams} mode={mode} onMode={setMode} onBack={reset} onChoose={chooseClub} />}
 
       {screen === 'draft' && selectedClub && mode === 'classic' && (
         <DraftScreen
@@ -1353,18 +1340,12 @@ function ClubChoice({
   onMode,
   onBack,
   onChoose,
-  showTestTools,
-  forceShootout,
-  onForceShootout,
 }: {
   teams: Team[];
   mode: 'classic' | 'dice';
   onMode: (mode: 'classic' | 'dice') => void;
   onBack: () => void;
   onChoose: (team: Team) => void;
-  showTestTools: boolean;
-  forceShootout: boolean;
-  onForceShootout: (value: boolean) => void;
 }) {
   return (
     <main className="flow-page">
@@ -1392,16 +1373,6 @@ function ClubChoice({
           <span aria-hidden="true">🎲</span> Modo Dado
         </button>
       </div>
-      {showTestTools && (
-        <div style={{ display: 'flex', justifyContent: 'center', margin: '-6px 0 20px' }}>
-          <button
-            className={forceShootout ? 'gold-button' : 'outline-button'}
-            onClick={() => onForceShootout(!forceShootout)}
-          >
-            <span aria-hidden="true">🧪</span> Teste: forçar pênaltis contra o bot {forceShootout ? '(LIGADO)' : '(desligado)'}
-          </button>
-        </div>
-      )}
       <div className="club-grid">
         {teams.map((team) => (
           <button
