@@ -236,6 +236,8 @@ function App() {
   const mpPlanRoom = useRef<string | null>(null);
   const mpMatchRoom = useRef<string | null>(null);
   const mpRecorded = useRef<string | null>(null);
+  // Cartas sorteadas para cada posição no draft clássico (ficam fixas até escolher)
+  const drawRef = useRef<Partial<Record<Position, string[]>>>({});
   // Placar mostrado na tela: só sobe quando a bola entra no gol na animação
   const [shownScore, setShownScore] = useState({ user: 0, bot: 0 });
   const [shownGoalIds, setShownGoalIds] = useState<number[]>([]);
@@ -460,6 +462,7 @@ function App() {
       if (team) {
         setSelectedClub(team);
         setMode(room.mode);
+        drawRef.current = {};
         setDraft({});
         setDraftPosition('GK');
         navigate('draft');
@@ -503,6 +506,7 @@ function App() {
   }
   function chooseClub(team: Team) {
     setSelectedClub(team);
+    drawRef.current = {};
     setDraft({});
     setDraftPosition('GK');
     navigate('draft');
@@ -515,7 +519,21 @@ function App() {
       (player) => getPlayerPositions(player).includes(position) && !selectedIds.includes(player.id),
     );
     const free = fits.filter((player) => !blockedIds.has(player.id));
-    return (free.length ? free : fits).slice(0, 5);
+    const pool = free.length ? free : fits;
+    // Sorteio: 3 cartas aleatórias por posição. Podem vir ótimas ou fracas, é questão de sorte.
+    const wanted = Math.min(3, pool.length);
+    let ids = (drawRef.current[position] ?? []).filter((id) => pool.some((player) => player.id === id));
+    if (ids.length < wanted) {
+      const rest = pool.filter((player) => !ids.includes(player.id));
+      while (ids.length < wanted && rest.length) {
+        const [taken] = rest.splice(Math.floor(Math.random() * rest.length), 1);
+        ids = [...ids, taken.id];
+      }
+      drawRef.current[position] = ids;
+    }
+    return ids
+      .map((id) => pool.find((player) => player.id === id))
+      .filter(Boolean) as Player[];
   }
   function chooseDraftPlayer(player: Player) {
     const nextDraft = { ...draft, [draftPosition]: player };
