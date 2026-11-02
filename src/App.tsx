@@ -1237,7 +1237,10 @@ function DraftScreen({
 }
 
 const lobbyCss = `
-.lobby-wrap { width: min(560px, calc(100% - 32px)); margin: 0 auto 40px; display: grid; gap: 16px; }
+.lobby-page { width: 100%; max-width: 100vw; min-width: 0; box-sizing: border-box; overflow-x: clip; }
+.lobby-wrap { width: min(560px, calc(100vw - 24px)); max-width: 100%; box-sizing: border-box; margin: 0 auto 28px; display: grid; gap: 16px; }
+.lobby-wrap *, .lobby-card { box-sizing: border-box; }
+.lobby-card { min-width: 0; }
 .lobby-card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); border-radius: 16px; padding: 20px; }
 .lobby-step { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 16px; }
 .lobby-step b { flex: 0 0 34px; height: 34px; border-radius: 50%; background: #F5B800; color: #0B1016; display: grid; place-items: center; font-size: 16px; }
@@ -1268,6 +1271,27 @@ const lobbyCss = `
 .lobby-join input::placeholder { color: rgba(255,255,255,.25); }
 .lobby-join input:focus { border-color: #F5B800; }
 .lobby-error { padding: 10px 14px; border-radius: 10px; border: 1px solid #ff6b6b; background: rgba(255,107,107,.1); color: #ffb3b3; font-size: 14px; text-align: center; }
+@media (max-width: 720px) {
+.lobby-page .flow-heading p { display: none; }
+.lobby-wrap { gap: 10px; margin-bottom: 20px; }
+.lobby-card { padding: 14px; border-radius: 14px; }
+.lobby-step { gap: 10px; margin-bottom: 10px; }
+.lobby-step b { flex-basis: 28px; height: 28px; font-size: 14px; }
+.lobby-step h3 { font-size: 17px; }
+.lobby-step p { font-size: 12px; line-height: 1.3; }
+.lobby-label { margin: 10px 0 6px; font-size: 10px; }
+.lobby-clubs { grid-template-columns: 1fr 1fr; gap: 6px; }
+.lobby-club { padding: 6px 8px; gap: 6px; border-radius: 10px; }
+.lobby-club i { flex-basis: 24px; height: 24px; border-radius: 6px; font-size: 8px; }
+.lobby-club span { font-size: 12px; }
+.lobby-seg { padding: 3px; gap: 3px; }
+.lobby-seg button { padding: 8px 4px; font-size: 13px; }
+.lobby-main { margin-top: 12px; }
+.lobby-or { font-size: 11px; gap: 8px; }
+.lobby-join { gap: 8px; }
+.lobby-join input { font-size: 22px; letter-spacing: 8px; padding: 8px 10px; }
+.lobby-error { font-size: 13px; padding: 8px 12px; }
+}
 `;
 
 function LobbyScreen({
@@ -1319,7 +1343,8 @@ function LobbyScreen({
   }
 
   return (
-    <main className="flow-page">
+    <main className="flow-page lobby-page">
+      <style>{lobbyCss}</style>
       <button className="back-button" onClick={onBack}>
         <ArrowLeft size={16} /> Voltar
       </button>
@@ -1335,7 +1360,6 @@ function LobbyScreen({
 
       {!room && (
         <div className="lobby-wrap">
-          <style>{lobbyCss}</style>
           <section className="lobby-card">
             <div className="lobby-step">
               <b>1</b>
