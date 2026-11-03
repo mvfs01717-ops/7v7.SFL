@@ -8,7 +8,8 @@ type Side = 'user' | 'bot';
 export type ShootoutKick = { side: Side; playerId: string; scored: boolean };
 export type Shootout = { kicks: ShootoutKick[]; userGoals: number; botGoals: number; winner: Side };
 type PenaltyTeam = { name: string; abbreviation: string; primary_color: string; secondary_color: string };
-type PenaltyPlayer = { id: string; name: string; overall: number; primary_position: string };
+type PenaltyPlayer = { id: string; name: string; overall: number; primary_position: string; slot?: string };
+const posOf = (player: PenaltyPlayer) => player.slot ?? player.primary_position;
 type Outcome = 'gol' | 'defesa' | 'fora' | 'trave';
 type Phase = 'aim' | 'power' | 'dive' | 'flying' | 'done';
 type Point = { x: number; y: number };
@@ -64,12 +65,12 @@ function pickKeeperZone(): Zone {
 
 function orderTakers(team: PenaltyPlayer[]) {
   return [
-    ...team.filter((player) => player.primary_position !== 'GK').sort((a, b) => b.overall - a.overall),
-    ...team.filter((player) => player.primary_position === 'GK'),
+    ...team.filter((player) => posOf(player) !== 'GK').sort((a, b) => b.overall - a.overall),
+    ...team.filter((player) => posOf(player) === 'GK'),
   ];
 }
 function keeperOf(team: PenaltyPlayer[]) {
-  return team.find((player) => player.primary_position === 'GK') ?? team[0];
+  return team.find((player) => posOf(player) === 'GK') ?? team[0];
 }
 
 // Situação da disputa: 5 cobranças para cada lado e depois morte súbita
