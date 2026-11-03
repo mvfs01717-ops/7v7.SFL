@@ -10,6 +10,8 @@ export type Tournament = {
   code: string;
   host_id: string;
   mode: 'classic' | 'dice';
+  // Quantos jogadores o anfitrião escolheu ao criar (4 = semis + final, 6 = quartas + semis + final)
+  size: 4 | 6;
   status: 'waiting' | 'playing' | 'finished' | 'cancelled';
   players: TPlayer[];
   seed: string[] | null;
@@ -26,8 +28,8 @@ function one(data: unknown): Tournament | null {
   return (row as Tournament | null) ?? null;
 }
 
-export async function createTournament(nick: string, mode: 'classic' | 'dice') {
-  const { data, error } = await supabase.rpc('create_tournament', { p_nick: nick, p_mode: mode });
+export async function createTournament(nick: string, mode: 'classic' | 'dice', size: 4 | 6 = 4) {
+  const { data, error } = await supabase.rpc('create_tournament', { p_nick: nick, p_mode: mode, p_size: size });
   if (error) return { error: error.message };
   return { tournament: one(data) ?? undefined };
 }
