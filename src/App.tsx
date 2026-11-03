@@ -117,7 +117,14 @@ function pickByRoll(list: Player[], weight: (player: Player) => number, roll: nu
 // Chance de uma partida contra o bot terminar empatada e ir para os pênaltis (0.2 = 20%)
 const SHOOTOUT_CHANCE = 0.2;
 
-type PlanEntry = { minute: number; type: MatchEvent['type']; side: 'user' | 'bot' };
+type PlanEntry = {
+  minute: number;
+  type: MatchEvent['type'];
+  side: 'user' | 'bot';
+  // Nomes sorteados pelo anfitrião em generatePlan (iguais para os dois lados e para quem assiste)
+  shooter?: string;
+  keeper?: string;
+};
 
 // Ajusta o plano da partida para terminar empatado: tira gols de quem ganharia
 // ou transforma um chute do outro time em gol, até os placares ficarem iguais.
@@ -315,7 +322,7 @@ function App() {
   const [mpError, setMpError] = useState('');
   const [mpNotice, setMpNotice] = useState('');
   const [spectating, setSpectating] = useState<{ host: string; guest: string } | null>(null);
-  const planRef = useRef<{ minute: number; type: MatchEvent['type']; side: 'user' | 'bot' }[] | null>(null);
+  const planRef = useRef<PlanEntry[] | null>(null);
   const roomRef = useRef<Room | null>(null);
   roomRef.current = room;
   const mpDraftRoom = useRef<string | null>(null);
@@ -535,6 +542,8 @@ function App() {
         minute: item.minute,
         type: item.type,
         side: item.side === 'host' ? 'user' : 'bot',
+        shooter: item.shooter,
+        keeper: item.keeper,
       }));
     setSpectating({ host: target.host_nick, guest: target.guest_nick ?? 'Jogador' });
     beginMatch(squadPlayers(target.host_squad), squadPlayers(target.guest_squad));
@@ -569,6 +578,8 @@ function App() {
       minute: item.minute,
       type: item.type,
       side: item.side === role ? 'user' : 'bot',
+      shooter: item.shooter,
+      keeper: item.keeper,
     }));
     beginMatch(mine, theirs);
   }
@@ -808,6 +819,8 @@ function App() {
         minute: item.minute,
         type: item.type,
         side: (item.side === 'host' ? 'user' : 'bot') as 'user' | 'bot',
+        shooter: item.shooter,
+        keeper: item.keeper,
       }));
     // De vez em quando a partida termina empatada e vai para os pênaltis
     planRef.current = forceShootout || Math.random() < SHOOTOUT_CHANCE ? forceDrawPlan(basePlan) : basePlan;
@@ -874,7 +887,7 @@ function App() {
     setShownScore((current) => ({ ...current, [side]: current[side] + 1 }));
   }
 
-  function createEvent(currentMinute: number, forced?: { type: MatchEvent['type']; side: MatchEvent['team'] }) {
+  function createEvent(currentMinute: number, forced?: PlanEntry) {
     const userAttack = average(userTeam.filter((player) => ['LF', 'RF', 'CF'].includes(slotOf(player))));
     const botAttack = average(botTeam.filter((player) => ['LF', 'RF', 'CF'].includes(slotOf(player))));
     const userWins = userAttack + Math.random() * 20 >= botAttack + Math.random() * 20;
@@ -894,10 +907,17 @@ function App() {
       roomRef.current || spectating
         ? Math.abs(Math.sin(currentMinute * 12.9898 + 78.233) * 43758.5453) % 1
         : Math.random();
-    const attackPlayer = pickShooter(side === 'user' ? userTeam : botTeam, type, shooterRoll);
+    const attackSquad = side === 'user' ? userTeam : botTeam;
+    const defenseSquad = side === 'user' ? botTeam : userTeam;
+    // Se o plano já diz quem finalizou/defendeu, usa esses nomes (assim o lance é igual para todo mundo).
+    // Sem nome no plano (partida antiga), cai no sorteio de antes.
+    const attackPlayer =
+      (forced?.shooter ? attackSquad.find((player) => player.name === forced.shooter) : undefined) ??
+      pickShooter(attackSquad, type, shooterRoll);
     const defensePlayer =
-      (side === 'user' ? botTeam : userTeam).find((player) => slotOf(player) === 'GK') ??
-      (side === 'user' ? botTeam[0] : userTeam[0]);
+      (forced?.keeper ? defenseSquad.find((player) => player.name === forced.keeper) : undefined) ??
+      defenseSquad.find((player) => slotOf(player) === 'GK') ??
+      defenseSquad[0];
     const club =
       side === 'user'
         ? selectedClub?.abbreviation
