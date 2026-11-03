@@ -1260,7 +1260,6 @@ function Header({
       <nav>
         <button onClick={onSquad}>Cartas</button>
         <button onClick={onLeaderboard}>Leaderboard</button>
-        {isAdmin && <button onClick={onAdmin}>Admin</button>}
       </nav>
       <button className="profile-button" onClick={onLogin}>
         <CircleUserRound size={17} /> {nickname}
@@ -1278,7 +1277,6 @@ function Header({
           <button onClick={() => go(onHome)}>Início</button>
           <button onClick={() => go(onSquad)}>Cartas</button>
           <button onClick={() => go(onLeaderboard)}>Leaderboard</button>
-          {isAdmin && <button onClick={() => go(onAdmin)}>Admin</button>}
         </div>
       )}
     </header>
