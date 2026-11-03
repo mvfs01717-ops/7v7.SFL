@@ -14,7 +14,7 @@ import {
 } from '@/lib/multiplayer';
 import {
   createTournament, joinTournament, leaveTournament, startTournament, setTournamentMatch, fetchTournament,
-  slotPlayers, currentSlot, slotOfRoom, decideWinner, SLOT_LABEL,
+  slotPlayers, slotsFor, currentSlot, slotOfRoom, decideWinner, SLOT_LABEL,
   type Tournament, type Slot,
 } from '@/lib/tournament';
 
@@ -2115,8 +2115,8 @@ function LobbyScreen({
                 <Trophy size={16} />
               </b>
               <div>
-                <h3>Torneio de 4 jogadores</h3>
-                <p>Duas semifinais e a final. Quem ganhar a final é o campeão.</p>
+                <h3>Torneio de 4 ou 6 jogadores</h3>
+                <p>Mata-mata até a final. Quem ganhar a final é o campeão.</p>
               </div>
             </div>
             <button className="gold-button large lobby-main" onClick={onTournament}>
@@ -2263,6 +2263,7 @@ function TournamentScreen({
 
   const gold = '#F5B800';
   const isHost = !!tournament && tournament.host_id === userId;
+  const canStart = !!tournament && (tournament.players.length === 4 || tournament.players.length === 6);
   const nickOf = (id?: string | null) => tournament?.players.find((player) => player.id === id)?.nick ?? null;
 
   // Dados da minha partida atual
@@ -2327,9 +2328,9 @@ function TournamentScreen({
           <Trophy size={14} /> TORNEIO
         </div>
         <h2>
-          COPA DOS <em>4</em>
+          COPA <em>7V7</em>
         </h2>
-        <p>Semifinais e final, cada partida é um multiplayer normal. O campeão leva a taça.</p>
+        <p>Mata-mata com 4 ou 6 jogadores, cada partida é um multiplayer normal. O campeão leva a taça.</p>
       </div>
 
       {!tournament && (
@@ -2339,7 +2340,7 @@ function TournamentScreen({
               <b>1</b>
               <div>
                 <h3>Criar torneio</h3>
-                <p>Escolha o modo do draft e passe o código para mais 3 amigos.</p>
+                <p>Escolha o modo do draft e passe o código para mais 3 ou 5 amigos.</p>
               </div>
             </div>
             <span className="lobby-label">MODO DO DRAFT</span>
@@ -2396,7 +2397,7 @@ function TournamentScreen({
             {copied ? 'Copiado!' : 'Copiar código'}
           </button>
           <div style={{ margin: '18px 0', display: 'grid', gap: 6 }}>
-            <span className="lobby-label" style={{ margin: 0 }}>JOGADORES ({tournament.players.length}/4)</span>
+            <span className="lobby-label" style={{ margin: 0 }}>JOGADORES ({tournament.players.length}/6)</span>
             {tournament.players.map((player) => (
               <div key={player.id} style={{ padding: '8px 12px', borderRadius: 10, background: 'rgba(255,255,255,.05)' }}>
                 {player.nick}
@@ -2408,10 +2409,14 @@ function TournamentScreen({
           {isHost ? (
             <button
               className="gold-button large lobby-main"
-              disabled={busy || tournament.players.length < 4}
+              disabled={busy || !canStart}
               onClick={onStart}
             >
-              {busy ? 'Começando...' : tournament.players.length < 4 ? 'Esperando 4 jogadores' : 'Começar torneio'}
+              {busy
+                ? 'Começando...'
+                : canStart
+                  ? `Começar torneio (${tournament.players.length} jogadores)`
+                  : 'Precisa de 4 ou 6 jogadores'}
             </button>
           ) : (
             <p style={{ opacity: 0.8 }}>Aguardando o anfitrião começar o torneio...</p>
@@ -2445,9 +2450,9 @@ function TournamentScreen({
             </div>
           )}
 
-          {renderMatch('m1')}
-          {renderMatch('m2')}
-          {renderMatch('m3')}
+          {slotsFor(tournament).map((slot) => (
+            <div key={slot}>{renderMatch(slot)}</div>
+          ))}
 
           {tournament.status === 'playing' && !mySlot && (
             <p style={{ textAlign: 'center', opacity: 0.85 }}>
@@ -2461,7 +2466,7 @@ function TournamentScreen({
             <section className="lobby-card" style={{ textAlign: 'center' }}>
               <span className="eyebrow">SUA PARTIDA · {SLOT_LABEL[mySlot].toUpperCase()}</span>
               {!pair[0] || !pair[1] ? (
-                <p style={{ margin: '12px 0 0', opacity: 0.85 }}>Aguardando a outra semifinal terminar...</p>
+                <p style={{ margin: '12px 0 0', opacity: 0.85 }}>Aguardando o jogo anterior do chaveamento terminar...</p>
               ) : (
                 <>
                   <h3 style={{ margin: '8px 0' }}>Rival: {rival?.nick ?? 'Jogador'}</h3>
