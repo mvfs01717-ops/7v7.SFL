@@ -12,9 +12,14 @@ import {
   createRoom, joinRoom, fetchRoom, patchRoom, listLiveRooms, isRoomLive, lookupRoom, generatePlan, recordResult, openRoomChat,
   type Room, type PlanItem, type ChatMessage,
 } from '@/lib/multiplayer';
+import {
+  createTournament, joinTournament, leaveTournament, startTournament, setTournamentMatch, fetchTournament,
+  slotPlayers, currentSlot, slotOfRoom, decideWinner, SLOT_LABEL,
+  type Tournament, type Slot,
+} from '@/lib/tournament';
 
 type Position = 'GK' | 'LB' | 'RB' | 'CM' | 'LF' | 'RF' | 'CF';
-type Screen = 'home' | 'club' | 'draft' | 'match' | 'results' | 'leaderboard' | 'squad' | 'admin' | 'lobby';
+type Screen = 'home' | 'club' | 'draft' | 'match' | 'results' | 'leaderboard' | 'squad' | 'admin' | 'lobby' | 'tournament';
 type Team = { id: string; name: string; abbreviation: string; primary_color: string; secondary_color: string };
 type Player = {
   id: string;
@@ -333,6 +338,14 @@ function App() {
   // O rival saiu da sala enquanto estávamos na tela de resultado
   const [rivalLeft, setRivalLeft] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  // Torneio de 4 jogadores (duas semifinais + final, cada partida é uma sala normal)
+  const [tournament, setTournament] = useState<Tournament | null>(null);
+  const tournamentRef = useRef<Tournament | null>(null);
+  tournamentRef.current = tournament;
+  const [tBusy, setTBusy] = useState(false);
+  const [tError, setTError] = useState('');
+  // Sala da minha partida do torneio (quando eu ainda não estou nela)
+  const [slotRoom, setSlotRoom] = useState<Room | null>(null);
   const chatRef = useRef<ReturnType<typeof openRoomChat> | null>(null);
   // Cartas sorteadas para cada posição no draft clássico (ficam fixas até escolher)
   const drawRef = useRef<Partial<Record<Position, string[]>>>({});
@@ -487,6 +500,80 @@ function App() {
     setMpError('');
     navigate('lobby');
   }
+  function openTournament() {
+    if (!userId) {
+      setAuthMessage('Entre na sua conta para jogar o torneio.');
+      setShowLogin(true);
+      return;
+    }
+    setTError('');
+    navigate('tournament');
+  }
+  async function handleCreateTournament(tMode: 'classic' | 'dice') {
+    if (!userId) return;
+    setTBusy(true);
+    setTError('');
+    const result = await createTournament(nickname, tMode);
+    setTBusy(false);
+    if (result.error || !result.tournament) setTError(result.error ?? 'Erro ao criar o torneio.');
+    else setTournament(result.tournament);
+  }
+  async function handleJoinTournament(code: string) {
+    if (!userId) return;
+    setTBusy(true);
+    setTError('');
+    const result = await joinTournament(code, nickname);
+    setTBusy(false);
+    if (result.error || !result.tournament) setTError(result.error ?? 'Erro ao entrar no torneio.');
+    else setTournament(result.tournament);
+  }
+  async function handleStartTournament() {
+    const current = tournamentRef.current;
+    if (!current) return;
+    setTBusy(true);
+    setTError('');
+    const result = await startTournament(current.id);
+    setTBusy(false);
+    if (result.error || !result.tournament) setTError(result.error ?? 'Não foi possível começar o torneio.');
+    else setTournament(result.tournament);
+  }
+  function handleLeaveTournament() {
+    const current = tournamentRef.current;
+    if (current && current.status === 'waiting') void leaveTournament(current.id);
+    if (roomRef.current) leaveRoom();
+    setTournament(null);
+    setSlotRoom(null);
+    setTError('');
+  }
+  // Primeiro jogador da partida cria a sala e registra no torneio; o rival entra pelo código dela
+  async function handleTournamentCreateMatch(teamId: string) {
+    const current = tournamentRef.current;
+    if (!userId || !current) return;
+    const slot = currentSlot(current, userId);
+    if (!slot) return;
+    setTBusy(true);
+    setTError('');
+    const created = await createRoom(userId, nickname, teamId, current.mode);
+    if (created.error || !created.room) {
+      setTBusy(false);
+      setTError(created.error ?? 'Erro ao criar a partida.');
+      return;
+    }
+    setRoom(created.room);
+    const registered = await setTournamentMatch(current.id, slot, { room_id: created.room.id });
+    setTBusy(false);
+    if (registered.error) setTError(registered.error);
+    else if (registered.tournament) setTournament(registered.tournament);
+  }
+  async function handleTournamentJoinMatch(teamId: string) {
+    if (!userId || !slotRoom) return;
+    setTBusy(true);
+    setTError('');
+    const result = await joinRoom(slotRoom.code, userId, nickname, teamId);
+    setTBusy(false);
+    if (result.error || !result.room) setTError(result.error ?? 'Erro ao entrar na partida.');
+    else setRoom(result.room);
+  }
   async function handleCreateRoom(teamId: string, roomMode: 'classic' | 'dice') {
     if (!userId) return;
     setMpBusy(true);
@@ -639,9 +726,10 @@ function App() {
     if (!room || !myRole) return;
     if (room.status === 'cancelled') {
       setRoom(null);
-      setMpNotice('O adversário saiu da sala.');
+      const inTournament = !!tournamentRef.current;
+      if (!inTournament) setMpNotice('O adversário saiu da sala.');
       if (screen === 'results') setRivalLeft(true);
-      if (screen === 'lobby' || screen === 'draft') navigate('home', true);
+      if (screen === 'lobby' || screen === 'draft') navigate(inTournament ? 'tournament' : 'home', true);
       return;
     }
     // Revanche: os dois apertaram "Jogar novamente" → o anfitrião reabre o draft na mesma sala
@@ -706,7 +794,85 @@ function App() {
     const goals = (side: 'host' | 'guest') =>
       room.plan!.filter((item) => item.type === 'gol' && item.side === side).length;
     void recordResult(room, goals('host'), goals('guest'));
+    // Partida de torneio: os dois lados calculam o mesmo vencedor e gravam (a gravação repetida não muda nada)
+    const currentTournament = tournamentRef.current;
+    const slot = currentTournament ? slotOfRoom(currentTournament, room.id) : null;
+    if (currentTournament && slot && !currentTournament[slot].winner_id) {
+      const hostGoals = goals('host');
+      const guestGoals = goals('guest');
+      const decided = decideWinner(room, hostGoals, guestGoals);
+      void setTournamentMatch(currentTournament.id, slot, {
+        room_id: room.id,
+        winner_id: decided.winnerId,
+        score: `${hostGoals}x${guestGoals}`,
+        pens: decided.pens,
+      }).then((result) => {
+        if (result.tournament) setTournament(result.tournament);
+      });
+      if (decided.pens) {
+        setMpNotice(decided.winnerId === userId ? 'Empate! Você avançou nos pênaltis.' : 'Empate! Seu rival avançou nos pênaltis.');
+      }
+    }
   }, [screen, room]);
+
+  // Mantém o torneio atualizado (tempo real + consulta a cada 2,5 s como reforço)
+  useEffect(() => {
+    if (!tournament?.id) return;
+    const id = tournament.id;
+    let alive = true;
+    async function refresh() {
+      const next = await fetchTournament(id);
+      if (!alive) return;
+      if (!next) return;
+      if (next.status === 'cancelled') {
+        setTournament(null);
+        setSlotRoom(null);
+        setMpNotice('O torneio foi cancelado.');
+        if (screen === 'tournament') navigate('home', true);
+        return;
+      }
+      setTournament((current) => (current && JSON.stringify(current) !== JSON.stringify(next) ? next : current));
+    }
+    const timer = window.setInterval(() => void refresh(), 2500);
+    let channel: any = null;
+    try {
+      channel = supabase
+        .channel(`tournament-${id}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'tournaments', filter: `id=eq.${id}` }, () => {
+          void refresh();
+        })
+        .subscribe();
+    } catch {
+      channel = null;
+    }
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+      if (channel) void supabase.removeChannel(channel);
+    };
+  }, [tournament?.id, screen]);
+
+  // Minha partida do torneio: procura a sala que o outro jogador criou para eu poder entrar
+  const mySlot: Slot | null = tournament && userId ? currentSlot(tournament, userId) : null;
+  const mySlotRoomId = tournament && mySlot ? tournament[mySlot].room_id : undefined;
+  const inRoom = !!room;
+  useEffect(() => {
+    if (!mySlotRoomId || inRoom) {
+      setSlotRoom(null);
+      return;
+    }
+    let alive = true;
+    async function load() {
+      const found = await fetchRoom(mySlotRoomId as string);
+      if (alive) setSlotRoom(found);
+    }
+    void load();
+    const timer = window.setInterval(() => void load(), 2500);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [mySlotRoomId, inRoom]);
 
   // Ao voltar para o início, sai da sala
   useEffect(() => {
@@ -1012,6 +1178,7 @@ function App() {
   }
 
   const opponentTeam = selectedClub ? teams.find((team) => team.id !== selectedClub.id) : undefined;
+  const inTournamentMatch = !!room && !!tournament && !!slotOfRoom(tournament, room.id);
 
   return (
     <div className="app-shell">
@@ -1068,6 +1235,7 @@ function App() {
           onJoin={handleJoinRoom}
           onResume={resumeMpDraft}
           onWatch={watchRoom}
+          onTournament={openTournament}
           onCancel={() => {
             leaveRoom();
             setMpError('');
@@ -1075,6 +1243,27 @@ function App() {
           userId={userId}
           chatMessages={chatMessages}
           onSendChat={sendChat}
+        />
+      )}
+
+      {screen === 'tournament' && !!userId && (
+        <TournamentScreen
+          teams={teams}
+          userId={userId}
+          tournament={tournament}
+          mySlot={mySlot}
+          slotRoom={slotRoom}
+          room={room}
+          busy={tBusy}
+          error={tError}
+          onBack={reset}
+          onCreate={handleCreateTournament}
+          onJoin={handleJoinTournament}
+          onStart={handleStartTournament}
+          onLeave={handleLeaveTournament}
+          onCreateMatch={handleTournamentCreateMatch}
+          onJoinMatch={handleTournamentJoinMatch}
+          onCancelMatch={() => leaveRoom()}
         />
       )}
 
@@ -1183,9 +1372,13 @@ function App() {
           stats={stats}
           goalLog={goalLog}
           shootout={shootout}
+          againLabel={inTournamentMatch ? 'Voltar ao torneio' : undefined}
           onAgain={() => {
             if (spectating) {
               navigate('lobby', true);
+            } else if (inTournamentMatch) {
+              leaveRoom();
+              navigate('tournament', true);
             } else if (room && !rivalLeft && room.status !== 'cancelled') {
               requestRematch();
             } else if (room || rivalLeft) {
@@ -1194,8 +1387,8 @@ function App() {
             } else goBack('club');
           }}
           rematch={{
-            enabled: !!room && !spectating,
-            left: rivalLeft,
+            enabled: !!room && !spectating && !inTournamentMatch,
+            left: rivalLeft && !inTournamentMatch,
             mine: rematchActive && !!myRole && (myRole === 'host' ? !room?.host_ready : !room?.guest_ready),
             rival: rematchActive && !!myRole && (myRole === 'host' ? !room?.guest_ready : !room?.host_ready),
           }}
@@ -1709,6 +1902,7 @@ function LobbyScreen({
   onJoin,
   onResume,
   onWatch,
+  onTournament,
   onCancel,
   userId,
   chatMessages,
@@ -1724,6 +1918,7 @@ function LobbyScreen({
   onJoin: (code: string, teamId: string) => void;
   onResume: () => void;
   onWatch: (room: Room) => void;
+  onTournament: () => void;
   onCancel: () => void;
   userId: string | null;
   chatMessages: ChatMessage[];
@@ -1914,6 +2109,24 @@ function LobbyScreen({
           <div className="lobby-or">
             <i /> <span>OU</span> <i />
           </div>
+          <section className="lobby-card">
+            <div className="lobby-step">
+              <b>
+                <Trophy size={16} />
+              </b>
+              <div>
+                <h3>Torneio de 4 jogadores</h3>
+                <p>Duas semifinais e a final. Quem ganhar a final é o campeão.</p>
+              </div>
+            </div>
+            <button className="gold-button large lobby-main" onClick={onTournament}>
+              Abrir torneio
+            </button>
+          </section>
+
+          <div className="lobby-or">
+            <i /> <span>OU</span> <i />
+          </div>
           <LiveMatches teams={teams} onWatch={onWatch} />
         </div>
       )}
@@ -1960,6 +2173,355 @@ function LobbyScreen({
       {room && room.status === 'playing' && (
         <div className="draft-picker" style={{ maxWidth: 520, margin: '0 auto', textAlign: 'center' }}>
           <p>A partida está começando...</p>
+        </div>
+      )}
+    </main>
+  );
+}
+
+function ClubPicker({
+  teams,
+  value,
+  onChange,
+  exclude,
+}: {
+  teams: Team[];
+  value: string;
+  onChange: (id: string) => void;
+  exclude?: string | null;
+}) {
+  return (
+    <div className="lobby-clubs">
+      {teams
+        .filter((team) => team.id !== exclude)
+        .map((team) => (
+          <button
+            key={team.id}
+            type="button"
+            className={value === team.id ? 'lobby-club on' : 'lobby-club'}
+            onClick={() => onChange(team.id)}
+            style={{ '--club': team.primary_color } as React.CSSProperties}
+          >
+            <i>{team.abbreviation}</i>
+            <span>{team.name}</span>
+          </button>
+        ))}
+    </div>
+  );
+}
+
+function TournamentScreen({
+  teams,
+  userId,
+  tournament,
+  mySlot,
+  slotRoom,
+  room,
+  busy,
+  error,
+  onBack,
+  onCreate,
+  onJoin,
+  onStart,
+  onLeave,
+  onCreateMatch,
+  onJoinMatch,
+  onCancelMatch,
+}: {
+  teams: Team[];
+  userId: string;
+  tournament: Tournament | null;
+  mySlot: Slot | null;
+  slotRoom: Room | null;
+  room: Room | null;
+  busy: boolean;
+  error: string;
+  onBack: () => void;
+  onCreate: (mode: 'classic' | 'dice') => void;
+  onJoin: (code: string) => void;
+  onStart: () => void;
+  onLeave: () => void;
+  onCreateMatch: (teamId: string) => void;
+  onJoinMatch: (teamId: string) => void;
+  onCancelMatch: () => void;
+}) {
+  const [tMode, setTMode] = useState<'classic' | 'dice'>('classic');
+  const [code, setCode] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [teamId, setTeamId] = useState('');
+
+  async function copyCode() {
+    if (!tournament) return;
+    try {
+      await navigator.clipboard.writeText(tournament.code);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  const gold = '#F5B800';
+  const isHost = !!tournament && tournament.host_id === userId;
+  const nickOf = (id?: string | null) => tournament?.players.find((player) => player.id === id)?.nick ?? null;
+
+  // Dados da minha partida atual
+  const pair = tournament && mySlot ? slotPlayers(tournament, mySlot) : null;
+  const iAmFirst = !!pair && pair[0]?.id === userId;
+  const rival = pair ? (pair[0]?.id === userId ? pair[1] : pair[0]) : null;
+  const match = tournament && mySlot ? tournament[mySlot] : null;
+  const roomOpen = !!slotRoom && slotRoom.status === 'waiting' && !slotRoom.guest_id;
+  const joinExclude = slotRoom?.host_team_id ?? null;
+  const pickable = teams.filter((team) => team.id !== joinExclude);
+  const chosenTeam = pickable.some((team) => team.id === teamId) ? teamId : pickable[0]?.id || '';
+
+  const renderMatch = (slot: Slot) => {
+    if (!tournament) return null;
+    const [a, b] = slotPlayers(tournament, slot);
+    const data = tournament[slot];
+    const mine = mySlot === slot;
+    return (
+      <div
+        style={{
+          border: `1px solid ${mine ? gold : 'rgba(255,255,255,.14)'}`,
+          background: mine ? 'rgba(245,184,0,.08)' : 'rgba(255,255,255,.03)',
+          borderRadius: 12,
+          padding: '10px 14px',
+          textAlign: 'left',
+        }}
+      >
+        <span className="lobby-label" style={{ margin: 0 }}>{SLOT_LABEL[slot].toUpperCase()}</span>
+        {[a, b].map((player, index) => (
+          <div
+            key={index}
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              padding: '4px 0',
+              fontWeight: data.winner_id && data.winner_id === player?.id ? 800 : 500,
+              color: data.winner_id && data.winner_id === player?.id ? gold : undefined,
+              opacity: data.winner_id && data.winner_id !== player?.id ? 0.55 : 1,
+            }}
+          >
+            <span>{player ? player.nick : 'A definir'}{player?.id === userId ? ' (você)' : ''}</span>
+            {data.winner_id && data.winner_id === player?.id && <Trophy size={14} />}
+          </div>
+        ))}
+        {data.winner_id && (
+          <small style={{ opacity: 0.8 }}>
+            {data.score ?? ''}{data.pens ? ' · pênaltis' : ''}
+          </small>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <main className="flow-page lobby-page">
+      <style>{lobbyCss}</style>
+      <button className="back-button" onClick={onBack}>
+        <ArrowLeft size={16} /> Voltar
+      </button>
+      <div className="flow-heading">
+        <div className="eyebrow">
+          <Trophy size={14} /> TORNEIO
+        </div>
+        <h2>
+          COPA DOS <em>4</em>
+        </h2>
+        <p>Semifinais e final, cada partida é um multiplayer normal. O campeão leva a taça.</p>
+      </div>
+
+      {!tournament && (
+        <div className="lobby-wrap">
+          <section className="lobby-card">
+            <div className="lobby-step">
+              <b>1</b>
+              <div>
+                <h3>Criar torneio</h3>
+                <p>Escolha o modo do draft e passe o código para mais 3 amigos.</p>
+              </div>
+            </div>
+            <span className="lobby-label">MODO DO DRAFT</span>
+            <div className="lobby-seg">
+              <button type="button" className={tMode === 'classic' ? 'on' : ''} onClick={() => setTMode('classic')}>
+                Draft clássico
+              </button>
+              <button type="button" className={tMode === 'dice' ? 'on' : ''} onClick={() => setTMode('dice')}>
+                <span aria-hidden="true">🎲</span> Modo Dado
+              </button>
+            </div>
+            <button className="gold-button large lobby-main" disabled={busy} onClick={() => onCreate(tMode)}>
+              {busy ? 'Criando...' : 'Criar torneio'}
+            </button>
+          </section>
+
+          <div className="lobby-or">
+            <i /> <span>OU</span> <i />
+          </div>
+
+          <section className="lobby-card">
+            <div className="lobby-step">
+              <b>2</b>
+              <div>
+                <h3>Entrar com código</h3>
+                <p>Recebeu o código de um torneio? Digite aqui.</p>
+              </div>
+            </div>
+            <div className="lobby-join">
+              <input
+                value={code}
+                onChange={(event) => setCode(event.target.value.toUpperCase().slice(0, 4))}
+                placeholder="K7QX"
+                maxLength={4}
+                autoCapitalize="characters"
+                autoComplete="off"
+              />
+              <button className="gold-button" disabled={busy || code.length < 4} onClick={() => onJoin(code)}>
+                {busy ? 'Entrando...' : 'Entrar'}
+              </button>
+            </div>
+          </section>
+          {error && <div className="lobby-error">{error}</div>}
+        </div>
+      )}
+
+      {tournament && tournament.status === 'waiting' && (
+        <div className="draft-picker" style={{ maxWidth: 520, margin: '0 auto', textAlign: 'center' }}>
+          <span className="eyebrow">CÓDIGO DO TORNEIO</span>
+          <div style={{ fontSize: 56, fontWeight: 900, letterSpacing: 12, margin: '10px 0', color: gold }}>
+            {tournament.code}
+          </div>
+          <button className="outline-button" onClick={() => void copyCode()}>
+            {copied ? 'Copiado!' : 'Copiar código'}
+          </button>
+          <div style={{ margin: '18px 0', display: 'grid', gap: 6 }}>
+            <span className="lobby-label" style={{ margin: 0 }}>JOGADORES ({tournament.players.length}/4)</span>
+            {tournament.players.map((player) => (
+              <div key={player.id} style={{ padding: '8px 12px', borderRadius: 10, background: 'rgba(255,255,255,.05)' }}>
+                {player.nick}
+                {player.id === tournament.host_id ? ' · anfitrião' : ''}
+                {player.id === userId ? ' (você)' : ''}
+              </div>
+            ))}
+          </div>
+          {isHost ? (
+            <button
+              className="gold-button large lobby-main"
+              disabled={busy || tournament.players.length < 4}
+              onClick={onStart}
+            >
+              {busy ? 'Começando...' : tournament.players.length < 4 ? 'Esperando 4 jogadores' : 'Começar torneio'}
+            </button>
+          ) : (
+            <p style={{ opacity: 0.8 }}>Aguardando o anfitrião começar o torneio...</p>
+          )}
+          {error && <div className="lobby-error" style={{ marginTop: 10 }}>{error}</div>}
+          <div style={{ marginTop: 14 }}>
+            <button className="outline-button" onClick={onLeave}>
+              {isHost ? 'Cancelar torneio' : 'Sair do torneio'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {tournament && tournament.status !== 'waiting' && (
+        <div style={{ maxWidth: 520, margin: '0 auto', display: 'grid', gap: 12 }}>
+          {tournament.status === 'finished' && (
+            <div
+              style={{
+                textAlign: 'center',
+                padding: '18px 14px',
+                borderRadius: 14,
+                border: `1px solid ${gold}`,
+                background: 'rgba(245,184,0,.12)',
+              }}
+            >
+              <Crown color={gold} />
+              <h3 style={{ margin: '6px 0 0' }}>
+                {tournament.champion_nick ? `${tournament.champion_nick} é o campeão!` : 'Torneio encerrado'}
+              </h3>
+              {tournament.m3.winner_id === userId && <p style={{ margin: '6px 0 0' }}>A taça é sua. 🏆</p>}
+            </div>
+          )}
+
+          {renderMatch('m1')}
+          {renderMatch('m2')}
+          {renderMatch('m3')}
+
+          {tournament.status === 'playing' && !mySlot && (
+            <p style={{ textAlign: 'center', opacity: 0.85 }}>
+              {nickOf(userId) && tournament.seed?.includes(userId)
+                ? 'Você foi eliminado. Acompanhe o resto do torneio por aqui.'
+                : 'Você não está jogando este torneio.'}
+            </p>
+          )}
+
+          {tournament.status === 'playing' && mySlot && pair && (
+            <section className="lobby-card" style={{ textAlign: 'center' }}>
+              <span className="eyebrow">SUA PARTIDA · {SLOT_LABEL[mySlot].toUpperCase()}</span>
+              {!pair[0] || !pair[1] ? (
+                <p style={{ margin: '12px 0 0', opacity: 0.85 }}>Aguardando a outra semifinal terminar...</p>
+              ) : (
+                <>
+                  <h3 style={{ margin: '8px 0' }}>Rival: {rival?.nick ?? 'Jogador'}</h3>
+
+                  {room ? (
+                    <>
+                      <p style={{ opacity: 0.85 }}>
+                        {room.status === 'waiting'
+                          ? 'Sala criada. Aguardando seu rival entrar...'
+                          : 'Partida em andamento...'}
+                      </p>
+                      {room.status === 'waiting' && (
+                        <button className="outline-button" onClick={onCancelMatch}>
+                          Cancelar sala
+                        </button>
+                      )}
+                    </>
+                  ) : iAmFirst ? (
+                    <>
+                      <p style={{ opacity: 0.85 }}>
+                        {match?.room_id ? 'Sua sala anterior não está mais ativa. ' : ''}
+                        Escolha seu clube e crie a partida. Seu rival entra automaticamente.
+                      </p>
+                      <span className="lobby-label">SEU CLUBE</span>
+                      <ClubPicker teams={teams} value={chosenTeam} onChange={setTeamId} />
+                      <button
+                        className="gold-button large lobby-main"
+                        disabled={busy || !chosenTeam}
+                        onClick={() => onCreateMatch(chosenTeam)}
+                      >
+                        {busy ? 'Criando...' : 'Criar minha partida'}
+                      </button>
+                    </>
+                  ) : roomOpen ? (
+                    <>
+                      <p style={{ opacity: 0.85 }}>{pair[0]?.nick} já criou a sala. Escolha seu clube e entre.</p>
+                      <span className="lobby-label">SEU CLUBE</span>
+                      <ClubPicker teams={teams} value={chosenTeam} onChange={setTeamId} exclude={joinExclude} />
+                      <button
+                        className="gold-button large lobby-main"
+                        disabled={busy || !chosenTeam}
+                        onClick={() => onJoinMatch(chosenTeam)}
+                      >
+                        {busy ? 'Entrando...' : 'Entrar na partida'}
+                      </button>
+                    </>
+                  ) : (
+                    <p style={{ opacity: 0.85 }}>Aguardando {pair[0]?.nick} criar a sala da partida...</p>
+                  )}
+                </>
+              )}
+              {error && <div className="lobby-error" style={{ marginTop: 10 }}>{error}</div>}
+            </section>
+          )}
+
+          <div style={{ textAlign: 'center' }}>
+            <button className="outline-button" onClick={onLeave}>
+              Sair do torneio
+            </button>
+          </div>
         </div>
       )}
     </main>
@@ -2768,6 +3330,7 @@ function ResultsScreen({
   goalLog,
   shootout,
   onAgain,
+  againLabel,
   rematch,
   onHome,
 }: {
@@ -2780,6 +3343,7 @@ function ResultsScreen({
   goalLog: GoalRecord[];
   shootout: Shootout | null;
   onAgain: () => void;
+  againLabel?: string;
   rematch: { enabled: boolean; left: boolean; mine: boolean; rival: boolean };
   onHome: () => void;
 }) {
@@ -2944,7 +3508,9 @@ function ResultsScreen({
             size={16}
             style={rematch.enabled && rematch.mine ? { animation: 'rm-spin 1.2s linear infinite' } : undefined}
           />{' '}
-          {rematch.left
+          {againLabel
+            ? againLabel
+            : rematch.left
             ? 'Novo jogo'
             : rematch.enabled && rematch.mine
               ? `Aguardando rival (${rematchCount}/2)`
