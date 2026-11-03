@@ -7,6 +7,7 @@ import {
 import { supabase } from '@/lib/supabase';
 import AdminScreen from '@/components/AdminScreen';
 import MatchPitch from '@/components/MatchPitch';
+import PenaltyShootout, { type Shootout } from '@/components/PenaltyShootout';
 import {
   createRoom, joinRoom, fetchRoom, patchRoom, listLiveRooms, isRoomLive, lookupRoom, generatePlan, recordResult, openRoomChat,
   type Room, type PlanItem, type ChatMessage,
@@ -114,8 +115,6 @@ function pickByRoll(list: Player[], weight: (player: Player) => number, roll: nu
 const SHOOTOUT_CHANCE = 0.2;
 
 type PlanEntry = { minute: number; type: MatchEvent['type']; side: 'user' | 'bot' };
-type ShootoutKick = { side: 'user' | 'bot'; playerId: string; scored: boolean };
-type Shootout = { kicks: ShootoutKick[]; userGoals: number; botGoals: number; winner: 'user' | 'bot' };
 
 // Ajusta o plano da partida para terminar empatado: tira gols de quem ganharia
 // ou transforma um chute do outro time em gol, até os placares ficarem iguais.
@@ -138,50 +137,6 @@ function forceDrawPlan(plan: PlanEntry[]): PlanEntry[] {
     }
   }
   return out;
-}
-
-// Disputa de pênaltis: 5 cobranças para cada lado (alternadas) e depois morte súbita.
-// A chance de converter depende do overall do batedor contra o do goleiro.
-function simulateShootout(userTeam: Player[], botTeam: Player[]): Shootout {
-  const takers = (team: Player[]) => [
-    ...team.filter((player) => player.primary_position !== 'GK').sort((a, b) => b.overall - a.overall),
-    ...team.filter((player) => player.primary_position === 'GK'),
-  ];
-  const keeperOf = (team: Player[]) => team.find((player) => player.primary_position === 'GK') ?? team[0];
-  const order = { user: takers(userTeam), bot: takers(botTeam) };
-  const keepers = { user: keeperOf(userTeam), bot: keeperOf(botTeam) };
-  const taken = { user: 0, bot: 0 };
-  const goals = { user: 0, bot: 0 };
-  const kicks: ShootoutKick[] = [];
-  let finished = false;
-  for (let round = 0; round < 30 && !finished; round += 1) {
-    for (const side of ['user', 'bot'] as const) {
-      const other = side === 'user' ? 'bot' : 'user';
-      const list = order[side];
-      const shooter = list[taken[side] % Math.max(1, list.length)];
-      const keeper = keepers[other];
-      taken[side] += 1;
-      if (!shooter) continue;
-      const chance = Math.max(0.55, Math.min(0.9, 0.74 + (shooter.overall - (keeper?.overall ?? 75)) / 150));
-      const scored = Math.random() < chance;
-      if (scored) goals[side] += 1;
-      kicks.push({ side, playerId: shooter.id, scored });
-      if (round < 5) {
-        // Termina antes se um lado já não pode ser alcançado
-        const leftUser = 5 - taken.user;
-        const leftBot = 5 - taken.bot;
-        if (goals.user > goals.bot + leftBot || goals.bot > goals.user + leftUser) {
-          finished = true;
-          break;
-        }
-      } else if (side === 'bot' && goals.user !== goals.bot) {
-        finished = true;
-      }
-    }
-  }
-  const winner: 'user' | 'bot' =
-    goals.user === goals.bot ? (Math.random() < 0.5 ? 'user' : 'bot') : goals.user > goals.bot ? 'user' : 'bot';
-  return { kicks, userGoals: goals.user, botGoals: goals.bot, winner };
 }
 
 function Card({
@@ -335,7 +290,9 @@ function App() {
   const [stats, setStats] = useState<MatchStats>(emptyStats);
   const [goalLog, setGoalLog] = useState<GoalRecord[]>([]);
   const [shootout, setShootout] = useState<Shootout | null>(null);
-  const [shootoutShown, setShootoutShown] = useState(0);
+  // Botão de teste: força a próxima partida contra o bot a terminar empatada (vai para os pênaltis)
+  const [forceShootout, setForceShootout] = useState(false);
+  const [penaltyPhase, setPenaltyPhase] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [nickname, setNickname] = useState('Visitante');
@@ -780,7 +737,7 @@ function App() {
         side: (item.side === 'host' ? 'user' : 'bot') as 'user' | 'bot',
       }));
     // De vez em quando a partida termina empatada e vai para os pênaltis
-    planRef.current = Math.random() < SHOOTOUT_CHANCE ? forceDrawPlan(basePlan) : basePlan;
+    planRef.current = forceShootout || Math.random() < SHOOTOUT_CHANCE ? forceDrawPlan(basePlan) : basePlan;
     beginMatch(chosen, botPlayers);
   }
   function beginMatch(chosen: Player[], botPlayers: Player[]) {
@@ -792,7 +749,7 @@ function App() {
     setStats(emptyStats);
     setGoalLog([]);
     setShootout(null);
-    setShootoutShown(0);
+    setPenaltyPhase(false);
     setShownScore({ user: 0, bot: 0 });
     setShownGoalIds([]);
     setSkipped(false);
@@ -811,26 +768,22 @@ function App() {
   const goesToShootout = !room && !spectating && score.user === score.bot;
   useEffect(() => {
     if (screen !== 'match' || minute < 90) return;
-    if (goesToShootout && shootout) return; // pênaltis em andamento
+    if (goesToShootout && (penaltyPhase || shootout)) return; // pênaltis em andamento
     const allShown = shownScore.user === score.user && shownScore.bot === score.bot;
     const wait = skipped ? 250 : allShown ? 2500 : 14000;
     const timer = window.setTimeout(() => {
-      if (goesToShootout) setShootout(simulateShootout(userTeam, botTeam));
+      if (goesToShootout) setPenaltyPhase(true);
       else navigate('results', true);
     }, wait);
     return () => window.clearTimeout(timer);
-  }, [screen, minute, skipped, shownScore, score, shootout]);
+  }, [screen, minute, skipped, shownScore, score, penaltyPhase, shootout]);
 
-  // Mostra as cobranças uma por uma e, no fim, vai para a tela de resultado
-  useEffect(() => {
-    if (screen !== 'match' || !shootout) return;
-    if (shootoutShown >= shootout.kicks.length) {
-      const done = window.setTimeout(() => navigate('results', true), skipped ? 900 : 3200);
-      return () => window.clearTimeout(done);
-    }
-    const next = window.setTimeout(() => setShootoutShown((count) => count + 1), skipped ? 350 : 1500);
-    return () => window.clearTimeout(next);
-  }, [screen, shootout, shootoutShown, skipped]);
+  // Fim da disputa de pênaltis jogada pelo usuário: guarda o resultado e mostra a tela final
+  function finishShootout(result: Shootout) {
+    setShootout(result);
+    setPenaltyPhase(false);
+    navigate('results', true);
+  }
 
   function advanceMatch() {
     const next = minute + 1;
@@ -1041,7 +994,18 @@ function App() {
         />
       )}
 
-      {screen === 'club' && <ClubChoice teams={teams} mode={mode} onMode={setMode} onBack={reset} onChoose={chooseClub} />}
+      {screen === 'club' && (
+        <ClubChoice
+          teams={teams}
+          mode={mode}
+          onMode={setMode}
+          onBack={reset}
+          onChoose={chooseClub}
+          showTestTools={isAdmin || window.location.search.includes('teste')}
+          forceShootout={forceShootout}
+          onForceShootout={setForceShootout}
+        />
+      )}
 
       {screen === 'draft' && selectedClub && mode === 'classic' && (
         <DraftScreen
@@ -1087,8 +1051,8 @@ function App() {
           onGoal={handleGoal}
           onSkip={skipMatch}
           stats={stats}
-          shootout={shootout}
-          shootoutShown={shootoutShown}
+          penaltyPhase={penaltyPhase}
+          onShootoutFinish={finishShootout}
           canSkip={!room && !spectating}
           multiplayer={!!room}
           userId={userId}
@@ -1340,12 +1304,18 @@ function ClubChoice({
   onMode,
   onBack,
   onChoose,
+  showTestTools,
+  forceShootout,
+  onForceShootout,
 }: {
   teams: Team[];
   mode: 'classic' | 'dice';
   onMode: (mode: 'classic' | 'dice') => void;
   onBack: () => void;
   onChoose: (team: Team) => void;
+  showTestTools: boolean;
+  forceShootout: boolean;
+  onForceShootout: (value: boolean) => void;
 }) {
   return (
     <main className="flow-page">
@@ -1373,6 +1343,16 @@ function ClubChoice({
           <span aria-hidden="true">🎲</span> Modo Dado
         </button>
       </div>
+      {showTestTools && (
+        <div style={{ display: 'flex', justifyContent: 'center', margin: '-6px 0 20px' }}>
+          <button
+            className={forceShootout ? 'gold-button' : 'outline-button'}
+            onClick={() => onForceShootout(!forceShootout)}
+          >
+            <span aria-hidden="true">🧪</span> Teste: forçar pênaltis contra o bot {forceShootout ? '(LIGADO)' : '(desligado)'}
+          </button>
+        </div>
+      )}
       <div className="club-grid">
         {teams.map((team) => (
           <button
@@ -2238,8 +2218,8 @@ function MatchScreen({
   onGoal,
   onSkip,
   stats,
-  shootout,
-  shootoutShown,
+  penaltyPhase,
+  onShootoutFinish,
   canSkip,
   multiplayer,
   userId,
@@ -2257,8 +2237,8 @@ function MatchScreen({
   onGoal: (id: number, side: 'user' | 'bot') => void;
   onSkip: () => void;
   stats: MatchStats;
-  shootout: Shootout | null;
-  shootoutShown: number;
+  penaltyPhase: boolean;
+  onShootoutFinish: (result: Shootout) => void;
   canSkip: boolean;
   multiplayer: boolean;
   userId: string | null;
@@ -2295,14 +2275,13 @@ function MatchScreen({
         </div>
       </div>
 
-      {shootout ? (
-        <PenaltyPanel
-          shootout={shootout}
-          shown={shootoutShown}
+      {penaltyPhase ? (
+        <PenaltyShootout
           club={club}
           opponent={opponent}
           userTeam={userTeam}
           botTeam={botTeam}
+          onFinish={onShootoutFinish}
         />
       ) : (
         <MatchPitch
@@ -2367,95 +2346,6 @@ function MatchScreen({
         </aside>
       </div>
     </main>
-  );
-}
-
-function PenaltyPanel({
-  shootout,
-  shown,
-  club,
-  opponent,
-  userTeam,
-  botTeam,
-}: {
-  shootout: Shootout;
-  shown: number;
-  club: Team;
-  opponent: Team;
-  userTeam: Player[];
-  botTeam: Player[];
-}) {
-  const revealed = shootout.kicks.slice(0, shown);
-  const userKicks = revealed.filter((kick) => kick.side === 'user');
-  const botKicks = revealed.filter((kick) => kick.side === 'bot');
-  const userGoals = userKicks.filter((kick) => kick.scored).length;
-  const botGoals = botKicks.filter((kick) => kick.scored).length;
-  const slots = Math.max(5, userKicks.length, botKicks.length);
-  const last = revealed[revealed.length - 1];
-  const finished = shown >= shootout.kicks.length;
-  const nameOf = (kick: ShootoutKick) =>
-    (kick.side === 'user' ? userTeam : botTeam).find((player) => player.id === kick.playerId)?.name ?? 'Jogador';
-  const winnerTeam = shootout.winner === 'user' ? club : opponent;
-  const mark = (list: ShootoutKick[], index: number) => {
-    const kick = list[index];
-    return (
-      <span
-        key={index}
-        style={{
-          width: 30,
-          height: 30,
-          borderRadius: '50%',
-          display: 'grid',
-          placeItems: 'center',
-          fontSize: 15,
-          fontWeight: 800,
-          background: !kick ? 'rgba(255,255,255,.06)' : kick.scored ? '#22c55e' : '#ef4444',
-          color: kick ? '#0B1016' : 'rgba(255,255,255,.35)',
-        }}
-      >
-        {!kick ? '•' : kick.scored ? '✓' : '✕'}
-      </span>
-    );
-  };
-  const row = (team: Team, list: ShootoutKick[], goals: number) => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-      <b style={{ minWidth: 48 }}>{team.abbreviation}</b>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', flex: 1 }}>
-        {Array.from({ length: slots }).map((_, index) => mark(list, index))}
-      </div>
-      <strong style={{ fontSize: 26, minWidth: 28, textAlign: 'right' }}>{goals}</strong>
-    </div>
-  );
-  return (
-    <section
-      style={{
-        margin: '0 0 16px',
-        padding: '18px 16px',
-        borderRadius: 14,
-        border: '1px solid rgba(245,184,0,.5)',
-        background: 'rgba(0,0,0,.35)',
-        display: 'grid',
-        gap: 14,
-      }}
-    >
-      <div style={{ textAlign: 'center' }}>
-        <span className="eyebrow">EMPATE NO TEMPO NORMAL</span>
-        <h2 style={{ margin: '4px 0 0' }}>
-          DISPUTA DE <em>PÊNALTIS</em>
-        </h2>
-      </div>
-      {row(club, userKicks, userGoals)}
-      {row(opponent, botKicks, botGoals)}
-      <p style={{ margin: 0, textAlign: 'center', minHeight: 22 }}>
-        {finished
-          ? `${winnerTeam.name} vence nos pênaltis!`
-          : last
-            ? last.scored
-              ? `${nameOf(last)} converte a cobrança!`
-              : `${nameOf(last)} desperdiça a cobrança!`
-            : 'Os batedores se preparam...'}
-      </p>
-    </section>
   );
 }
 
