@@ -322,6 +322,9 @@ function App() {
   const mpPlanRoom = useRef<string | null>(null);
   const mpMatchRoom = useRef<string | null>(null);
   const mpRecorded = useRef<string | null>(null);
+  const mpResetKey = useRef<string | null>(null);
+  // O rival saiu da sala enquanto estávamos na tela de resultado
+  const [rivalLeft, setRivalLeft] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const chatRef = useRef<ReturnType<typeof openRoomChat> | null>(null);
   // Cartas sorteadas para cada posição no draft clássico (ficam fixas até escolher)
@@ -463,7 +466,7 @@ function App() {
   function leaveRoom() {
     const current = roomRef.current;
     if (!current) return;
-    if (current.status === 'waiting' || current.status === 'drafting') {
+    if (current.status === 'waiting' || current.status === 'drafting' || current.status === 'finished') {
       void patchRoom(current.id, { status: 'cancelled' });
     }
     setRoom(null);
@@ -494,6 +497,14 @@ function App() {
     setMpBusy(false);
     if (result.error || !result.room) setMpError(result.error ?? 'Erro ao entrar na sala.');
     else setRoom(result.room);
+  }
+  // Revanche: marca que quer jogar de novo (1/2). Quando os dois marcam, o anfitrião reabre o draft na mesma sala.
+  // Reaproveita as flags de "pronto": depois da partida, pronto = false significa "quero revanche".
+  function requestRematch() {
+    if (!room || !myRole || room.status === 'cancelled') return;
+    const patch: Partial<Room> = myRole === 'host' ? { host_ready: false } : { guest_ready: false };
+    setRoom((current) => (current ? { ...current, ...patch } : current));
+    void patchRoom(room.id, patch);
   }
   function resumeMpDraft() {
     if (!room || !myRole) return;
@@ -562,6 +573,10 @@ function App() {
     beginMatch(mine, theirs);
   }
 
+  useEffect(() => {
+    if (room?.id) setRivalLeft(false);
+  }, [room?.id]);
+
   // Chat da sala: abre quando os dois jogadores estão na sala e fecha ao sair
   const chatActive = !!room?.id && !!room?.guest_id;
   useEffect(() => {
@@ -614,8 +629,33 @@ function App() {
     if (room.status === 'cancelled') {
       setRoom(null);
       setMpNotice('O adversário saiu da sala.');
+      if (screen === 'results') setRivalLeft(true);
       if (screen === 'lobby' || screen === 'draft') navigate('home', true);
       return;
+    }
+    // Revanche: os dois apertaram "Jogar novamente" → o anfitrião reabre o draft na mesma sala
+    if (myRole === 'host' && room.status === 'finished' && room.plan && !room.host_ready && !room.guest_ready) {
+      const key = `${room.id}:${room.plan.find((item) => item.startedAt)?.startedAt ?? room.plan.length}`;
+      if (mpResetKey.current !== key) {
+        mpResetKey.current = key;
+        const fresh: Partial<Room> = {
+          status: 'drafting',
+          plan: null,
+          host_squad: {},
+          guest_squad: {},
+          host_ready: false,
+          guest_ready: false,
+        };
+        setRoom((current) => (current ? { ...current, ...fresh } : current));
+        void patchRoom(room.id, fresh);
+      }
+    }
+    // A sala voltou para o draft depois de uma partida: libera os controles para um novo jogo
+    if (room.status === 'drafting' && mpMatchRoom.current === room.id) {
+      mpMatchRoom.current = null;
+      mpPlanRoom.current = null;
+      mpRecorded.current = null;
+      mpDraftRoom.current = null;
     }
     if (room.status === 'drafting' && mpDraftRoom.current !== room.id) {
       mpDraftRoom.current = room.id;
@@ -922,6 +962,8 @@ function App() {
     setSkipped(true);
     setMinute(90);
   }
+  // Depois da partida, a revanche só vale enquanto a sala está jogando/encerrada
+  const rematchActive = !!room && (room.status === 'finished' || room.status === 'playing');
   function reset() {
     setSelectedClub(null);
     setDraft({});
@@ -1124,10 +1166,18 @@ function App() {
           onAgain={() => {
             if (spectating) {
               navigate('lobby', true);
-            } else if (room) {
+            } else if (room && !rivalLeft && room.status !== 'cancelled') {
+              requestRematch();
+            } else if (room || rivalLeft) {
               leaveRoom();
               navigate('lobby', true);
             } else goBack('club');
+          }}
+          rematch={{
+            enabled: !!room && !spectating,
+            left: rivalLeft,
+            mine: rematchActive && !!myRole && (myRole === 'host' ? !room?.host_ready : !room?.guest_ready),
+            rival: rematchActive && !!myRole && (myRole === 'host' ? !room?.guest_ready : !room?.host_ready),
           }}
           onHome={reset}
         />
@@ -2700,6 +2750,7 @@ function ResultsScreen({
   goalLog,
   shootout,
   onAgain,
+  rematch,
   onHome,
 }: {
   club: Team;
@@ -2711,8 +2762,10 @@ function ResultsScreen({
   goalLog: GoalRecord[];
   shootout: Shootout | null;
   onAgain: () => void;
+  rematch: { enabled: boolean; left: boolean; mine: boolean; rival: boolean };
   onHome: () => void;
 }) {
+  const rematchCount = (rematch.mine ? 1 : 0) + (rematch.rival ? 1 : 0);
   const userWon = score.user > score.bot || (score.user === score.bot && shootout?.winner === 'user');
   // Calculado uma vez por partida (não muda quando a tela é redesenhada)
   const ratings = useMemo(
@@ -2852,9 +2905,34 @@ function ResultsScreen({
           <RatingList players={botTeam} ratings={ratings.bot} />
         </section>
       </div>
+      {(rematch.left || (rematch.enabled && rematchCount > 0)) && (
+        <p style={{ textAlign: 'center', margin: '0 0 10px', fontSize: 14, fontWeight: 700, color: rematch.left ? '#ffb3b3' : '#F5B800' }}>
+          {rematch.left
+            ? 'O rival saiu da sala.'
+            : rematch.mine
+              ? `Revanche ${rematchCount}/2 · esperando o rival aceitar...`
+              : `O rival quer jogar de novo · ${rematchCount}/2`}
+        </p>
+      )}
       <div className="result-actions">
-        <button className="gold-button" onClick={onAgain}>
-          <RefreshCw size={16} /> Jogar novamente
+        <style>{'@keyframes rm-spin { to { transform: rotate(360deg); } }'}</style>
+        <button
+          className="gold-button"
+          onClick={onAgain}
+          disabled={rematch.enabled && rematch.mine}
+          style={rematch.enabled && rematch.mine ? { opacity: 0.75, cursor: 'default' } : undefined}
+        >
+          <RefreshCw
+            size={16}
+            style={rematch.enabled && rematch.mine ? { animation: 'rm-spin 1.2s linear infinite' } : undefined}
+          />{' '}
+          {rematch.left
+            ? 'Novo jogo'
+            : rematch.enabled && rematch.mine
+              ? `Aguardando rival (${rematchCount}/2)`
+              : rematch.enabled && rematchCount > 0
+                ? `Jogar novamente (${rematchCount}/2)`
+                : 'Jogar novamente'}
         </button>
         <button className="outline-button" onClick={onHome}>
           Voltar ao início
