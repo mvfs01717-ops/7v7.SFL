@@ -25,6 +25,8 @@ type Player = {
   team_id: string;
   image_url?: string | null;
   team?: Team;
+  // Posição em que o jogador realmente jogou na partida (pode ser diferente da principal)
+  slot?: Position;
 };
 type MatchEvent = {
   id: number;
@@ -80,6 +82,7 @@ function average(players: Player[]) {
 function colorForOverall(overall: number) {
   return overall >= 90 ? 'special' : overall >= 75 ? 'gold' : overall >= 65 ? 'silver' : 'bronze';
 }
+const slotOf = (player: Player): Position => player.slot ?? player.primary_position;
 function getPlayerPositions(player: Player) {
   return [player.primary_position, ...(player.alternate_positions ?? [])];
 }
@@ -87,8 +90,8 @@ function getPlayerPositions(player: Player) {
 // Escolhe quem finaliza o lance. Gol favorece muito os atacantes de overall alto;
 // finalização comum é mais equilibrada. `roll` vai de 0 a 1.
 function pickShooter(team: Player[], type: MatchEvent['type'], roll: number): Player | undefined {
-  const attackers = team.filter((player) => ['LF', 'RF', 'CF'].includes(player.primary_position));
-  const pool = attackers.length ? attackers : team.filter((player) => player.primary_position !== 'GK');
+  const attackers = team.filter((player) => ['LF', 'RF', 'CF'].includes(slotOf(player)));
+  const pool = attackers.length ? attackers : team.filter((player) => slotOf(player) !== 'GK');
   if (!pool.length) return team[0];
   const power = type === 'gol' ? 6 : 2;
   const weights = pool.map((player) => Math.pow(Math.max(player.overall, 1) / 50, power));
@@ -428,9 +431,10 @@ function App() {
     return out;
   }
   function squadPlayers(squad: Record<string, string> | null | undefined) {
-    return positions
-      .map((position) => players.find((player) => player.id === squad?.[position]))
-      .filter(Boolean) as Player[];
+    return positions.flatMap((position) => {
+      const found = players.find((player) => player.id === squad?.[position]);
+      return found ? [{ ...found, slot: position }] : [];
+    }) as Player[];
   }
   // Envia as escolhas do draft para a sala (e marca como pronto no fim)
   function syncSquad(source: Partial<Record<Position, Player>>, ready = false) {
@@ -710,7 +714,10 @@ function App() {
       navigate('lobby', true);
       return;
     }
-    const chosen = positions.map((position) => finalDraft[position]).filter(Boolean) as Player[];
+    const chosen = positions.flatMap((position) => {
+      const picked = finalDraft[position];
+      return picked ? [{ ...picked, slot: position }] : [];
+    }) as Player[];
     const chosenIds = new Set(chosen.map((player) => player.id));
     const botClub = teams.find((team) => team.id !== selectedClub?.id);
     // O bot completa o time com os jogadores que sobraram. Prefere os do clube rival,
@@ -724,7 +731,7 @@ function App() {
       const choice = pool.find((player) => player.team_id === botClub?.id) ?? pool[0];
       if (choice) {
         usedIds.add(choice.id);
-        botPlayers.push(choice);
+        botPlayers.push({ ...choice, slot: position });
       }
     });
     // Contra o bot também usa o plano da partida: time mais forte faz mais gols e não há empate.
@@ -802,8 +809,8 @@ function App() {
   }
 
   function createEvent(currentMinute: number, forced?: { type: MatchEvent['type']; side: MatchEvent['team'] }) {
-    const userAttack = average(userTeam.filter((player) => ['LF', 'RF', 'CF'].includes(player.primary_position)));
-    const botAttack = average(botTeam.filter((player) => ['LF', 'RF', 'CF'].includes(player.primary_position)));
+    const userAttack = average(userTeam.filter((player) => ['LF', 'RF', 'CF'].includes(slotOf(player))));
+    const botAttack = average(botTeam.filter((player) => ['LF', 'RF', 'CF'].includes(slotOf(player))));
     const userWins = userAttack + Math.random() * 20 >= botAttack + Math.random() * 20;
     const type: MatchEvent['type'] = forced
       ? forced.type
@@ -823,7 +830,7 @@ function App() {
         : Math.random();
     const attackPlayer = pickShooter(side === 'user' ? userTeam : botTeam, type, shooterRoll);
     const defensePlayer =
-      (side === 'user' ? botTeam : userTeam).find((player) => player.primary_position === 'GK') ??
+      (side === 'user' ? botTeam : userTeam).find((player) => slotOf(player) === 'GK') ??
       (side === 'user' ? botTeam[0] : userTeam[0]);
     const club =
       side === 'user'
@@ -864,7 +871,7 @@ function App() {
       if (attackPlayer) {
         // Assistência sorteada na hora do gol (igual nos dois lados do multiplayer)
         const mates = (side === 'user' ? userTeam : botTeam).filter(
-          (player) => player.id !== attackPlayer.id && player.primary_position !== 'GK',
+          (player) => player.id !== attackPlayer.id && slotOf(player) !== 'GK',
         );
         const assistRoll = Math.abs(Math.sin(currentMinute * 39.3468 + 11.135) * 24634.6345) % 1;
         const assist = assistRoll < 0.75 ? pickByRoll(mates, (player) => player.overall, assistRoll / 0.75) : undefined;
@@ -2337,7 +2344,7 @@ function MatchScreen({
             <h3>Seu elenco</h3>
             {userTeam.map((player) => (
               <div key={player.id}>
-                <span>{player.primary_position}</span>
+                <span>{slotOf(player)}</span>
                 <b>{player.name}</b>
                 <strong>{player.overall}</strong>
               </div>
@@ -2436,9 +2443,63 @@ function ResultsScreen({
         <TeamMark team={opponent} />
       </div>
       {shootout && (
-        <p style={{ textAlign: 'center', margin: '-6px 0 16px', opacity: 0.85 }}>
-          Pênaltis: {club.abbreviation} {shootout.userGoals} × {shootout.botGoals} {opponent.abbreviation}
-        </p>
+        <div
+          style={{
+            margin: '-4px auto 18px',
+            padding: '14px 16px',
+            maxWidth: 560,
+            borderRadius: 14,
+            border: '1px solid rgba(245,184,0,.45)',
+            background: 'rgba(245,184,0,.06)',
+            display: 'grid',
+            gap: 10,
+          }}
+        >
+          <span className="eyebrow" style={{ textAlign: 'center' }}>
+            DISPUTA DE PÊNALTIS
+          </span>
+          {(
+            [
+              ['user', club, shootout.userGoals],
+              ['bot', opponent, shootout.botGoals],
+            ] as const
+          ).map(([side, team, goals]) => (
+            <div key={side} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <b style={{ minWidth: 46 }}>{team.abbreviation}</b>
+              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', flex: 1 }}>
+                {shootout.kicks
+                  .filter((kick) => kick.side === side)
+                  .map((kick, index) => (
+                    <span
+                      key={index}
+                      style={{
+                        width: 24,
+                        height: 24,
+                        borderRadius: '50%',
+                        display: 'grid',
+                        placeItems: 'center',
+                        fontSize: 12,
+                        fontWeight: 800,
+                        background: kick.scored ? '#22c55e' : '#ef4444',
+                        color: '#0B1016',
+                      }}
+                    >
+                      {kick.scored ? '✓' : '✕'}
+                    </span>
+                  ))}
+              </div>
+              <strong
+                style={{ fontSize: 28, minWidth: 28, textAlign: 'right', color: shootout.winner === side ? '#F5B800' : undefined }}
+              >
+                {goals}
+              </strong>
+            </div>
+          ))}
+          <p style={{ margin: 0, textAlign: 'center', fontSize: 14, opacity: 0.85 }}>
+            {shootout.winner === 'user' ? club.name : opponent.name} vence nos pênaltis por{' '}
+            {Math.max(shootout.userGoals, shootout.botGoals)} × {Math.min(shootout.userGoals, shootout.botGoals)}
+          </p>
+        </div>
       )}
       <div className="results-grid">
         <section className="result-panel">
@@ -2557,7 +2618,7 @@ function rateTeam(
   const result = goalsFor > goalsAgainst ? 0.4 : goalsFor < goalsAgainst ? -0.3 : 0;
   const cleanSheet = goalsAgainst === 0;
   team.forEach((player) => {
-    const position = player.primary_position;
+    const position = slotOf(player);
     let value = 6.1 + (player.overall - 70) / 25 + result;
     value += (Math.random() + Math.random() - 1) * 0.9;
     value += out[player.id].goals * 1.1 + out[player.id].assists * 0.5;
@@ -2594,7 +2655,7 @@ function RatingList({
         return (
           <div key={player.id} className={player.id === bestId ? 'best-player' : ''}>
             <span>
-              {player.id === bestId && <Crown size={13} />} {player.primary_position}
+              {player.id === bestId && <Crown size={13} />} {slotOf(player)}
             </span>
             <b>
               {player.name}
