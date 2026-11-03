@@ -604,13 +604,17 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
           const goalX = d > 0 ? FX1 : FX0;
           const toGoal = Math.abs(goalX - h.x);
           const near = nearestOpp(all, h.side, h);
-          // Atacante livre perto do gol: chuta em vez de passar (o placar continua sendo decidido pela simulação,
-          // então esses chutes de rotina terminam em defesa ou para fora, nunca em gol)
-          const canShoot = FORWARDS.includes(h.pos) && toGoal < 240 && near.d > 55;
-          if (canShoot && Math.random() < 0.9) {
+          // Pressão do zagueiro: 0 = atacante livre (zagueiro a 95 ou mais), 1 = marcador colado (35 ou menos)
+          const pressure = clamp((95 - near.d) / 60, 0, 1);
+          // Atacante perto do gol chuta em vez de passar, livre ou pressionado (o placar continua sendo decidido
+          // pela simulação, então esses chutes de rotina terminam em defesa ou para fora, nunca em gol)
+          const canShoot = FORWARDS.includes(h.pos) && toGoal < 240 && near.d > 26;
+          if (canShoot && Math.random() < (pressure > 0.4 ? 0.6 : 0.9)) {
             const O = otherSide(h.side);
             const gk = get(`${O}-GK`);
-            if (gk && Math.random() < 0.55) {
+            // Livre: quase sempre manda no gol. Pressionado: erra a maioria. Overall alto ajuda um pouco.
+            const onTarget = clamp(lerp(0.9, 0.22, pressure) + (h.ovr - 75) * 0.004, 0.12, 0.96);
+            if (gk && Math.random() < onTarget) {
               st.queue.push({
                 kind: 'shot',
                 to: { slot: gk.key },
@@ -625,7 +629,10 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
                 to: { x: goalX + d * 8, y: wideY },
                 dur: 420,
                 ambient: true,
-                caption: `${h.name} chuta para fora`,
+                caption:
+                  pressure > 0.4 && near.slot
+                    ? `${h.name} chuta pressionado por ${near.slot.name} e manda para fora`
+                    : `${h.name} chuta para fora`,
                 after: () => {
                   st.queue.unshift({ kind: 'move', to: { slot: `${O}-GK` }, dur: 800, caption: 'Tiro de meta' });
                 },
