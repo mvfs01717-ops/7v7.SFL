@@ -8,6 +8,9 @@ export type PlanItem = {
   side: 'host' | 'guest';
   // Só no item "meta" (minuto 0): hora em que a partida começou, para o modo espectador entrar ao vivo
   startedAt?: number;
+  // Quem finalizou e quem defendeu (nomes). Só nos lances de finalização, defesa e gol.
+  shooter?: string;
+  keeper?: string;
 };
 export type Room = {
   id: string;
@@ -26,7 +29,9 @@ export type Room = {
   plan: PlanItem[] | null;
   status: RoomStatus;
 };
-type Lite = { primary_position: string; overall: number };
+// `slot` é a posição em que o jogador foi escalado no draft (pode ser diferente da posição de origem)
+type Lite = { primary_position: string; overall: number; name?: string; slot?: string };
+const posOf = (player: Lite) => player.slot ?? player.primary_position;
 
 // Sem letras parecidas (0/O, 1/I) para o código ser fácil de ditar
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -140,14 +145,43 @@ export async function patchRoom(id: string, patch: Partial<Room>) {
 
 const clampNum = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
-// Força de um time: o ataque pesa mais, mas meio-campo, laterais e goleiro também contam
-function teamStrength(squad: Lite[]) {
-  const avg = (positions: string[]) => {
-    const list = squad.filter((player) => positions.includes(player.primary_position));
-    return list.length ? list.reduce((sum, player) => sum + player.overall, 0) / list.length : 70;
-  };
-  return avg(['LF', 'RF', 'CF']) * 0.45 + avg(['CM']) * 0.2 + avg(['LB', 'RB']) * 0.2 + avg(['GK']) * 0.15;
+function avgOf(squad: Lite[], positions: string[]) {
+  const list = squad.filter((player) => positions.includes(posOf(player)));
+  return list.length ? list.reduce((sum, player) => sum + player.overall, 0) / list.length : 70;
 }
+
+// Ataque: os atacantes pesam mais, o meio-campo ajuda a criar
+function attackRating(squad: Lite[]) {
+  return avgOf(squad, ['LF', 'RF', 'CF']) * 0.65 + avgOf(squad, ['CM']) * 0.35;
+}
+
+// Defesa: o goleiro é quem mais pesa, depois laterais e meio-campo
+function defenseRating(squad: Lite[]) {
+  return avgOf(squad, ['GK']) * 0.5 + avgOf(squad, ['LB', 'RB']) * 0.3 + avgOf(squad, ['CM']) * 0.2;
+}
+
+// Quem costuma finalizar (atacantes quase sempre, meio-campo às vezes, laterais raramente)
+const SHOOTER_WEIGHT: Record<string, number> = { CF: 1, LF: 0.9, RF: 0.9, CM: 0.3, LB: 0.06, RB: 0.06 };
+// Quanto maior, mais o overall decide quem finaliza (7 = um jogador 10 pontos melhor finaliza ~4x mais)
+const SHOOTER_SPREAD = 7;
+
+// Sorteia o finalizador: jogador melhor tem mais chance, o pior atacante quase nunca aparece
+function pickShooter(squad: Lite[]): Lite | undefined {
+  const pool = squad.filter((player) => (SHOOTER_WEIGHT[posOf(player)] ?? 0) > 0);
+  const weights = pool.map(
+    (player) => SHOOTER_WEIGHT[posOf(player)] * Math.exp((player.overall - 80) / SHOOTER_SPREAD),
+  );
+  const total = weights.reduce((sum, weight) => sum + weight, 0);
+  if (!pool.length || total <= 0) return undefined;
+  let roll = Math.random() * total;
+  for (let i = 0; i < pool.length; i += 1) {
+    roll -= weights[i];
+    if (roll <= 0) return pool[i];
+  }
+  return pool[pool.length - 1];
+}
+
+const keeperOf = (squad: Lite[]) => squad.find((player) => posOf(player) === 'GK');
 
 // Número aleatório de gols (distribuição de Poisson): média `lambda`
 function poisson(lambda: number) {
@@ -187,17 +221,22 @@ function pickGoalMinutes(count: number, slots: number[]): number[] {
 
 const MIN_GOALS = 3;
 const MAX_GOALS = 7;
+// Quanto cada ponto de vantagem (ataque contra a defesa do rival) vale em gols esperados
+const GOAL_PER_EDGE = 0.16;
 
 // O anfitrião sorteia a partida inteira uma vez. Os dois lados reproduzem a mesma lista.
-// Time mais forte faz mais gols e ganha com mais frequência; a partida nunca termina empatada.
+// Cada time faz gols conforme o SEU ataque contra a defesa e o goleiro do RIVAL; quem finaliza é
+// sorteado entre os jogadores do time, favorecendo os melhores. A partida nunca termina empatada.
 export function generatePlan(hostSquad: Lite[], guestSquad: Lite[]): PlanItem[] {
-  const diff = teamStrength(hostSquad) - teamStrength(guestSquad);
-  const hostChance = clampNum(0.5 + diff * 0.04, 0.2, 0.8);
+  const edgeHost = attackRating(hostSquad) - defenseRating(guestSquad);
+  const edgeGuest = attackRating(guestSquad) - defenseRating(hostSquad);
+  const hostChance = clampNum(0.5 + (edgeHost - edgeGuest) * (GOAL_PER_EDGE / 6), 0.2, 0.8);
 
-  let hostGoals = poisson(clampNum(2.4 + diff * 0.12, 0.8, 5));
-  let guestGoals = poisson(clampNum(2.4 - diff * 0.12, 0.8, 5));
+  let hostGoals = poisson(clampNum(2.4 + edgeHost * GOAL_PER_EDGE, 0.4, 5));
+  let guestGoals = poisson(clampNum(2.4 + edgeGuest * GOAL_PER_EDGE, 0.4, 5));
   while (hostGoals + guestGoals > MAX_GOALS) {
-    if (hostGoals >= guestGoals) hostGoals -= 1;
+    // Corta do lado que fez mais; em empate sorteia, para não prejudicar sempre o mesmo time
+    if (hostGoals > guestGoals || (hostGoals === guestGoals && Math.random() < 0.5)) hostGoals -= 1;
     else guestGoals -= 1;
   }
   while (hostGoals + guestGoals < MIN_GOALS) {
@@ -220,16 +259,29 @@ export function generatePlan(hostSquad: Lite[], guestSquad: Lite[]): PlanItem[] 
     ...Array.from({ length: guestGoals }, () => 'guest' as const),
   ]);
 
+  // Acrescenta quem finalizou e quem defendeu ao lance
+  const withPlayers = (minute: number, type: PlanItem['type'], side: PlanItem['side']): PlanItem => {
+    const attack = side === 'host' ? hostSquad : guestSquad;
+    const defend = side === 'host' ? guestSquad : hostSquad;
+    const item: PlanItem = { minute, type, side };
+    const shooter = pickShooter(attack)?.name;
+    const keeper = keeperOf(defend)?.name;
+    if (shooter) item.shooter = shooter;
+    if (keeper) item.keeper = keeper;
+    return item;
+  };
+
   // Item "meta" no minuto 0: nunca é um lance, só guarda a hora de início da partida
   const plan: PlanItem[] = [{ minute: 0, type: 'posse', side: 'host', startedAt: Date.now() }];
   slots.forEach((minute) => {
     const goalIndex = goalMinutes.indexOf(minute);
     if (goalIndex >= 0) {
-      plan.push({ minute, type: 'gol', side: goalSides[goalIndex] });
+      plan.push(withPlayers(minute, 'gol', goalSides[goalIndex]));
       return;
     }
     const type: PlanItem['type'] = minute % 5 === 0 ? 'finalização' : minute % 3 === 0 ? 'defesa' : 'posse';
-    plan.push({ minute, type, side: Math.random() < hostChance ? 'host' : 'guest' });
+    const side: PlanItem['side'] = Math.random() < hostChance ? 'host' : 'guest';
+    plan.push(type === 'posse' ? { minute, type, side } : withPlayers(minute, type, side));
   });
   return plan;
 }
