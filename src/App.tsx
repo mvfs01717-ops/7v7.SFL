@@ -509,11 +509,11 @@ function App() {
     setTError('');
     navigate('tournament');
   }
-  async function handleCreateTournament(tMode: 'classic' | 'dice') {
+  async function handleCreateTournament(tMode: 'classic' | 'dice', tSize: 4 | 6) {
     if (!userId) return;
     setTBusy(true);
     setTError('');
-    const result = await createTournament(nickname, tMode);
+    const result = await createTournament(nickname, tMode, tSize);
     setTBusy(false);
     if (result.error || !result.tournament) setTError(result.error ?? 'Erro ao criar o torneio.');
     else setTournament(result.tournament);
@@ -2237,7 +2237,7 @@ function TournamentScreen({
   busy: boolean;
   error: string;
   onBack: () => void;
-  onCreate: (mode: 'classic' | 'dice') => void;
+  onCreate: (mode: 'classic' | 'dice', size: 4 | 6) => void;
   onJoin: (code: string) => void;
   onStart: () => void;
   onLeave: () => void;
@@ -2246,6 +2246,7 @@ function TournamentScreen({
   onCancelMatch: () => void;
 }) {
   const [tMode, setTMode] = useState<'classic' | 'dice'>('classic');
+  const [tSize, setTSize] = useState<4 | 6>(4);
   const [code, setCode] = useState('');
   const [copied, setCopied] = useState(false);
   const [teamId, setTeamId] = useState('');
@@ -2263,7 +2264,7 @@ function TournamentScreen({
 
   const gold = '#F5B800';
   const isHost = !!tournament && tournament.host_id === userId;
-  const canStart = !!tournament && (tournament.players.length === 4 || tournament.players.length === 6);
+  const canStart = !!tournament && tournament.players.length === tournament.size;
   const nickOf = (id?: string | null) => tournament?.players.find((player) => player.id === id)?.nick ?? null;
 
   // Dados da minha partida atual
@@ -2340,9 +2341,23 @@ function TournamentScreen({
               <b>1</b>
               <div>
                 <h3>Criar torneio</h3>
-                <p>Escolha o modo do draft e passe o código para mais 3 ou 5 amigos.</p>
+                <p>Escolha o tamanho e o modo do draft. Depois passe o código para mais {tSize - 1} amigos.</p>
               </div>
             </div>
+            <span className="lobby-label">QUANTOS JOGADORES</span>
+            <div className="lobby-seg">
+              <button type="button" className={tSize === 4 ? 'on' : ''} onClick={() => setTSize(4)}>
+                4 jogadores
+              </button>
+              <button type="button" className={tSize === 6 ? 'on' : ''} onClick={() => setTSize(6)}>
+                6 jogadores
+              </button>
+            </div>
+            <p style={{ margin: '6px 0 0', fontSize: 13, opacity: 0.7 }}>
+              {tSize === 4
+                ? 'Duas semifinais e a final (3 partidas).'
+                : 'Duas quartas, duas semifinais e a final (5 partidas). Dois jogadores começam direto na semi.'}
+            </p>
             <span className="lobby-label">MODO DO DRAFT</span>
             <div className="lobby-seg">
               <button type="button" className={tMode === 'classic' ? 'on' : ''} onClick={() => setTMode('classic')}>
@@ -2352,7 +2367,7 @@ function TournamentScreen({
                 <span aria-hidden="true">🎲</span> Modo Dado
               </button>
             </div>
-            <button className="gold-button large lobby-main" disabled={busy} onClick={() => onCreate(tMode)}>
+            <button className="gold-button large lobby-main" disabled={busy} onClick={() => onCreate(tMode, tSize)}>
               {busy ? 'Criando...' : 'Criar torneio'}
             </button>
           </section>
@@ -2397,7 +2412,7 @@ function TournamentScreen({
             {copied ? 'Copiado!' : 'Copiar código'}
           </button>
           <div style={{ margin: '18px 0', display: 'grid', gap: 6 }}>
-            <span className="lobby-label" style={{ margin: 0 }}>JOGADORES ({tournament.players.length}/6)</span>
+            <span className="lobby-label" style={{ margin: 0 }}>JOGADORES ({tournament.players.length}/{tournament.size})</span>
             {tournament.players.map((player) => (
               <div key={player.id} style={{ padding: '8px 12px', borderRadius: 10, background: 'rgba(255,255,255,.05)' }}>
                 {player.nick}
@@ -2416,7 +2431,7 @@ function TournamentScreen({
                 ? 'Começando...'
                 : canStart
                   ? `Começar torneio (${tournament.players.length} jogadores)`
-                  : 'Precisa de 4 ou 6 jogadores'}
+                  : `Esperando jogadores (${tournament.players.length}/${tournament.size})`}
             </button>
           ) : (
             <p style={{ opacity: 0.8 }}>Aguardando o anfitrião começar o torneio...</p>
