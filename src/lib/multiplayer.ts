@@ -247,7 +247,8 @@ export async function recordResult(room: Room, hostGoals: number, guestGoals: nu
     guest_goals: guestGoals,
   });
   if (error && error.code !== '23505') console.warn('Não foi possível salvar o resultado:', error.message);
-  await supabase.from('rooms').update({ status: 'finished' }).eq('id', room.id);
+  // Só encerra se ainda estiver jogando: numa revanche a sala já pode ter voltado para o draft
+  await supabase.from('rooms').update({ status: 'finished' }).eq('id', room.id).eq('status', 'playing');
 }
 
 // ---------- Chat da sala ----------
