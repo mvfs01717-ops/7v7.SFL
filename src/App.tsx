@@ -286,6 +286,8 @@ function App() {
   const [draftPosition, setDraftPosition] = useState<Position>('GK');
   // Multiplayer: depois de escolher os 7, revisa e ajusta as posições antes de confirmar
   const [reviewing, setReviewing] = useState(false);
+  // Animação com o overall de ataque e defesa do time, mostrada quando o time fica pronto
+  const [reveal, setReveal] = useState<{ squad: Partial<Record<Position, Player>>; next: () => void } | null>(null);
   const [mode, setMode] = useState<'classic' | 'dice'>('classic');
   const [botTeam, setBotTeam] = useState<Player[]>([]);
   const [userTeam, setUserTeam] = useState<Player[]>([]);
@@ -707,7 +709,7 @@ function App() {
   // No multiplayer o jogador pode ajustar as posições antes de confirmar; no solo segue direto
   function finishOrReview(finalDraft: Partial<Record<Position, Player>>) {
     if (room) setReviewing(true);
-    else finishDraft(finalDraft);
+    else setReveal({ squad: finalDraft, next: () => finishDraft(finalDraft) });
   }
   // Troca dois jogadores de posição (só se os dois têm aptidão na posição do outro)
   function swapDraft(a: Position, b: Position) {
@@ -720,8 +722,9 @@ function App() {
     syncSquad(nextDraft);
   }
   function confirmSquad() {
+    const finalDraft = draft;
     setReviewing(false);
-    finishDraft(draft);
+    setReveal({ squad: finalDraft, next: () => finishDraft(finalDraft) });
   }
   // Modo Dado: coloca o jogador escolhido na posição indicada
   function pickDicePlayer(player: Player, position: Position) {
@@ -1035,6 +1038,18 @@ function App() {
           showTestTools={isAdmin || window.location.search.includes('teste')}
           forceShootout={forceShootout}
           onForceShootout={setForceShootout}
+        />
+      )}
+
+      {reveal && selectedClub && (
+        <TeamReveal
+          club={selectedClub}
+          squad={reveal.squad}
+          onDone={() => {
+            const next = reveal.next;
+            setReveal(null);
+            next();
+          }}
         />
       )}
 
@@ -2122,6 +2137,123 @@ function DiceDraftScreen({
         <DraftPitch club={club} selected={selected} />
       </div>
     </main>
+  );
+}
+
+// Média de overall de um grupo de posições do time
+function groupAverage(squad: Partial<Record<Position, Player>>, group: Position[]) {
+  const list = group.map((position) => squad[position]).filter(Boolean) as Player[];
+  return list.length ? Math.round(list.reduce((sum, player) => sum + player.overall, 0) / list.length) : 0;
+}
+
+// Animação de fim de draft: o overall do ataque e da defesa sobe até o valor final
+function TeamReveal({ club, squad, onDone }: { club: Team; squad: Partial<Record<Position, Player>>; onDone: () => void }) {
+  const atk = groupAverage(squad, ['LF', 'RF', 'CF']);
+  const def = groupAverage(squad, ['GK', 'LB', 'RB', 'CM']);
+  const overall = average(Object.values(squad).filter(Boolean) as Player[]) || 0;
+  const [t, setT] = useState(0);
+  const done = useRef(false);
+  const finish = () => {
+    if (done.current) return;
+    done.current = true;
+    onDone();
+  };
+  useEffect(() => {
+    const still = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (still) {
+      setT(1);
+      return;
+    }
+    const start = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const value = Math.min(1, (now - start) / 2600);
+      setT(value);
+      if (value < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  // Segue sozinho depois de alguns segundos, para não travar quem não clicar
+  useEffect(() => {
+    const timer = window.setTimeout(finish, 7000);
+    return () => window.clearTimeout(timer);
+  }, []);
+  const ease = (x: number) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
+  const atkP = ease(t / 0.55);
+  const defP = ease((t - 0.3) / 0.55);
+  const ovrP = ease((t - 0.6) / 0.4);
+  const rows = [
+    { label: 'ATAQUE', hint: 'LF · RF · CF', value: atk, progress: atkP, color: '#ef4444' },
+    { label: 'DEFESA', hint: 'GK · LB · RB · CM', value: def, progress: defP, color: '#3b82f6' },
+  ];
+  return (
+    <div
+      role="dialog"
+      aria-label="Overall do time"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 80,
+        display: 'grid',
+        placeItems: 'center',
+        padding: 16,
+        background: 'rgba(5,8,12,.92)',
+        animation: 'tr-fade .35s ease-out',
+      }}
+    >
+      <style>{`
+        @keyframes tr-fade { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes tr-pop { 0% { transform: scale(.6); opacity: 0 } 70% { transform: scale(1.08) } 100% { transform: scale(1); opacity: 1 } }
+        @media (prefers-reduced-motion: reduce) { .tr-pop { animation: none !important } }
+      `}</style>
+      <div style={{ width: 'min(460px, 100%)', textAlign: 'center' }}>
+        <div className="eyebrow">SEU TIME ESTÁ PRONTO</div>
+        <h2 style={{ margin: '6px 0 22px' }}>
+          {club.name.toUpperCase()}
+        </h2>
+        <div style={{ display: 'grid', gap: 16 }}>
+          {rows.map((row) => (
+            <div key={row.label} style={{ textAlign: 'left' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+                <span style={{ fontWeight: 800, letterSpacing: 2, fontSize: 13 }}>
+                  {row.label} <small style={{ opacity: 0.5, fontWeight: 600, letterSpacing: 1 }}>{row.hint}</small>
+                </span>
+                <strong style={{ fontSize: 44, lineHeight: 1, color: row.color, fontVariantNumeric: 'tabular-nums' }}>
+                  {Math.round(row.value * row.progress)}
+                </strong>
+              </div>
+              <div style={{ height: 10, borderRadius: 6, background: 'rgba(255,255,255,.1)', overflow: 'hidden', marginTop: 6 }}>
+                <div
+                  style={{
+                    width: `${Math.min(100, row.value * row.progress)}%`,
+                    height: '100%',
+                    borderRadius: 6,
+                    background: row.color,
+                  }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div
+          className="tr-pop"
+          style={{
+            marginTop: 26,
+            opacity: ovrP,
+            animation: ovrP > 0 ? 'tr-pop .5s ease-out' : undefined,
+          }}
+        >
+          <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: 2, color: '#F5B800' }}>OVERALL DO TIME</span>
+          <div style={{ fontSize: 64, fontWeight: 900, lineHeight: 1.05, fontVariantNumeric: 'tabular-nums' }}>
+            {Math.round(overall * ovrP)}
+          </div>
+        </div>
+        <button className="gold-button large lobby-main" onClick={finish} style={{ opacity: t >= 1 ? 1 : 0.6 }}>
+          Continuar
+        </button>
+      </div>
+    </div>
   );
 }
 
