@@ -284,6 +284,8 @@ function App() {
   clubRef.current = selectedClub;
   const [draft, setDraft] = useState<Partial<Record<Position, Player>>>({});
   const [draftPosition, setDraftPosition] = useState<Position>('GK');
+  // Multiplayer: depois de escolher os 7, revisa e ajusta as posições antes de confirmar
+  const [reviewing, setReviewing] = useState(false);
   const [mode, setMode] = useState<'classic' | 'dice'>('classic');
   const [botTeam, setBotTeam] = useState<Player[]>([]);
   const [userTeam, setUserTeam] = useState<Player[]>([]);
@@ -621,6 +623,7 @@ function App() {
         setMode(room.mode);
         drawRef.current = {};
         setDraft({});
+        setReviewing(false);
         setDraftPosition('GK');
         navigate('draft');
       }
@@ -665,6 +668,7 @@ function App() {
     setSelectedClub(team);
     drawRef.current = {};
     setDraft({});
+        setReviewing(false);
     setDraftPosition('GK');
     navigate('draft');
   }
@@ -698,14 +702,33 @@ function App() {
     syncSquad(nextDraft);
     const nextPosition = positions.find((position) => !nextDraft[position]);
     if (nextPosition) setDraftPosition(nextPosition);
-    else finishDraft(nextDraft);
+    else finishOrReview(nextDraft);
+  }
+  // No multiplayer o jogador pode ajustar as posições antes de confirmar; no solo segue direto
+  function finishOrReview(finalDraft: Partial<Record<Position, Player>>) {
+    if (room) setReviewing(true);
+    else finishDraft(finalDraft);
+  }
+  // Troca dois jogadores de posição (só se os dois têm aptidão na posição do outro)
+  function swapDraft(a: Position, b: Position) {
+    const first = draft[a];
+    const second = draft[b];
+    if (!first || !second || a === b) return;
+    if (!getPlayerPositions(first).includes(b) || !getPlayerPositions(second).includes(a)) return;
+    const nextDraft = { ...draft, [a]: second, [b]: first };
+    setDraft(nextDraft);
+    syncSquad(nextDraft);
+  }
+  function confirmSquad() {
+    setReviewing(false);
+    finishDraft(draft);
   }
   // Modo Dado: coloca o jogador escolhido na posição indicada
   function pickDicePlayer(player: Player, position: Position) {
     const nextDraft = { ...draft, [position]: player };
     setDraft(nextDraft);
     syncSquad(nextDraft);
-    if (positions.every((item) => nextDraft[item])) finishDraft(nextDraft);
+    if (positions.every((item) => nextDraft[item])) finishOrReview(nextDraft);
   }
   function finishDraft(finalDraft: Partial<Record<Position, Player>>) {
     if (room) {
@@ -899,6 +922,7 @@ function App() {
   function reset() {
     setSelectedClub(null);
     setDraft({});
+        setReviewing(false);
     goHome();
   }
 
@@ -1014,7 +1038,11 @@ function App() {
         />
       )}
 
-      {screen === 'draft' && selectedClub && mode === 'classic' && (
+      {screen === 'draft' && selectedClub && reviewing && !!room && (
+        <PositionEditor club={selectedClub} selected={draft} onSwap={swapDraft} onConfirm={confirmSquad} />
+      )}
+
+      {screen === 'draft' && selectedClub && !reviewing && mode === 'classic' && (
         <DraftScreen
           club={selectedClub}
           positions={positions}
@@ -1027,7 +1055,7 @@ function App() {
         />
       )}
 
-      {screen === 'draft' && selectedClub && mode === 'dice' && (
+      {screen === 'draft' && selectedClub && !reviewing && mode === 'dice' && (
         <DiceDraftScreen
           club={selectedClub}
           teams={teams}
@@ -2090,6 +2118,148 @@ function DiceDraftScreen({
               </div>
             </>
           )}
+        </section>
+        <DraftPitch club={club} selected={selected} />
+      </div>
+    </main>
+  );
+}
+
+// Multiplayer: ajusta em que posição cada jogador joga, usando a posição principal ou as secundárias dele
+function PositionEditor({
+  club,
+  selected,
+  onSwap,
+  onConfirm,
+}: {
+  club: Team;
+  selected: Partial<Record<Position, Player>>;
+  onSwap: (a: Position, b: Position) => void;
+  onConfirm: () => void;
+}) {
+  const [from, setFrom] = useState<Position | null>(null);
+  const canSwap = (a: Position, b: Position) => {
+    const first = selected[a];
+    const second = selected[b];
+    return !!first && !!second && a !== b && getPlayerPositions(first).includes(b) && getPlayerPositions(second).includes(a);
+  };
+  const anyMove = positions.some((a) => positions.some((b) => canSwap(a, b)));
+
+  function tap(position: Position) {
+    if (from === null) {
+      setFrom(position);
+      return;
+    }
+    if (from === position) {
+      setFrom(null);
+      return;
+    }
+    if (canSwap(from, position)) {
+      onSwap(from, position);
+      setFrom(null);
+      return;
+    }
+    setFrom(position);
+  }
+
+  return (
+    <main className="draft-page">
+      <div className="draft-head">
+        <div>
+          <div className="eyebrow">ÚLTIMA ETAPA · AJUSTE SEU TIME</div>
+          <h2>
+            POSIÇÕES <em>{club.abbreviation}</em>
+          </h2>
+        </div>
+        <div className="draft-progress">
+          <strong>7</strong>
+          <span>/ 7 jogadores</span>
+        </div>
+      </div>
+      <div className="draft-layout">
+        <section className="draft-picker">
+          <p style={{ margin: '0 0 12px', opacity: 0.8, fontSize: 14 }}>
+            Toque em um jogador e depois em outro para trocar de posição. Só dá para trocar quando os dois têm aptidão
+            na posição um do outro (principal ou secundária).
+          </p>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {positions.map((position) => {
+              const player = selected[position];
+              if (!player) return null;
+              const isFrom = from === position;
+              const target = from !== null && !isFrom && canSwap(from, position);
+              const blocked = from !== null && !isFrom && !target;
+              const outOfPlace = player.primary_position !== position;
+              return (
+                <button
+                  key={position}
+                  type="button"
+                  onClick={() => tap(position)}
+                  aria-pressed={isFrom}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '10px 12px',
+                    borderRadius: 12,
+                    textAlign: 'left',
+                    color: 'inherit',
+                    cursor: 'pointer',
+                    background: isFrom ? 'rgba(245,184,0,.16)' : target ? 'rgba(34,197,94,.12)' : 'rgba(255,255,255,.04)',
+                    border: `1px solid ${isFrom ? '#F5B800' : target ? '#22c55e' : 'rgba(255,255,255,.12)'}`,
+                    opacity: blocked ? 0.45 : 1,
+                  }}
+                >
+                  <b
+                    style={{
+                      flex: '0 0 44px',
+                      textAlign: 'center',
+                      padding: '6px 0',
+                      borderRadius: 8,
+                      background: '#F5B800',
+                      color: '#0B1016',
+                      fontSize: 14,
+                    }}
+                  >
+                    {position}
+                  </b>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: 'block', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {player.name}
+                    </span>
+                    <span style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                      {getPlayerPositions(player).map((item, index) => (
+                        <small
+                          key={item}
+                          style={{
+                            padding: '1px 6px',
+                            borderRadius: 6,
+                            fontSize: 11,
+                            fontWeight: 700,
+                            background: item === position ? 'rgba(245,184,0,.25)' : 'rgba(255,255,255,.08)',
+                            border: index === 0 ? '1px solid rgba(255,255,255,.35)' : '1px solid transparent',
+                          }}
+                          title={index === 0 ? 'Posição principal' : 'Posição secundária'}
+                        >
+                          {item}
+                        </small>
+                      ))}
+                      {outOfPlace && <small style={{ fontSize: 11, opacity: 0.7 }}>jogando de secundária</small>}
+                    </span>
+                  </span>
+                  <strong style={{ fontSize: 20 }}>{player.overall}</strong>
+                </button>
+              );
+            })}
+          </div>
+          {!anyMove && (
+            <div className="empty-state" style={{ marginTop: 12 }}>
+              Nenhum jogador do seu time tem aptidão para trocar de posição.
+            </div>
+          )}
+          <button className="gold-button large lobby-main" onClick={onConfirm}>
+            Confirmar time
+          </button>
         </section>
         <DraftPitch club={club} selected={selected} />
       </div>
