@@ -14,8 +14,8 @@ import {
 } from '@/lib/multiplayer';
 import {
   createTournament, joinTournament, leaveTournament, startTournament, setTournamentMatch, fetchTournament,
-  slotPlayers, slotsFor, currentSlot, slotOfRoom, decideWinner, SLOT_LABEL,
-  type Tournament, type Slot,
+  slotPlayers, currentSlot, slotOfRoom, decideWinner, SLOT_LABEL,
+  type Tournament, type Slot, type TPlayer,
 } from '@/lib/tournament';
 
 type Position = 'GK' | 'LB' | 'RB' | 'CM' | 'LF' | 'RF' | 'CF';
@@ -2210,6 +2210,210 @@ function ClubPicker({
   );
 }
 
+// Chaveamento em árvore: rodadas da esquerda para a direita, linhas ligando cada confronto e a taça no fim
+function TournamentBracket({ tournament: t, userId }: { tournament: Tournament; userId: string }) {
+  const six = t.seed?.length === 6;
+  const gold = '#F5B800';
+  const BW = 124; // largura da caixa
+  const BH = 28; // altura da caixa
+  const COL = 170; // distância entre colunas
+  const TOP = 34; // espaço para o título das colunas
+
+  const semiYs = [20, 60, 130, 170].map((y) => y + TOP);
+  const finalYs = [40, 150].map((y) => y + TOP);
+  const quartYs = [40, 80, 150, 190].map((y) => y + TOP);
+  const champY = 95 + TOP;
+
+  type Round = { label: string; slots: Slot[]; ys: number[] };
+  const rounds: Round[] = six
+    ? [
+        { label: 'QUARTAS', slots: ['q1', 'q2'], ys: quartYs },
+        { label: 'SEMIFINAIS', slots: ['m1', 'm2'], ys: semiYs },
+        { label: 'FINAL', slots: ['m3'], ys: finalYs },
+      ]
+    : [
+        { label: 'SEMIFINAIS', slots: ['m1', 'm2'], ys: semiYs },
+        { label: 'FINAL', slots: ['m3'], ys: finalYs },
+      ];
+  // Ligações de uma rodada para a próxima: caixas de origem (par) e índice da caixa de destino
+  const edgesAfter = (index: number): { from: [number, number]; to: number; slot: Slot }[] => {
+    const next = rounds[index + 1];
+    if (!next) return [{ from: [0, 1], to: 0, slot: 'm3' }];
+    if (six && index === 0) {
+      return [
+        { from: [0, 1], to: 1, slot: 'q1' },
+        { from: [2, 3], to: 3, slot: 'q2' },
+      ];
+    }
+    return [
+      { from: [0, 1], to: 0, slot: rounds[index].slots[0] },
+      { from: [2, 3], to: 1, slot: rounds[index].slots[1] },
+    ];
+  };
+
+  const champX = rounds.length * COL;
+  const width = champX + BW + 16;
+  const height = 240;
+  const champion = t.players.find((player) => player.id === t.m3.winner_id) ?? null;
+  const finalists = slotPlayers(t, 'm3');
+  const runnerUp = t.m3.winner_id ? (finalists.find((player) => player && player.id !== t.m3.winner_id) ?? null) : null;
+
+  const cut = (text: string) => (text.length > 14 ? `${text.slice(0, 13)}…` : text);
+  const line = 'rgba(255,255,255,.32)';
+
+  function box(x: number, y: number, player: TPlayer | null, state: 'win' | 'lose' | null, key: string, tag?: string) {
+    const mine = !!player && player.id === userId;
+    return (
+      <g key={key} opacity={state === 'lose' ? 0.5 : 1}>
+        <rect
+          x={x}
+          y={y - BH / 2}
+          width={BW}
+          height={BH}
+          rx={7}
+          fill={mine ? 'rgba(245,184,0,.16)' : 'rgba(255,255,255,.07)'}
+          stroke={mine || state === 'win' ? gold : 'rgba(255,255,255,.28)'}
+          strokeWidth={mine || state === 'win' ? 1.6 : 1}
+        />
+        <text
+          x={x + 9}
+          y={y}
+          dominantBaseline="central"
+          fontSize={13}
+          fontWeight={state === 'win' || mine ? 800 : 500}
+          fill={state === 'win' ? gold : 'currentColor'}
+          fontStyle={player ? 'normal' : 'italic'}
+          opacity={player ? 1 : 0.5}
+        >
+          {player ? cut(player.nick) : 'A definir'}
+        </text>
+        {tag && (
+          <text x={x + BW - 7} y={y} dominantBaseline="central" textAnchor="end" fontSize={9} opacity={0.6} fill="currentColor">
+            {tag}
+          </text>
+        )}
+      </g>
+    );
+  }
+
+  const stateOf = (slot: Slot, player: TPlayer | null): 'win' | 'lose' | null => {
+    const winner = t[slot].winner_id;
+    if (!winner || !player) return null;
+    return winner === player.id ? 'win' : 'lose';
+  };
+
+  return (
+    <div style={{ overflowX: 'auto', paddingBottom: 6 }}>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        width={width}
+        height={height}
+        role="img"
+        aria-label="Chaveamento do torneio"
+        style={{ display: 'block', margin: '0 auto', maxWidth: 'none' }}
+      >
+        {/* títulos das colunas */}
+        {rounds.map((round, index) => (
+          <text key={round.label} x={index * COL + BW / 2} y={14} textAnchor="middle" fontSize={10} letterSpacing={1.5} fill={gold} opacity={0.85}>
+            {round.label}
+          </text>
+        ))}
+        <text x={champX + BW / 2} y={14} textAnchor="middle" fontSize={10} letterSpacing={1.5} fill={gold} opacity={0.85}>
+          CAMPEÃO
+        </text>
+
+        {/* linhas */}
+        {rounds.map((round, index) =>
+          edgesAfter(index).map((edge) => {
+            const xr = index * COL + BW;
+            const xe = xr + 20;
+            const xl = (index + 1) * COL;
+            const y1 = round.ys[edge.from[0]];
+            const y2 = round.ys[edge.from[1]];
+            const yt = rounds[index + 1] ? rounds[index + 1].ys[edge.to] : champY;
+            const match = t[edge.slot];
+            return (
+              <g key={`${index}-${edge.slot}`}>
+                <path d={`M${xr} ${y1}H${xe}V${y2}H${xr}M${xe} ${yt}H${xl}`} fill="none" stroke={line} strokeWidth={1.3} />
+                {match.score && (
+                  <text x={xe + 4} y={yt - 4} fontSize={10} fontWeight={700} fill={gold}>
+                    {match.score}
+                  </text>
+                )}
+                {match.pens && (
+                  <text x={xe + 4} y={yt + 11} fontSize={9} fill="currentColor" opacity={0.7}>
+                    pên.
+                  </text>
+                )}
+              </g>
+            );
+          }),
+        )}
+
+        {/* caixas dos jogadores */}
+        {rounds.map((round, index) => {
+          const pairs = round.slots.flatMap((slot) => slotPlayers(t, slot).map((player) => ({ slot, player })));
+          return pairs.map((entry, i) => {
+            // Com 6 jogadores, quem tem folga já aparece direto nas semifinais
+            const bye = six && round.slots[0] === 'm1' && (i === 0 || i === 2);
+            return box(index * COL, round.ys[i], entry.player, stateOf(entry.slot, entry.player), `${index}-${i}`, bye ? 'folga' : undefined);
+          });
+        })}
+
+        {/* taça */}
+        <g transform={`translate(${champX + BW / 2} 0)`}>
+          <rect x={-24} y={champY - 40} width={48} height={8} rx={2} fill="#3a3f47" />
+          <rect x={-6} y={champY - 56} width={12} height={17} fill="#d9a400" />
+          <path
+            d={`M-28 ${champY - 106}H28C28 ${champY - 76} 14 ${champY - 58} 0 ${champY - 58}C-14 ${champY - 58} -28 ${champY - 76} -28 ${champY - 106}Z`}
+            fill={gold}
+            stroke="#b78a00"
+            strokeWidth={1.5}
+          />
+          <path
+            d={`M-28 ${champY - 98}C-48 ${champY - 98} -48 ${champY - 74} -20 ${champY - 72}M28 ${champY - 98}C48 ${champY - 98} 48 ${champY - 74} 20 ${champY - 72}`}
+            fill="none"
+            stroke="#d9a400"
+            strokeWidth={4.5}
+            strokeLinecap="round"
+          />
+          <ellipse cx={-12} cy={champY - 88} rx={4} ry={11} fill="#fff" opacity={0.35} />
+        </g>
+        {box(champX, champY, champion, champion ? 'win' : null, 'champion')}
+
+        {/* 2º lugar */}
+        <text x={champX + BW / 2} y={champY + 36} textAnchor="middle" fontSize={10} letterSpacing={1.5} fill="#c9ced6" opacity={0.85}>
+          2º LUGAR
+        </text>
+        <g opacity={runnerUp ? 1 : 0.8}>
+          <rect
+            x={champX}
+            y={champY + 44}
+            width={BW}
+            height={BH}
+            rx={7}
+            fill={runnerUp && runnerUp.id === userId ? 'rgba(201,206,214,.2)' : 'rgba(201,206,214,.1)'}
+            stroke="#c9ced6"
+            strokeWidth={1.2}
+          />
+          <text
+            x={champX + 9}
+            y={champY + 44 + BH / 2}
+            dominantBaseline="central"
+            fontSize={13}
+            fontWeight={runnerUp ? 700 : 500}
+            fontStyle={runnerUp ? 'normal' : 'italic'}
+            fill="currentColor"
+            opacity={runnerUp ? 1 : 0.5}
+          >
+            {runnerUp ? cut(runnerUp.nick) : 'A definir'}
+          </text>
+        </g>
+      </svg>
+    </div>
+  );
+}
+
 function TournamentScreen({
   teams,
   userId,
@@ -2276,47 +2480,6 @@ function TournamentScreen({
   const joinExclude = slotRoom?.host_team_id ?? null;
   const pickable = teams.filter((team) => team.id !== joinExclude);
   const chosenTeam = pickable.some((team) => team.id === teamId) ? teamId : pickable[0]?.id || '';
-
-  const renderMatch = (slot: Slot) => {
-    if (!tournament) return null;
-    const [a, b] = slotPlayers(tournament, slot);
-    const data = tournament[slot];
-    const mine = mySlot === slot;
-    return (
-      <div
-        style={{
-          border: `1px solid ${mine ? gold : 'rgba(255,255,255,.14)'}`,
-          background: mine ? 'rgba(245,184,0,.08)' : 'rgba(255,255,255,.03)',
-          borderRadius: 12,
-          padding: '10px 14px',
-          textAlign: 'left',
-        }}
-      >
-        <span className="lobby-label" style={{ margin: 0 }}>{SLOT_LABEL[slot].toUpperCase()}</span>
-        {[a, b].map((player, index) => (
-          <div
-            key={index}
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              padding: '4px 0',
-              fontWeight: data.winner_id && data.winner_id === player?.id ? 800 : 500,
-              color: data.winner_id && data.winner_id === player?.id ? gold : undefined,
-              opacity: data.winner_id && data.winner_id !== player?.id ? 0.55 : 1,
-            }}
-          >
-            <span>{player ? player.nick : 'A definir'}{player?.id === userId ? ' (você)' : ''}</span>
-            {data.winner_id && data.winner_id === player?.id && <Trophy size={14} />}
-          </div>
-        ))}
-        {data.winner_id && (
-          <small style={{ opacity: 0.8 }}>
-            {data.score ?? ''}{data.pens ? ' · pênaltis' : ''}
-          </small>
-        )}
-      </div>
-    );
-  }
 
   return (
     <main className="flow-page lobby-page">
@@ -2446,6 +2609,12 @@ function TournamentScreen({
       )}
 
       {tournament && tournament.status !== 'waiting' && (
+        <div style={{ maxWidth: 760, margin: '0 auto 14px' }}>
+          <TournamentBracket tournament={tournament} userId={userId} />
+        </div>
+      )}
+
+      {tournament && tournament.status !== 'waiting' && (
         <div style={{ maxWidth: 520, margin: '0 auto', display: 'grid', gap: 12 }}>
           {tournament.status === 'finished' && (
             <div
@@ -2464,10 +2633,6 @@ function TournamentScreen({
               {tournament.m3.winner_id === userId && <p style={{ margin: '6px 0 0' }}>A taça é sua. 🏆</p>}
             </div>
           )}
-
-          {slotsFor(tournament).map((slot) => (
-            <div key={slot}>{renderMatch(slot)}</div>
-          ))}
 
           {tournament.status === 'playing' && !mySlot && (
             <p style={{ textAlign: 'center', opacity: 0.85 }}>
