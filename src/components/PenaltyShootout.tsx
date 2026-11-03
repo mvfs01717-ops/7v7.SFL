@@ -50,12 +50,11 @@ const toSvg = (p: Point): Point => ({ x: GL + p.x * GW, y: GT + p.y * GH });
 const zoneOf = (p: Point): Zone => ({ col: p.x < 1 / 3 ? 0 : p.x < 2 / 3 ? 1 : 2, row: p.y < 0.5 ? 0 : 1 });
 const zoneCenter = (z: Zone): Point => ({ x: COLS[z.col], y: ROWS[z.row] });
 
-// Chance base de defesa conforme a relação entre o canto do chute e o canto do goleiro
+// Chance base de defesa conforme o lado do chute e o lado para onde o goleiro pulou
 function savePct(shot: Zone, keeper: Zone) {
   const dc = Math.abs(shot.col - keeper.col);
-  const sameRow = shot.row === keeper.row;
-  if (dc === 0) return sameRow ? 0.85 : 0.32;
-  if (dc === 1) return sameRow ? 0.14 : 0.05;
+  if (dc === 0) return 0.6;
+  if (dc === 1) return 0.1;
   return 0;
 }
 function pickKeeperZone(): Zone {
@@ -106,7 +105,7 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
   const [kicks, setKicks] = useState<ShootoutKick[]>([]);
   const [phase, setPhase] = useState<Phase>('aim');
   const [aim, setAim] = useState<Point>({ x: 0.5, y: 0.5 });
-  const [hover, setHover] = useState(-1);
+  const [hover, setHover] = useState(-1); // lado sob o dedo/mouse na hora de defender (0, 1 ou 2)
   const [flash, setFlash] = useState<{ text: string; good: boolean } | null>(null);
 
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -325,7 +324,7 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
   }
 
   // O adversário bate: você escolhe o canto onde o goleiro pula
-  function chooseDive(col: number, row: number) {
+  function chooseDive(col: number) {
     if (phase !== 'dive') return;
     const player = shooterFor('bot');
     if (!player) return;
@@ -344,7 +343,7 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
         target = { x: shotZone.col === 0 ? -0.15 : shotZone.col === 2 ? 1.15 : 0.5, y: shotZone.col === 1 ? -0.25 : center.y };
       }
     } else {
-      let pSave = savePct(shotZone, { col, row });
+      let pSave = savePct(shotZone, { col, row: 1 });
       if (pSave > 0) pSave = clamp(pSave + ((keepers.user?.overall ?? 75) - player.overall) / 300, 0.02, 0.95);
       outcome = Math.random() < pSave ? 'defesa' : 'gol';
     }
@@ -355,7 +354,7 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
       playerId: player.id,
       outcome,
       target,
-      keeper: outcome === 'defesa' ? target : zoneCenter({ col, row }),
+      keeper: outcome === 'defesa' ? target : zoneCenter({ col, row: 1 }),
       dur: rand(520, 640),
       arc: 14,
     });
@@ -413,7 +412,6 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
     </div>
   );
 
-  const zoneRects = [0, 1].flatMap((r) => [0, 1, 2].map((c) => ({ c, r, i: r * 3 + c })));
   const headline =
     phase === 'done'
       ? result?.winner === 'user'
@@ -428,7 +426,7 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
       : phase === 'power'
         ? 'Pare a barra na faixa verde para chutar com precisão!'
         : phase === 'dive'
-          ? 'Toque no canto para onde o goleiro deve pular.'
+          ? 'Toque no lado para onde o goleiro deve pular: esquerda, meio ou direita.'
           : '';
 
   return (
@@ -532,24 +530,38 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
           )}
 
           {phase === 'dive' &&
-            zoneRects.map(({ c, r, i }) => (
-              <rect
-                key={i}
-                x={GL + (c * GW) / 3}
-                y={GT + (r * GH) / 2}
-                width={GW / 3}
-                height={GH / 2}
-                fill={hover === i ? 'rgba(245,184,0,.32)' : 'rgba(255,255,255,.07)'}
-                stroke="rgba(255,255,255,.45)"
-                strokeWidth="1"
-                style={{ cursor: 'pointer' }}
-                onPointerEnter={() => setHover(i)}
-                onPointerLeave={() => setHover(-1)}
-                onPointerDown={(event) => {
-                  event.stopPropagation();
-                  chooseDive(c, r);
-                }}
-              />
+            ['ESQUERDA', 'MEIO', 'DIREITA'].map((label, c) => (
+              <g key={label}>
+                <rect
+                  x={GL + (c * GW) / 3}
+                  y={GT}
+                  width={GW / 3}
+                  height={GH}
+                  fill={hover === c ? 'rgba(245,184,0,.32)' : 'rgba(255,255,255,.07)'}
+                  stroke="rgba(255,255,255,.45)"
+                  strokeWidth="1"
+                  style={{ cursor: 'pointer' }}
+                  onPointerEnter={() => setHover(c)}
+                  onPointerLeave={() => setHover(-1)}
+                  onPointerDown={(event) => {
+                    event.stopPropagation();
+                    chooseDive(c);
+                  }}
+                />
+                <text
+                  x={GL + (c * GW) / 3 + GW / 6}
+                  y={GT + 16}
+                  textAnchor="middle"
+                  fontSize="10"
+                  fontWeight="700"
+                  fill="rgba(255,255,255,.8)"
+                  pointerEvents="none"
+                >
+                  {c === 0 ? '◀ ' : ''}
+                  {label}
+                  {c === 2 ? ' ▶' : ''}
+                </text>
+              </g>
             ))}
         </svg>
 
