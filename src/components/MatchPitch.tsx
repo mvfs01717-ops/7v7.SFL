@@ -3,7 +3,16 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 type Side = 'user' | 'bot';
 type PitchPlayer = { id: string; name: string; overall?: number };
 type PitchTeam = { name: string; abbreviation: string; primary_color: string; secondary_color: string };
-type PitchEvent = { id?: number; minute: number; type: 'posse' | 'finalização' | 'defesa' | 'gol'; text: string; team: Side };
+type PitchEvent = {
+  id?: number;
+  minute: number;
+  type: 'posse' | 'finalização' | 'defesa' | 'gol';
+  text: string;
+  team: Side;
+  // Quem finalizou e quem deu o passe (nomes). Opcionais: sem eles, o nome é procurado no texto do lance.
+  actor?: string;
+  assist?: string;
+};
 type Props = {
   club: PitchTeam;
   opponent: PitchTeam;
@@ -34,8 +43,9 @@ type Slot = {
   jy: number;
   jitterAt: number;
 };
+type Setup = { key: string; x: number; y: number; speed?: number };
 type Step = {
-  kind: 'pass' | 'shot' | 'move' | 'carry';
+  kind: 'pass' | 'shot' | 'move' | 'carry' | 'wait';
   to: { slot: string } | Point;
   dur: number;
   critical?: boolean;
@@ -44,6 +54,12 @@ type Step = {
   dribble?: boolean;
   arrive?: boolean;
   caption?: string;
+  // Altura da bola no meio do trajeto (passe/chute por cima), em pixels
+  arc?: number;
+  // Velocidade do condutor (só em passos de condução)
+  speed?: number;
+  // Movimentos combinados que começam junto com o passo (corrida do atacante, mergulho do goleiro...)
+  setup?: Setup[];
   after?: () => void;
 };
 type Override = { x: number; y: number; until: number; speed?: number };
@@ -57,7 +73,7 @@ type Engine = {
   active: Active | null;
   ambientAt: number;
   runAt: number;
-  celebrate: { side: Side; actor: string; until: number } | null;
+  celebrate: { side: Side; actor: string; until: number; run?: Point } | null;
   overrides: Record<string, Override>;
   kickoff: { side: Side; until: number; maxUntil: number } | null;
   lastKey: string;
@@ -235,19 +251,37 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
   const ballNode = useRef<SVGGElement | null>(null);
   const ringNode = useRef<SVGGElement | null>(null);
   const nameNode = useRef<SVGTextElement | null>(null);
+  const liftNode = useRef<SVGGElement | null>(null);
+  const trailNodes = useRef<(SVGCircleElement | null)[]>([]);
+  const trailPts = useRef<Point[]>([]);
+  const netNodes = useRef<Record<Side, SVGRectElement | null>>({ user: null, bot: null });
   const [caption, setCaption] = useState('Bola rolando');
   const [goalText, setGoalText] = useState('');
 
   const find = (key: string) => slotsRef.current.find((s) => s.key === key);
 
+  // A rede balança quando a bola entra
+  function flashNet(side: Side) {
+    const node = netNodes.current[side];
+    if (!node) return;
+    node.setAttribute('fill', 'rgba(255,255,255,.65)');
+    window.setTimeout(() => node.setAttribute('fill', 'rgba(255,255,255,.12)'), 750);
+  }
+
+  // Comemoração: o autor do gol sai correndo para o canto (na maioria das vezes) e o time vai atrás dele
   function startCelebration(side: Side, actorKey: string) {
     const st = engine.current;
-    st.celebrate = { side, actor: actorKey, until: performance.now() + 2000 };
+    const a = find(actorKey);
+    const dir = dirOf(side);
+    const goalX = dir > 0 ? FX1 : FX0;
+    const run: Point | undefined =
+      a && Math.random() < 0.6 ? { x: goalX - dir * 38, y: a.y < MID_Y ? FY0 + 34 : FY1 - 34 } : undefined;
+    st.celebrate = { side, actor: actorKey, until: performance.now() + 2200, run };
     st.holder = null;
     st.overrides = {};
-    const who = find(actorKey)?.name ?? '';
+    const who = a?.name ?? '';
     setGoalText(`GOL! ${who}`.trim());
-    window.setTimeout(() => setGoalText(''), 1900);
+    window.setTimeout(() => setGoalText(''), 2000);
   }
 
   // Drible: finta para o lado do marcador e acelera por fora. Pode dar certo ou o marcador desarma.
@@ -304,11 +338,28 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
     const all = slotsRef.current;
     const holder = st.holder ? find(st.holder) : undefined;
 
+    // Movimentos combinados com o passo (corridas, mergulho do goleiro...)
+    step.setup?.forEach((m) => {
+      st.overrides[m.key] = { x: m.x, y: m.y, until: now + step.dur + 250, speed: m.speed ?? 1.1 };
+    });
+
+    if (step.kind === 'wait') {
+      // Pausa curta: a bola fica parada (ou com quem a tem) enquanto os jogadores se posicionam
+      st.active = { step, from: { x: st.ballX, y: st.ballY }, start: now, dest: null };
+      if (step.caption) setCaption(step.caption);
+      return;
+    }
+
     if (step.kind === 'carry') {
       if (!holder) return;
       const to = step.to as Point;
       st.active = { step, from: { x: st.ballX, y: st.ballY }, start: now, dest: null };
-      st.overrides[holder.key] = { x: to.x, y: to.y, until: now + step.dur + 120, speed: step.dribble ? 1.3 : step.arrive ? 1.25 : 0.9 };
+      st.overrides[holder.key] = {
+        x: to.x,
+        y: to.y,
+        until: now + step.dur + 120,
+        speed: step.speed ?? (step.dribble ? 1.3 : step.arrive ? 1.25 : 0.9),
+      };
       if (step.caption) setCaption(step.caption);
       return;
     }
@@ -345,7 +396,9 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
     st.holder = null;
   }
 
-  // Transforma o lance gerado pela simulação em uma jogada: passe, condução e chute
+  // Transforma o lance gerado pela simulação em uma jogada. Cada lance sorteia um estilo de jogada
+  // (pelo meio, pela ponta com cruzamento, lançamento, tabela, drible, contra-ataque ou chute de longe)
+  // e o desfecho segue o que a narração diz (gol de canto, cavadinha, trave, por cima, escanteio...).
   function scheduleEvent(ev: PitchEvent) {
     const st = engine.current;
     const S = ev.team;
@@ -362,80 +415,290 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
     if (st.queue.filter((s) => !s.critical).length > 8) st.queue = st.queue.filter((s) => s.critical);
 
     const mk = (s: Step): Step => ({ ...s, scripted: true, critical });
-    const q: Step[] = [];
     const holderSide = st.holder ? sideOf(st.holder) : null;
-    if (holderSide !== S) q.push(mk({ kind: 'move', to: { slot: `${S}-CM` }, dur: 520 }));
-
     if (ev.type === 'posse') {
+      if (holderSide !== S) st.queue.push(mk({ kind: 'move', to: { slot: `${S}-CM` }, dur: 520 }));
       st.runAt = 0; // o time que ficou com a bola começa a se movimentar já
-      st.queue.push(...q);
       return;
     }
 
-    // Quem aparece no texto do lance (o goleiro não conta como finalizador)
-    const named = slotsRef.current
-      .filter((s) => s.side === S && ev.text.includes(s.name))
-      .sort((a, b) => b.name.length - a.name.length)[0];
-    const actorKey = named && named.pos !== 'GK' ? named.key : `${S}-${pick(['CF', 'LF', 'RF'])}`;
-    if (!actorKey.endsWith('-CM') && Math.random() < 0.55) q.push(mk({ kind: 'pass', to: { slot: `${S}-CM` }, dur: 520 }));
-    q.push(mk({ kind: 'pass', to: { slot: actorKey }, dur: 560 }));
-    const carryTo = { x: goalX - dir * rand(105, 135), y: MID_Y + rand(-55, 55) };
-    // Só chuta depois de chegar perto do gol (espera o atacante chegar, com limite de tempo)
-    q.push(mk({ kind: 'carry', to: carryTo, dur: 4200, arrive: true }));
+    const text = ev.text.toLowerCase();
+    const all = slotsRef.current;
+    const mine = all.filter((s) => s.side === S && s.pos !== 'GK');
 
-    // Em parte das jogadas o atacante dribla um marcador antes de finalizar
-    const actor = find(actorKey);
-    const marker = find(`${O}-${pick(['LB', 'RB', 'CM'])}`);
-    if (actor && marker && ev.type !== 'defesa' && Math.random() < 0.65) {
-      const sg = carryTo.y >= MID_Y ? -1 : 1;
-      // O marcador sai para encontrar o atacante na hora do drible
-      st.overrides[marker.key] = {
-        x: carryTo.x + dir * 34,
-        y: carryTo.y - sg * 4,
-        until: performance.now() + 3500,
-        speed: 1,
-      };
-      const ghost = { ...marker, x: carryTo.x + dir * 34, y: carryTo.y - sg * 4 } as Slot;
-      const hero = { ...actor, x: carryTo.x, y: carryTo.y } as Slot;
+    // Quem finaliza: o nome que veio com o lance ou, na falta dele, o primeiro nome que aparece no texto
+    let actor: Slot | undefined = ev.actor ? mine.find((s) => s.name === ev.actor) : undefined;
+    if (!actor) {
+      let bestIdx = Infinity;
+      for (const s of mine) {
+        const idx = ev.text.indexOf(s.name);
+        if (idx >= 0 && (idx < bestIdx || (idx === bestIdx && s.name.length > (actor ? actor.name.length : 0)))) {
+          bestIdx = idx;
+          actor = s;
+        }
+      }
+    }
+    const actorSlot: Slot = actor ?? (find(`${S}-${pick(FORWARDS)}`) as Slot);
+    const actorKey = actorSlot.key;
+    const actorName = actorSlot.name;
+    const passer = ev.assist ? mine.find((s) => s.name === ev.assist && s.key !== actorKey) : undefined;
+    const isWing = (s: Slot) => s.pos === 'LF' || s.pos === 'RF' || s.pos === 'LB' || s.pos === 'RB';
+    const wings = mine.filter((s) => s.key !== actorKey && isWing(s));
+    const backlog = st.queue.length + (st.active && st.active.step.scripted ? 1 : 0);
+
+    // Estilo da jogada: a narração manda quando cita o tipo de finalização; senão, sorteio ponderado
+    type Play = 'central' | 'ponta' | 'lancamento' | 'tabela' | 'solo' | 'contra' | 'longe';
+    let play: Play;
+    if (backlog > 4 && !critical) play = 'longe'; // jogada curta para não acumular fila
+    else if (text.includes('cabece')) play = 'ponta';
+    else if (text.includes('fora da área') || text.includes('de longe') || text.includes('arrisca')) play = 'longe';
+    else if (text.includes('contra-ataque')) play = 'contra';
+    else if (text.includes('cavadinha')) play = 'solo';
+    else {
+      const table: [Play, number][] = [
+        ['central', 3],
+        ['ponta', 2.2],
+        ['lancamento', 1.5],
+        ['tabela', 2],
+        ['solo', 2],
+        ['contra', 1.4],
+        ['longe', ev.type === 'gol' ? 1 : 2],
+      ];
+      let roll = Math.random() * table.reduce((sum, [, w]) => sum + w, 0);
+      play = 'central';
+      for (const [name, w] of table) {
+        roll -= w;
+        if (roll <= 0) {
+          play = name;
+          break;
+        }
+      }
+    }
+    if (play === 'ponta' && !wings.length) play = 'central';
+    const partner =
+      actorSlot.pos === 'CM'
+        ? mine.find((s) => s.key !== actorKey && FORWARDS.includes(s.pos))
+        : find(`${S}-CM`);
+    if (play === 'tabela' && (!partner || partner.key === actorKey)) play = 'central';
+
+    const near = (d: number): Point => ({ x: goalX - dir * d, y: MID_Y + rand(-55, 55) });
+    const run = (key: string, p: Point, speed = 1.4): Setup => ({ key, x: p.x, y: p.y, speed });
+    const waitStep = (dur: number, setup?: Setup[], caption?: string): Step =>
+      mk({ kind: 'wait', to: { x: MID_X, y: MID_Y }, dur, setup, caption });
+    const q: Step[] = [];
+
+    // Quem inicia a jogada
+    const backs = mine.filter((s) => s.pos === 'LB' || s.pos === 'RB');
+    const starter: Slot | undefined =
+      play === 'contra'
+        ? pick(backs.length ? backs : mine)
+        : play === 'lancamento'
+          ? Math.random() < 0.3
+            ? find(`${S}-GK`)
+            : pick(backs.length ? backs : mine)
+          : find(`${S}-CM`);
+    const starterKey = starter?.key ?? `${S}-CM`;
+    if (holderSide !== S) q.push(mk({ kind: 'move', to: { slot: starterKey }, dur: 520 }));
+    else if (starterKey !== st.holder && starterKey !== `${S}-CM`) q.push(mk({ kind: 'pass', to: { slot: starterKey }, dur: 480 }));
+
+    // Condução até um ponto; às vezes o atacante ainda dribla um marcador antes de finalizar
+    const carryTo = (at: Point, dur: number, speed: number | undefined, dribble: boolean) => {
+      const marker = dribble ? find(`${O}-${pick<Pos>(['LB', 'RB', 'CM'])}`) : undefined;
+      const sg = at.y >= MID_Y ? -1 : 1;
+      q.push(
+        mk({
+          kind: 'carry',
+          to: at,
+          dur,
+          arrive: true,
+          speed,
+          // O marcador sai para encontrar o atacante na hora do drible
+          setup: marker ? [{ key: marker.key, x: at.x + dir * 34, y: at.y - sg * 4, speed: 1 }] : undefined,
+        }),
+      );
+      if (!marker) return;
+      const ghost = { ...marker, x: at.x + dir * 34, y: at.y - sg * 4 } as Slot;
+      const hero = { ...actorSlot, x: at.x, y: at.y } as Slot;
       dribbleSteps(hero, ghost, false, true).forEach((step, i) => {
         const base = mk(step);
-        base.after = i === 0
-          ? () => {
-              st.overrides[marker.key] = { x: marker.x, y: marker.y, until: performance.now() + 1000, speed: 0.18 };
-            }
-          : undefined;
+        base.after =
+          i === 0
+            ? () => {
+                st.overrides[marker.key] = { x: marker.x, y: marker.y, until: performance.now() + 1000, speed: 0.18 };
+              }
+            : undefined;
         q.push(base);
       });
+    };
+    const canDribble = ev.type !== 'defesa';
+
+    if (play === 'central') {
+      const via = passer ?? find(`${S}-CM`);
+      if (via && via.key !== actorKey && via.key !== starterKey && (passer || Math.random() < 0.55)) {
+        q.push(mk({ kind: 'pass', to: { slot: via.key }, dur: 520 }));
+      }
+      q.push(
+        mk({
+          kind: 'pass',
+          to: { slot: actorKey },
+          dur: 560,
+          caption: passer && via?.key === passer.key ? `Passe de ${passer.name} para ${actorName}` : undefined,
+        }),
+      );
+      carryTo(near(rand(105, 135)), 4200, undefined, canDribble && Math.random() < 0.65);
+    } else if (play === 'ponta') {
+      const crosser = passer && isWing(passer) ? passer : pick(wings);
+      q.push(mk({ kind: 'pass', to: { slot: crosser.key }, dur: 560 }));
+      const byline: Point = { x: goalX - dir * rand(60, 90), y: crosser.base.y < MID_Y ? FY0 + 42 : FY1 - 42 };
+      q.push(mk({ kind: 'carry', to: byline, dur: 3800, arrive: true, caption: `${crosser.name} avança pela ponta` }));
+      q.push(waitStep(420, [run(actorKey, { x: goalX - dir * rand(70, 95), y: MID_Y + rand(-18, 18) }, 1.5)]));
+      q.push(mk({ kind: 'pass', to: { slot: actorKey }, dur: 720, arc: 16, caption: `${crosser.name} cruza para ${actorName}` }));
+    } else if (play === 'lancamento') {
+      const from = starter ?? actorSlot;
+      q.push(waitStep(450, [run(actorKey, { x: goalX - dir * rand(150, 190), y: MID_Y + rand(-70, 70) }, 1.5)]));
+      q.push(mk({ kind: 'pass', to: { slot: actorKey }, dur: 900, arc: 18, caption: `Lançamento de ${from.name} para ${actorName}` }));
+      carryTo(near(rand(70, 100)), 3200, 1.4, canDribble && Math.random() < 0.5);
+    } else if (play === 'tabela' && partner) {
+      q.push(mk({ kind: 'pass', to: { slot: actorKey }, dur: 520 }));
+      q.push(mk({ kind: 'pass', to: { slot: partner.key }, dur: 380, caption: `${actorName} toca para ${partner.name}` }));
+      q.push(waitStep(300, [run(actorKey, { x: goalX - dir * rand(130, 170), y: MID_Y + rand(-55, 55) }, 1.6)]));
+      q.push(mk({ kind: 'pass', to: { slot: actorKey }, dur: 460, caption: `Tabela! ${partner.name} devolve para ${actorName}` }));
+      carryTo(near(rand(80, 105)), 3200, 1.3, false);
+    } else if (play === 'solo') {
+      q.push(mk({ kind: 'pass', to: { slot: actorKey }, dur: 560 }));
+      carryTo(near(rand(150, 190)), 3600, undefined, ev.type !== 'defesa' || Math.random() < 0.5);
+      if (Math.random() < 0.4) carryTo(near(rand(95, 120)), 2600, undefined, true);
+    } else if (play === 'contra') {
+      q.push(waitStep(300, [run(actorKey, { x: goalX - dir * rand(200, 250), y: MID_Y + rand(-80, 80) }, 1.7)], 'Contra-ataque!'));
+      q.push(mk({ kind: 'pass', to: { slot: actorKey }, dur: 820, arc: 16, caption: `${starter?.name ?? 'A defesa'} lança o contra-ataque` }));
+      carryTo(near(rand(85, 115)), 3000, 1.8, false);
+    } else {
+      // Chute de longe
+      q.push(mk({ kind: 'pass', to: { slot: actorKey }, dur: 560 }));
+      q.push(mk({ kind: 'carry', to: near(rand(190, 230)), dur: 2600, arrive: true }));
     }
 
+    // Desfecho do lance
+    const gkKey = `${O}-GK`;
+    const gk = find(gkKey);
+    const gkX = gk ? gk.x : goalX - dir * 24;
+    const header = play === 'ponta';
+    const tiroDeMeta = (): void => {
+      st.queue.unshift({ kind: 'move', to: { slot: gkKey }, dur: 800, caption: 'Tiro de meta', scripted: true });
+    };
+    const defenderKey = () => `${O}-${pick<Pos>(['LB', 'RB', 'CM'])}`;
+
+    // Escanteio: o goleiro espalma para fora, o time cobra e a bola entra na área
+    const cornerSteps = (): Step[] => {
+      const cy = Math.random() < 0.5 ? FY0 + 6 : FY1 - 6;
+      const corner: Point = { x: goalX - dir * 5, y: cy };
+      const taker = mine.find((s) => s.key !== actorKey && (s.pos === 'LF' || s.pos === 'RF')) ?? mine.find((s) => s.key !== actorKey) ?? actorSlot;
+      const target = mine.find((s) => s.pos === 'CF' && s.key !== taker.key) ?? actorSlot;
+      const box = (d: number, dy: number): Point => ({ x: goalX - dir * d, y: MID_Y + dy });
+      const setup: Setup[] = [{ key: taker.key, x: corner.x - dir * 8, y: cy < MID_Y ? cy + 6 : cy - 6, speed: 2 }];
+      mine.forEach((s) => {
+        if (s.key === taker.key) return;
+        const p = s.key === target.key ? box(rand(55, 80), rand(-16, 16)) : box(rand(95, 135), rand(-48, 48));
+        setup.push({ key: s.key, x: p.x, y: p.y, speed: 1.5 });
+      });
+      all.filter((s) => s.side === O && s.pos !== 'GK').forEach((s) => {
+        const p = box(rand(40, 90), rand(-42, 42));
+        setup.push({ key: s.key, x: p.x, y: p.y, speed: 1.5 });
+      });
+      const abbr = S === 'user' ? club.abbreviation : opponent.abbreviation;
+      return [
+        { kind: 'shot', to: corner, dur: 420, caption: 'Defendeu para escanteio!', scripted: true, after: () => { st.poss = S; } },
+        { kind: 'wait', to: corner, dur: 1700, caption: `Escanteio para ${abbr}`, scripted: true, setup },
+        { kind: 'pass', to: { slot: target.key }, dur: 760, arc: 18, caption: `${taker.name} cobra o escanteio`, scripted: true },
+      ];
+    };
+
     if (ev.type === 'gol') {
+      const style = text.includes('cavadinha') ? 'cavadinha' : play === 'longe' ? 'longe' : Math.random() < 0.55 ? 'canto' : 'meio';
+      const gy = style === 'canto' ? (Math.random() < 0.5 ? GOAL_TOP + 9 : GOAL_BOTTOM - 9) : MID_Y + rand(-20, 20);
+      // O goleiro pula para o lado errado ou chega atrasado
+      const diveY = gy >= MID_Y ? MID_Y - rand(10, 24) : MID_Y + rand(10, 24);
       q.push(
         mk({
           kind: 'shot',
-          to: { x: goalX + dir * 12, y: MID_Y + rand(-18, 18) },
-          dur: 360,
+          to: { x: goalX + dir * 12, y: gy },
+          dur: style === 'longe' ? 520 : style === 'cavadinha' ? 600 : header ? 320 : 360,
+          arc: style === 'cavadinha' ? 14 : style === 'longe' ? 8 : 0,
           caption: ev.text,
+          setup: gk ? [{ key: gkKey, x: gkX, y: diveY, speed: 2.2 }] : undefined,
           after: () => {
             startCelebration(S, actorKey);
+            flashNet(S);
             onGoalRef.current?.(ev.id ?? -1, S);
           },
         }),
       );
     } else if (ev.type === 'defesa') {
-      q.push(mk({ kind: 'shot', to: { slot: `${O}-GK` }, dur: 420, caption: ev.text }));
-    } else {
-      const wideY = MID_Y + (Math.random() < 0.5 ? -1 : 1) * (GOAL_BOTTOM - MID_Y + rand(14, 40));
+      const outcome: 'corner' | 'hold' | 'rebound' = text.includes('escanteio')
+        ? 'corner'
+        : text.includes('domina') || text.includes('segura')
+          ? 'hold'
+          : pick<'corner' | 'hold' | 'rebound'>(['hold', 'hold', 'rebound', 'corner']);
+      const useCorner = outcome === 'corner' && backlog <= 3;
       q.push(
         mk({
           kind: 'shot',
-          to: { x: goalX + dir * 8, y: wideY },
-          dur: 420,
+          to: { slot: gkKey },
+          dur: header ? 360 : 420,
+          arc: Math.random() < 0.2 ? 6 : 0,
           caption: ev.text,
+          setup: gk ? [{ key: gkKey, x: gkX, y: MID_Y + rand(-38, 38), speed: 2.2 }] : undefined,
           after: () => {
-            st.queue.unshift({ kind: 'move', to: { slot: `${O}-GK` }, dur: 800, caption: 'Tiro de meta', scripted: true });
+            if (useCorner) st.queue.unshift(...cornerSteps());
+            else if (outcome !== 'hold') {
+              st.queue.unshift({
+                kind: 'move',
+                to: { slot: defenderKey() },
+                dur: 700,
+                caption: `${gk?.name ?? 'O goleiro'} espalma e a zaga afasta`,
+                scripted: true,
+              });
+            }
           },
         }),
       );
+    } else {
+      // Finalização que não dá em gol: trave, rente à trave, por cima ou para fora
+      const kind: 'post' | 'rente' | 'over' | 'wide' = text.includes('bola na trave')
+        ? 'post'
+        : text.includes('rente')
+          ? 'rente'
+          : text.includes('por cima') || text.includes('isola')
+            ? 'over'
+            : 'wide';
+      const side = Math.random() < 0.5 ? -1 : 1;
+      if (kind === 'post') {
+        q.push(
+          mk({
+            kind: 'shot',
+            to: { x: goalX, y: side < 0 ? GOAL_TOP : GOAL_BOTTOM },
+            dur: 380,
+            caption: ev.text,
+            after: () => {
+              st.queue.unshift({
+                kind: 'move',
+                to: { slot: defenderKey() },
+                dur: 700,
+                caption: 'Na trave! A zaga afasta o perigo',
+                scripted: true,
+              });
+            },
+          }),
+        );
+      } else {
+        const to: Point =
+          kind === 'over'
+            ? { x: goalX + dir * 55, y: MID_Y + rand(-34, 34) }
+            : kind === 'rente'
+              ? { x: goalX + dir * 8, y: side < 0 ? GOAL_TOP - 12 : GOAL_BOTTOM + 12 }
+              : { x: goalX + dir * 8, y: MID_Y + side * (GOAL_BOTTOM - MID_Y + rand(14, 40)) };
+        q.push(mk({ kind: 'shot', to, dur: kind === 'over' ? 520 : 420, arc: kind === 'over' ? 26 : 0, caption: ev.text, after: tiroDeMeta }));
+      }
     }
     st.queue.push(...q);
   }
@@ -534,7 +797,16 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
       };
 
       // Move a bola
-      if (st.active && st.active.step.kind !== 'carry') {
+      let lift = 0; // altura da bola (passes e chutes por cima)
+      if (st.active && st.active.step.kind === 'wait') {
+        // Pausa: a bola fica parada (ou com quem a tem) enquanto os jogadores se posicionam
+        followHolder();
+        if (now - st.active.start >= st.active.step.dur) {
+          const done = st.active.step;
+          st.active = null;
+          done.after?.();
+        }
+      } else if (st.active && st.active.step.kind !== 'carry') {
         const { step, from, start, lead, dest } = st.active;
         const p = Math.min(1, (now - start) / step.dur);
         const e = step.kind === 'shot' ? p : 1 - Math.pow(1 - p, 2);
@@ -555,6 +827,7 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
         }
         st.ballX = from.x + (tx - from.x) * e;
         st.ballY = from.y + (ty - from.y) * e;
+        lift = (step.arc ?? 0) * Math.sin(Math.PI * p);
         if (p >= 1) {
           st.active = null;
           if (dest) {
@@ -657,8 +930,33 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
               ambient: true,
             });
           } else {
-            const r = choosePass(h, all);
-            if (r) st.queue.push({ kind: 'pass', to: { slot: r.key }, dur: passDur(dist(h, r)), ambient: true });
+            // Cruzamento: quem está aberto perto da área levanta a bola para o centroavante
+            const cf = all.find((s) => s.side === h.side && s.pos === 'CF' && s.key !== h.key);
+            const cross =
+              !!cf && ['LF', 'RF', 'LB', 'RB'].includes(h.pos) && toGoal < 240 && toGoal > 40 && Math.abs(h.y - MID_Y) > 95 && Math.random() < 0.55;
+            if (cross && cf) {
+              st.queue.push({ kind: 'pass', to: { slot: cf.key }, dur: 640, ambient: true, arc: 12, caption: `${h.name} cruza para ${cf.name}` });
+            } else {
+              const r = choosePass(h, all);
+              if (r) {
+                const dd = dist(h, r);
+                const long = dd > 230;
+                const through = !long && (r.x - h.x) * d > 120 && nearestOpp(all, h.side, r).d > 60;
+                st.queue.push({
+                  kind: 'pass',
+                  to: { slot: r.key },
+                  dur: passDur(dd) + (long ? 140 : 0),
+                  ambient: true,
+                  arc: long ? 16 : through ? 8 : 0,
+                  caption:
+                    long && Math.abs(r.y - h.y) > 170
+                      ? `${h.name} inverte o jogo para ${r.name}`
+                      : through
+                        ? `${h.name} lança ${r.name} em profundidade`
+                        : undefined,
+                });
+              }
+            }
           }
         }
         st.ambientAt = now + rand(120, 420);
@@ -723,7 +1021,11 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
           const a = get(c.actor);
           if (a) {
             if (a.key === s.key) {
-              speedMul = 0.2;
+              if (c.run) {
+                tx = c.run.x;
+                ty = c.run.y;
+                speedMul = 1.25;
+              } else speedMul = 0.2;
             } else {
               tx = a.x + Math.cos(i * 2.1) * 34;
               ty = a.y + Math.sin(i * 2.1) * 34;
@@ -830,6 +1132,23 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
 
       // Bola, anel dourado e nome de quem está com a bola
       ballNode.current?.setAttribute('transform', `translate(${st.ballX.toFixed(1)} ${st.ballY.toFixed(1)})`);
+      liftNode.current?.setAttribute('transform', `translate(0 ${(-lift).toFixed(1)}) scale(${(1 + lift / 50).toFixed(2)})`);
+      // Rastro da bola quando ela anda rápido (chutes e passes)
+      const pts = trailPts.current;
+      pts.push({ x: st.ballX, y: st.ballY - lift });
+      if (pts.length > 14) pts.shift();
+      const prev = pts[pts.length - 2];
+      const ballSpeed = prev && dt > 0 ? Math.hypot(st.ballX - prev.x, st.ballY - lift - prev.y) / dt : 0;
+      for (let i = 0; i < 5; i += 1) {
+        const node = trailNodes.current[i];
+        if (!node) continue;
+        const pt = pts[pts.length - 1 - (i + 1) * 2];
+        if (pt && ballSpeed > 0.28) {
+          node.setAttribute('cx', pt.x.toFixed(1));
+          node.setAttribute('cy', pt.y.toFixed(1));
+          node.setAttribute('opacity', (0.34 - i * 0.06).toFixed(2));
+        } else node.setAttribute('opacity', '0');
+      }
       const hs = st.holder ? get(st.holder) : undefined;
       if (ringNode.current) {
         ringNode.current.style.display = hs ? '' : 'none';
@@ -880,8 +1199,8 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
           <rect x={FX1 - 36} y={MID_Y - 42} width={36} height={84} />
         </g>
         <circle cx={MID_X} cy={MID_Y} r={3} fill={lineColor} />
-        <rect x={FX0 - 14} y={GOAL_TOP} width={14} height={GOAL_BOTTOM - GOAL_TOP} fill="rgba(255,255,255,.12)" stroke={lineColor} strokeWidth={2} />
-        <rect x={FX1} y={GOAL_TOP} width={14} height={GOAL_BOTTOM - GOAL_TOP} fill="rgba(255,255,255,.12)" stroke={lineColor} strokeWidth={2} />
+        <rect ref={(el: SVGRectElement | null) => { netNodes.current.bot = el; }} x={FX0 - 14} y={GOAL_TOP} width={14} height={GOAL_BOTTOM - GOAL_TOP} fill="rgba(255,255,255,.12)" stroke={lineColor} strokeWidth={2} />
+        <rect ref={(el: SVGRectElement | null) => { netNodes.current.user = el; }} x={FX1} y={GOAL_TOP} width={14} height={GOAL_BOTTOM - GOAL_TOP} fill="rgba(255,255,255,.12)" stroke={lineColor} strokeWidth={2} />
 
         {slots.map((s) => {
           const team = s.side === 'user' ? club : opponent;
@@ -899,9 +1218,14 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
         <g ref={ringNode} style={{ display: 'none' }}>
           <circle r={20} fill="none" stroke="#F5B800" strokeWidth={2.5} />
         </g>
+        {[0, 1, 2, 3, 4].map((i) => (
+          <circle key={`trail-${i}`} ref={(el: SVGCircleElement | null) => { trailNodes.current[i] = el; }} r={5.5 - i * 0.6} fill="#ffffff" opacity={0} />
+        ))}
         <g ref={ballNode} transform={`translate(${MID_X} ${MID_Y})`}>
           <ellipse cy={5} rx={6} ry={2.5} fill="rgba(0,0,0,.4)" />
-          <circle r={6.5} fill="#ffffff" stroke="#111111" strokeWidth={1.5} />
+          <g ref={liftNode}>
+            <circle r={6.5} fill="#ffffff" stroke="#111111" strokeWidth={1.5} />
+          </g>
         </g>
         <text
           ref={nameNode}
