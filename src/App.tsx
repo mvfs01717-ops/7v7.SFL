@@ -124,6 +124,8 @@ function pickByRoll(list: Player[], weight: (player: Player) => number, roll: nu
 
 // Chance de uma partida contra o bot terminar empatada e ir para os pênaltis (0.4 = 40%)
 const SHOOTOUT_CHANCE = 0.4;
+// Tempo da animação da escalação do rival antes da bola rolar (o modo espectador desconta isso do relógio)
+const LINEUP_REVEAL_MS = 9000;
 
 type PlanEntry = {
   minute: number;
@@ -303,6 +305,8 @@ function App() {
   const [reviewing, setReviewing] = useState(false);
   // Animação com o overall de ataque e defesa do time, mostrada quando o time fica pronto
   const [reveal, setReveal] = useState<{ squad: Partial<Record<Position, Player>>; next: () => void } | null>(null);
+  // Animação da escalação do rival, mostrada antes de a partida começar
+  const [lineupReveal, setLineupReveal] = useState<{ squad: Player[]; team?: Team; name?: string } | null>(null);
   const [mode, setMode] = useState<'classic' | 'dice'>('classic');
   const [botTeam, setBotTeam] = useState<Player[]>([]);
   const [userTeam, setUserTeam] = useState<Player[]>([]);
@@ -626,7 +630,7 @@ function App() {
     setSelectedClub(team);
     const startedAt = target.plan.find((item) => item.startedAt)?.startedAt;
     // Cada minuto da partida dura 900 ms. Sem hora de início (partida antiga), começa do zero.
-    const liveMinute = startedAt ? Math.max(0, Math.min(90, Math.floor((Date.now() - startedAt) / 900))) : 0;
+    const liveMinute = startedAt ? Math.max(0, Math.min(90, Math.floor((Date.now() - startedAt - LINEUP_REVEAL_MS) / 900))) : 0;
     spectateFrom.current = liveMinute;
     planRef.current = target.plan
       .filter((item: PlanItem) => item.minute > 0)
@@ -638,7 +642,7 @@ function App() {
         keeper: item.keeper,
       }));
     setSpectating({ host: target.host_nick, guest: target.guest_nick ?? 'Jogador', roomId: target.id });
-    beginMatch(squadPlayers(target.host_squad), squadPlayers(target.guest_squad));
+    beginMatch(squadPlayers(target.host_squad), squadPlayers(target.guest_squad), null);
   }
   // Ao entrar como espectador, reconstrói o que já aconteceu até o minuto atual
   const spectateFrom = useRef<number | null>(null);
@@ -673,7 +677,8 @@ function App() {
       shooter: item.shooter,
       keeper: item.keeper,
     }));
-    beginMatch(mine, theirs);
+    const rivalTeam = teams.find((item) => item.id === (role === 'host' ? current.guest_team_id : current.host_team_id));
+    beginMatch(mine, theirs, { team: rivalTeam, name: (role === 'host' ? current.guest_nick : current.host_nick) ?? undefined });
   }
 
   useEffect(() => {
@@ -1033,9 +1038,10 @@ function App() {
       }));
     // De vez em quando a partida termina empatada e vai para os pênaltis
     planRef.current = forceShootout || Math.random() < SHOOTOUT_CHANCE ? forceDrawPlan(basePlan) : basePlan;
-    beginMatch(chosen, botPlayers);
+    beginMatch(chosen, botPlayers, { team: botClub });
   }
-  function beginMatch(chosen: Player[], botPlayers: Player[]) {
+  function beginMatch(chosen: Player[], botPlayers: Player[], rivalInfo?: { team?: Team; name?: string } | null) {
+    setLineupReveal(rivalInfo ? { squad: botPlayers, ...rivalInfo } : null);
     setUserTeam(chosen);
     setBotTeam(botPlayers);
     setMinute(0);
@@ -1054,10 +1060,10 @@ function App() {
   }
 
   useEffect(() => {
-    if (screen !== 'match' || minute >= 90 || skipped) return;
+    if (screen !== 'match' || minute >= 90 || skipped || lineupReveal) return;
     const timer = window.setInterval(() => advanceMatch(), 900);
     return () => window.clearInterval(timer);
-  }, [screen, minute, skipped]);
+  }, [screen, minute, skipped, lineupReveal]);
 
   // Depois dos 90 minutos, espera os gols aparecerem na animação antes de mostrar o resultado
   const goesToShootout = score.user === score.bot;
@@ -1414,6 +1420,15 @@ function App() {
           showTestTools={isAdmin || window.location.search.includes('teste')}
           forceShootout={forceShootout}
           onForceShootout={setForceShootout}
+        />
+      )}
+
+      {lineupReveal && screen === 'match' && (lineupReveal.team ?? opponentTeam) && (
+        <RivalReveal
+          opponent={(lineupReveal.team ?? opponentTeam) as Team}
+          rivalName={lineupReveal.name}
+          squad={lineupReveal.squad}
+          onDone={() => setLineupReveal(null)}
         />
       )}
 
@@ -3283,6 +3298,164 @@ function TeamReveal({ club, squad, onDone }: { club: Team; squad: Partial<Record
         </div>
         <button className="gold-button large lobby-main" onClick={finish} style={{ opacity: t >= 1 ? 1 : 0.6 }}>
           Continuar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Animação antes da partida: a escalação do rival entra jogador por jogador (posição e overall), depois o overall do time
+function RivalReveal({
+  opponent,
+  rivalName,
+  squad,
+  onDone,
+}: {
+  opponent: Team;
+  rivalName?: string;
+  squad: Player[];
+  onDone: () => void;
+}) {
+  const ordered = positions.flatMap((position) => squad.filter((player) => slotOf(player) === position));
+  const bySlot: Partial<Record<Position, Player>> = {};
+  squad.forEach((player) => {
+    bySlot[slotOf(player)] = player;
+  });
+  const atk = groupAverage(bySlot, ['LF', 'RF', 'CF']);
+  const def = groupAverage(bySlot, ['GK', 'LB', 'RB', 'CM']);
+  const overall = average(squad);
+  const STEP = 380; // intervalo entre um jogador e o próximo
+  const statsAt = ordered.length * STEP + 500;
+  const [t, setT] = useState(0);
+  const done = useRef(false);
+  const finish = () => {
+    if (done.current) return;
+    done.current = true;
+    onDone();
+  };
+  useEffect(() => {
+    const still = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (still) {
+      setT(1e6);
+      return;
+    }
+    const start = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const elapsed = now - start;
+      setT(elapsed);
+      if (elapsed < statsAt + 2200) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  // Segue sozinho para a partida começar nos dois lados quase ao mesmo tempo
+  useEffect(() => {
+    const timer = window.setTimeout(finish, LINEUP_REVEAL_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
+  const ease = (x: number) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
+  const statP = ease((t - statsAt) / 1600);
+  const ovrP = ease((t - statsAt - 700) / 1200);
+  const tones = { special: '#F5B800', gold: '#d4a63a', silver: '#bcc3cd', bronze: '#b8743f' };
+  const ready = t >= statsAt + 1800;
+  return (
+    <div
+      role="dialog"
+      aria-label="Escalação do rival"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 80,
+        overflowY: 'auto',
+        display: 'grid',
+        placeItems: 'center',
+        padding: 16,
+        background: 'rgba(5,8,12,.94)',
+        animation: 'lr-fade .35s ease-out',
+      }}
+    >
+      <style>{`
+        @keyframes lr-fade { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes lr-in { from { opacity: 0; transform: translateX(-40px) } to { opacity: 1; transform: translateX(0) } }
+        @keyframes lr-pop { 0% { transform: scale(.6); opacity: 0 } 70% { transform: scale(1.08) } 100% { transform: scale(1); opacity: 1 } }
+        @media (prefers-reduced-motion: reduce) { .lr-row, .lr-pop { animation: none !important; opacity: 1 !important } }
+      `}</style>
+      <div style={{ width: 'min(460px, 100%)', textAlign: 'center' }}>
+        <div className="eyebrow">{rivalName ? `SEU RIVAL · ${rivalName.toUpperCase()}` : 'SEU RIVAL'}</div>
+        <h2 style={{ margin: '6px 0 16px' }}>{opponent.name.toUpperCase()}</h2>
+        <div style={{ display: 'grid', gap: 6, textAlign: 'left' }}>
+          {ordered.map((player, index) => {
+            const color = tones[colorForOverall(player.overall) as keyof typeof tones];
+            return (
+              <div
+                key={player.id}
+                className="lr-row"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  padding: '8px 12px',
+                  borderRadius: 12,
+                  border: `1px solid ${color}`,
+                  background: 'linear-gradient(90deg, rgba(255,255,255,.07), rgba(255,255,255,.02))',
+                  opacity: 0,
+                  animation: `lr-in .35s ease-out ${index * STEP}ms forwards`,
+                }}
+              >
+                <b
+                  style={{
+                    flex: '0 0 44px',
+                    textAlign: 'center',
+                    padding: '5px 0',
+                    borderRadius: 8,
+                    background: '#F5B800',
+                    color: '#0B1016',
+                    fontSize: 14,
+                  }}
+                >
+                  {slotOf(player)}
+                </b>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: 'block', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {player.name}
+                  </span>
+                  <small style={{ opacity: 0.6, fontSize: 11 }}>{getPlayerPositions(player).join(' · ')}</small>
+                </span>
+                <strong style={{ fontSize: 26, color, fontVariantNumeric: 'tabular-nums' }}>{player.overall}</strong>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ marginTop: 18, display: 'grid', gap: 10, opacity: statP > 0 ? 1 : 0 }}>
+          {[
+            { label: 'ATAQUE', value: atk, color: '#ef4444' },
+            { label: 'DEFESA', value: def, color: '#3b82f6' },
+          ].map((row) => (
+            <div key={row.label} style={{ textAlign: 'left' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+                <span style={{ fontWeight: 800, letterSpacing: 2, fontSize: 12 }}>{row.label}</span>
+                <strong style={{ fontSize: 30, lineHeight: 1, color: row.color, fontVariantNumeric: 'tabular-nums' }}>
+                  {Math.round(row.value * statP)}
+                </strong>
+              </div>
+              <div style={{ height: 8, borderRadius: 6, background: 'rgba(255,255,255,.1)', overflow: 'hidden', marginTop: 4 }}>
+                <div style={{ width: `${Math.min(100, row.value * statP)}%`, height: '100%', borderRadius: 6, background: row.color }} />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div
+          className="lr-pop"
+          style={{ marginTop: 14, opacity: ovrP, animation: ovrP > 0 ? 'lr-pop .5s ease-out' : undefined }}
+        >
+          <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: 2, color: '#F5B800' }}>OVERALL DO RIVAL</span>
+          <div style={{ fontSize: 56, fontWeight: 900, lineHeight: 1.05, fontVariantNumeric: 'tabular-nums' }}>
+            {Math.round(overall * ovrP)}
+          </div>
+        </div>
+        <button className="gold-button large lobby-main" onClick={finish} style={{ opacity: ready ? 1 : 0.6 }}>
+          Começar partida
         </button>
       </div>
     </div>
