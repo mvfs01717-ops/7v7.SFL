@@ -4,31 +4,39 @@ import type { Room } from '@/lib/multiplayer';
 export type TPlayer = { id: string; nick: string };
 export type TMatch = { room_id?: string; winner_id?: string; score?: string; pens?: boolean };
 // q1/q2 só existem com 6 jogadores (quartas). Com 4 jogadores o torneio começa direto nas semis (m1/m2).
-export type Slot = 'q1' | 'q2' | 'm1' | 'm2' | 'm3';
+export type Slot = 'q1' | 'q2' | 'q3' | 'q4' | 'm1' | 'm2' | 'm3';
 export type Tournament = {
   id: string;
   code: string;
   host_id: string;
   mode: 'classic' | 'dice';
-  // Quantos jogadores o anfitrião escolheu ao criar (4 = semis + final, 6 = quartas + semis + final)
-  size: 4 | 6;
+  // Quantos jogadores o anfitrião escolheu ao criar (4 = semis + final, 6 = 2 quartas + semis + final, 8 = 4 quartas + semis + final)
+  size: 4 | 6 | 8;
   status: 'waiting' | 'playing' | 'finished' | 'cancelled';
   players: TPlayer[];
   seed: string[] | null;
   q1: TMatch;
   q2: TMatch;
+  q3: TMatch;
+  q4: TMatch;
   m1: TMatch;
   m2: TMatch;
   m3: TMatch;
   champion_nick: string | null;
 };
 
-function one(data: unknown): Tournament | null {
-  const row = Array.isArray(data) ? data[0] : data;
-  return (row as Tournament | null) ?? null;
+// q3/q4 só existem no banco depois da migração do torneio de 8: até lá, vêm vazias
+function norm(row: Tournament | null): Tournament | null {
+  if (!row) return null;
+  return { ...row, q3: row.q3 ?? {}, q4: row.q4 ?? {} };
 }
 
-export async function createTournament(nick: string, mode: 'classic' | 'dice', size: 4 | 6 = 4) {
+function one(data: unknown): Tournament | null {
+  const row = Array.isArray(data) ? data[0] : data;
+  return norm((row as Tournament | null) ?? null);
+}
+
+export async function createTournament(nick: string, mode: 'classic' | 'dice', size: 4 | 6 | 8 = 4) {
   const { data, error } = await supabase.rpc('create_tournament', { p_nick: nick, p_mode: mode, p_size: size });
   if (error) return { error: error.message };
   return { tournament: one(data) ?? undefined };
@@ -60,12 +68,14 @@ export async function setTournamentMatch(id: string, slot: Slot, patch: TMatch) 
 
 export async function fetchTournament(id: string): Promise<Tournament | null> {
   const { data } = await supabase.from('tournaments').select('*').eq('id', id).maybeSingle();
-  return (data as Tournament | null) ?? null;
+  return norm((data as Tournament | null) ?? null);
 }
 
 // Quais partidas existem nesse torneio (4 jogadores: semis + final; 6 jogadores: quartas + semis + final)
 export function slotsFor(t: Tournament): Slot[] {
-  return t.seed && t.seed.length === 6 ? ['q1', 'q2', 'm1', 'm2', 'm3'] : ['m1', 'm2', 'm3'];
+  if (t.seed && t.seed.length === 8) return ['q1', 'q2', 'q3', 'q4', 'm1', 'm2', 'm3'];
+  if (t.seed && t.seed.length === 6) return ['q1', 'q2', 'm1', 'm2', 'm3'];
+  return ['m1', 'm2', 'm3'];
 }
 
 // Quem joga cada partida.
@@ -75,8 +85,19 @@ export function slotPlayers(t: Tournament, slot: Slot): [TPlayer | null, TPlayer
   const find = (id?: string | null) => t.players.find((player) => player.id === id) ?? null;
   if (!t.seed) return [null, null];
   const six = t.seed.length === 6;
+  // 8 jogadores: quatro quartas (sorteio 0x1, 2x3, 4x5, 6x7); as semis são os vencedores das quartas
+  if (t.seed.length === 8) {
+    if (slot === 'q1') return [find(t.seed[0]), find(t.seed[1])];
+    if (slot === 'q2') return [find(t.seed[2]), find(t.seed[3])];
+    if (slot === 'q3') return [find(t.seed[4]), find(t.seed[5])];
+    if (slot === 'q4') return [find(t.seed[6]), find(t.seed[7])];
+    if (slot === 'm1') return [find(t.q1.winner_id), find(t.q2.winner_id)];
+    if (slot === 'm2') return [find(t.q3.winner_id), find(t.q4.winner_id)];
+    return [find(t.m1.winner_id), find(t.m2.winner_id)];
+  }
   if (slot === 'q1') return six ? [find(t.seed[2]), find(t.seed[3])] : [null, null];
   if (slot === 'q2') return six ? [find(t.seed[4]), find(t.seed[5])] : [null, null];
+  if (slot === 'q3' || slot === 'q4') return [null, null];
   if (slot === 'm1') return six ? [find(t.seed[0]), find(t.q1.winner_id)] : [find(t.seed[0]), find(t.seed[1])];
   if (slot === 'm2') return six ? [find(t.seed[1]), find(t.q2.winner_id)] : [find(t.seed[2]), find(t.seed[3])];
   return [find(t.m1.winner_id), find(t.m2.winner_id)];
@@ -109,6 +130,8 @@ export function decideWinner(room: Room, hostGoals: number, guestGoals: number) 
 export const SLOT_LABEL: Record<Slot, string> = {
   q1: 'Quartas 1',
   q2: 'Quartas 2',
+  q3: 'Quartas 3',
+  q4: 'Quartas 4',
   m1: 'Semifinal 1',
   m2: 'Semifinal 2',
   m3: 'Final',
