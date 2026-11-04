@@ -3306,13 +3306,13 @@ function TeamReveal({ club, squad, onDone }: { club: Team; squad: Partial<Record
 
 // Animação antes da partida: o rival entra em campo, jogador por jogador, na formação (goleiro primeiro), e depois aparece o overall do time
 const REVEAL_SPOTS: Record<Position, [number, number]> = {
-  GK: [50, 9],
-  LB: [20, 30],
-  RB: [80, 30],
-  CM: [50, 50],
-  LF: [20, 72],
-  RF: [80, 72],
-  CF: [50, 88],
+  GK: [50, 15],
+  LB: [24, 34],
+  RB: [76, 34],
+  CM: [50, 52],
+  LF: [22, 70],
+  RF: [78, 70],
+  CF: [50, 84],
 };
 
 function RivalReveal({
@@ -3400,7 +3400,11 @@ function RivalReveal({
           className="pitch"
           style={{ position: 'relative', width: '100%', height: 'auto', aspectRatio: '3 / 4', maxWidth: 'none', margin: 0, overflow: 'hidden' }}
         >
-          <div className="pitch-lines" />
+          <div className="pitch-lines">
+            {/* círculo central e grande área de baixo, no mesmo traço das linhas do campo do jogo */}
+            <div style={{ position: 'absolute', left: '50%', top: '50%', width: '26%', aspectRatio: '1', transform: 'translate(-50%, -50%)', border: '1px solid #ffffff42', borderRadius: '50%' }} />
+            <div style={{ position: 'absolute', left: '35%', bottom: 0, width: '30%', height: '16%', border: '1px solid #ffffff42' }} />
+          </div>
           {ordered.map((player, index) => {
             const [x, y] = REVEAL_SPOTS[slotOf(player)];
             const color = tones[colorForOverall(player.overall) as keyof typeof tones];
