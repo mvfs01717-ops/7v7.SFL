@@ -14,7 +14,7 @@ import {
 } from '@/lib/multiplayer';
 import {
   createTournament, joinTournament, leaveTournament, startTournament, setTournamentMatch, fetchTournament,
-  slotPlayers, currentSlot, slotOfRoom, decideWinner, SLOT_LABEL,
+  slotPlayers, currentSlot, slotOfRoom, slotsFor, decideWinner, SLOT_LABEL,
   type Tournament, type Slot, type TPlayer,
 } from '@/lib/tournament';
 
@@ -514,7 +514,7 @@ function App() {
     setTError('');
     navigate('tournament');
   }
-  async function handleCreateTournament(tMode: 'classic' | 'dice', tSize: 4 | 6) {
+  async function handleCreateTournament(tMode: 'classic' | 'dice', tSize: 4 | 6 | 8) {
     if (!userId) return;
     setTBusy(true);
     setTError('');
@@ -1297,7 +1297,7 @@ function App() {
   function abortShootout() {
     setPenaltyPhase(false);
     if (spectating) {
-      navigate('lobby', true);
+      navigate(tournamentRef.current ? 'tournament' : 'lobby', true);
       return;
     }
     leaveRoom();
@@ -1388,6 +1388,7 @@ function App() {
           onCreateMatch={handleTournamentCreateMatch}
           onJoinMatch={handleTournamentJoinMatch}
           onCancelMatch={() => leaveRoom()}
+          onWatch={watchRoom}
         />
       )}
 
@@ -1501,7 +1502,7 @@ function App() {
           againLabel={inTournamentMatch ? 'Voltar ao torneio' : undefined}
           onAgain={() => {
             if (spectating) {
-              navigate('lobby', true);
+              navigate(tournamentRef.current ? 'tournament' : 'lobby', true);
             } else if (inTournamentMatch) {
               leaveRoom();
               navigate('tournament', true);
@@ -2241,7 +2242,7 @@ function LobbyScreen({
                 <Trophy size={16} />
               </b>
               <div>
-                <h3>Torneio de 4 ou 6 jogadores</h3>
+                <h3>Torneio de 4, 6 ou 8 jogadores</h3>
                 <p>Mata-mata até a final. Quem ganhar a final é o campeão.</p>
               </div>
             </div>
@@ -2339,19 +2340,31 @@ function ClubPicker({
 // Chaveamento em árvore: rodadas da esquerda para a direita, linhas ligando cada confronto e a taça no fim
 function TournamentBracket({ tournament: t, userId }: { tournament: Tournament; userId: string }) {
   const six = t.seed?.length === 6;
+  const eight = t.seed?.length === 8;
   const gold = '#F5B800';
   const BW = 124; // largura da caixa
   const BH = 28; // altura da caixa
   const COL = 170; // distância entre colunas
   const TOP = 34; // espaço para o título das colunas
 
+  const mid = (list: number[]) => list.filter((_, i) => i % 2 === 0).map((y, i) => (y + list[i * 2 + 1]) / 2);
+  // Com 8 jogadores as posições são calculadas: cada vencedor fica no meio das duas caixas de onde veio
+  const eightQuartYs = Array.from({ length: 8 }, (_, i) => 20 + i * 38 + TOP);
+  const eightSemiYs = mid(eightQuartYs);
+  const eightFinalYs = mid(eightSemiYs);
   const semiYs = [20, 60, 130, 170].map((y) => y + TOP);
-  const finalYs = [40, 150].map((y) => y + TOP);
+  const finalYs = eight ? eightFinalYs : [40, 150].map((y) => y + TOP);
   const quartYs = [40, 80, 150, 190].map((y) => y + TOP);
-  const champY = 95 + TOP;
+  const champY = eight ? mid(eightFinalYs)[0] : 95 + TOP;
 
   type Round = { label: string; slots: Slot[]; ys: number[] };
-  const rounds: Round[] = six
+  const rounds: Round[] = eight
+    ? [
+        { label: 'QUARTAS', slots: ['q1', 'q2', 'q3', 'q4'], ys: eightQuartYs },
+        { label: 'SEMIFINAIS', slots: ['m1', 'm2'], ys: eightSemiYs },
+        { label: 'FINAL', slots: ['m3'], ys: eightFinalYs },
+      ]
+    : six
     ? [
         { label: 'QUARTAS', slots: ['q1', 'q2'], ys: quartYs },
         { label: 'SEMIFINAIS', slots: ['m1', 'm2'], ys: semiYs },
@@ -2365,6 +2378,14 @@ function TournamentBracket({ tournament: t, userId }: { tournament: Tournament; 
   const edgesAfter = (index: number): { from: [number, number]; to: number; slot: Slot }[] => {
     const next = rounds[index + 1];
     if (!next) return [{ from: [0, 1], to: 0, slot: 'm3' }];
+    if (eight && index === 0) {
+      return [
+        { from: [0, 1], to: 0, slot: 'q1' },
+        { from: [2, 3], to: 1, slot: 'q2' },
+        { from: [4, 5], to: 2, slot: 'q3' },
+        { from: [6, 7], to: 3, slot: 'q4' },
+      ];
+    }
     if (six && index === 0) {
       return [
         { from: [0, 1], to: 1, slot: 'q1' },
@@ -2379,7 +2400,7 @@ function TournamentBracket({ tournament: t, userId }: { tournament: Tournament; 
 
   const champX = rounds.length * COL;
   const width = champX + BW + 16;
-  const height = 240;
+  const height = eight ? eightQuartYs[7] + BH / 2 + 24 : 240;
   const champion = t.players.find((player) => player.id === t.m3.winner_id) ?? null;
   const finalists = slotPlayers(t, 'm3');
   const runnerUp = t.m3.winner_id ? (finalists.find((player) => player && player.id !== t.m3.winner_id) ?? null) : null;
@@ -2557,6 +2578,7 @@ function TournamentScreen({
   onCreateMatch,
   onJoinMatch,
   onCancelMatch,
+  onWatch,
 }: {
   teams: Team[];
   userId: string;
@@ -2567,16 +2589,17 @@ function TournamentScreen({
   busy: boolean;
   error: string;
   onBack: () => void;
-  onCreate: (mode: 'classic' | 'dice', size: 4 | 6) => void;
+  onCreate: (mode: 'classic' | 'dice', size: 4 | 6 | 8) => void;
   onJoin: (code: string) => void;
   onStart: () => void;
   onLeave: () => void;
   onCreateMatch: (teamId: string) => void;
   onJoinMatch: (teamId: string) => void;
   onCancelMatch: () => void;
+  onWatch: (room: Room) => void;
 }) {
   const [tMode, setTMode] = useState<'classic' | 'dice'>('classic');
-  const [tSize, setTSize] = useState<4 | 6>(4);
+  const [tSize, setTSize] = useState<4 | 6 | 8>(4);
   const [code, setCode] = useState('');
   const [copied, setCopied] = useState(false);
   const [teamId, setTeamId] = useState('');
@@ -2620,7 +2643,7 @@ function TournamentScreen({
         <h2>
           COPA <em>7V7</em>
         </h2>
-        <p>Mata-mata com 4 ou 6 jogadores, cada partida é um multiplayer normal. O campeão leva a taça.</p>
+        <p>Mata-mata com 4, 6 ou 8 jogadores, cada partida é um multiplayer normal. O campeão leva a taça.</p>
       </div>
 
       {!tournament && (
@@ -2634,18 +2657,23 @@ function TournamentScreen({
               </div>
             </div>
             <span className="lobby-label">QUANTOS JOGADORES</span>
-            <div className="lobby-seg">
+            <div className="lobby-seg" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
               <button type="button" className={tSize === 4 ? 'on' : ''} onClick={() => setTSize(4)}>
                 4 jogadores
               </button>
               <button type="button" className={tSize === 6 ? 'on' : ''} onClick={() => setTSize(6)}>
                 6 jogadores
               </button>
+              <button type="button" className={tSize === 8 ? 'on' : ''} onClick={() => setTSize(8)}>
+                8 jogadores
+              </button>
             </div>
             <p style={{ margin: '6px 0 0', fontSize: 13, opacity: 0.7 }}>
               {tSize === 4
                 ? 'Duas semifinais e a final (3 partidas).'
-                : 'Duas quartas, duas semifinais e a final (5 partidas). Dois jogadores começam direto na semi.'}
+                : tSize === 6
+                  ? 'Duas quartas, duas semifinais e a final (5 partidas). Dois jogadores começam direto na semi.'
+                  : 'Quatro quartas, duas semifinais e a final (7 partidas).'}
             </p>
             <span className="lobby-label">MODO DO DRAFT</span>
             <div className="lobby-seg">
@@ -2828,6 +2856,10 @@ function TournamentScreen({
             </section>
           )}
 
+          {tournament.status === 'playing' && !room && (
+            <TournamentLive tournament={tournament} exclude={mySlot} onWatch={onWatch} />
+          )}
+
           <div style={{ textAlign: 'center' }}>
             <button className="outline-button" onClick={onLeave}>
               Sair do torneio
@@ -2836,6 +2868,65 @@ function TournamentScreen({
         </div>
       )}
     </main>
+  );
+}
+
+// Partidas do torneio que estão rolando agora: qualquer um do torneio pode assistir ao vivo
+function TournamentLive({
+  tournament: t,
+  exclude,
+  onWatch,
+}: {
+  tournament: Tournament;
+  exclude: Slot | null;
+  onWatch: (room: Room) => void;
+}) {
+  const [live, setLive] = useState<{ slot: Slot; room: Room }[]>([]);
+  const open = slotsFor(t)
+    .filter((slot) => slot !== exclude && t[slot].room_id && !t[slot].winner_id)
+    .map((slot) => ({ slot, roomId: t[slot].room_id as string }));
+  const key = JSON.stringify(open);
+  useEffect(() => {
+    let alive = true;
+    async function load() {
+      const found = await Promise.all(
+        open.map(async (item) => ({ slot: item.slot, room: await fetchRoom(item.roomId) })),
+      );
+      if (!alive) return;
+      setLive(
+        found.filter((item): item is { slot: Slot; room: Room } => !!item.room && isRoomLive(item.room)),
+      );
+    }
+    void load();
+    const timer = window.setInterval(() => void load(), 4000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [key]);
+  return (
+    <section className="lobby-card">
+      <span className="lobby-label" style={{ margin: '0 0 8px' }}>ASSISTIR AO VIVO</span>
+      {live.length === 0 ? (
+        <p style={{ margin: 0, opacity: 0.6, fontSize: 14 }}>Nenhuma partida do torneio rolando agora.</p>
+      ) : (
+        <div style={{ display: 'grid', gap: 8 }}>
+          {live.map((item) => (
+            <button
+              key={item.slot}
+              className="lobby-club"
+              style={{ justifyContent: 'space-between', width: '100%' }}
+              onClick={() => onWatch(item.room)}
+            >
+              <span>
+                {SLOT_LABEL[item.slot]}: {item.room.host_nick} x {item.room.guest_nick ?? 'Jogador'}
+              </span>
+              <b style={{ color: '#F5B800', fontSize: 12 }}>👁 ASSISTIR</b>
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
