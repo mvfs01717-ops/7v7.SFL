@@ -318,6 +318,8 @@ function App() {
   const [shootout, setShootout] = useState<Shootout | null>(null);
   // Botão de teste: força a próxima partida contra o bot a terminar empatada (vai para os pênaltis)
   const [forceShootout, setForceShootout] = useState(false);
+  // Dificuldade do bot: quantas cartas ele sorteia por posição no draft (mais cartas = time mais forte)
+  const [botLevel, setBotLevel] = useState<1 | 3 | 5>(3);
   const [penaltyPhase, setPenaltyPhase] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -1018,8 +1020,16 @@ function App() {
     positions.forEach((position) => {
       const free = players.filter((player) => !usedIds.has(player.id));
       const fits = free.filter((player) => getPlayerPositions(player).includes(position));
-      const pool = fits.length ? fits : free;
-      const choice = pool.find((player) => player.team_id === botClub?.id) ?? pool[0];
+      const base = fits.length ? fits : free;
+      const rivalFits = base.filter((player) => player.team_id === botClub?.id);
+      const pool = rivalFits.length ? rivalFits : base;
+      // O bot drafta como o jogador: sorteia algumas cartas (1 fácil, 3 normal, 5 difícil) e fica com a melhor
+      const left = [...pool];
+      const drawn: Player[] = [];
+      while (drawn.length < botLevel && left.length) {
+        drawn.push(left.splice(Math.floor(Math.random() * left.length), 1)[0]);
+      }
+      const choice = drawn.sort((a, b) => b.overall - a.overall)[0];
       if (choice) {
         usedIds.add(choice.id);
         botPlayers.push({ ...choice, slot: position });
@@ -1420,6 +1430,8 @@ function App() {
           showTestTools={isAdmin || window.location.search.includes('teste')}
           forceShootout={forceShootout}
           onForceShootout={setForceShootout}
+          botLevel={botLevel}
+          onBotLevel={setBotLevel}
         />
       )}
 
@@ -1760,6 +1772,8 @@ function ClubChoice({
   showTestTools,
   forceShootout,
   onForceShootout,
+  botLevel,
+  onBotLevel,
 }: {
   teams: Team[];
   mode: 'classic' | 'dice';
@@ -1769,6 +1783,8 @@ function ClubChoice({
   showTestTools: boolean;
   forceShootout: boolean;
   onForceShootout: (value: boolean) => void;
+  botLevel: 1 | 3 | 5;
+  onBotLevel: (value: 1 | 3 | 5) => void;
 }) {
   return (
     <main className="flow-page">
@@ -1795,6 +1811,18 @@ function ClubChoice({
         >
           <span aria-hidden="true">🎲</span> Modo Dado
         </button>
+      </div>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap', margin: '0 0 20px' }}>
+        <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.5, color: '#F5B800' }}>BOT</span>
+        {([[1, 'Fácil'], [3, 'Normal'], [5, 'Difícil']] as const).map(([level, label]) => (
+          <button
+            key={level}
+            className={botLevel === level ? 'gold-button' : 'outline-button'}
+            onClick={() => onBotLevel(level)}
+          >
+            {label}
+          </button>
+        ))}
       </div>
       {showTestTools && (
         <div style={{ display: 'flex', justifyContent: 'center', margin: '-6px 0 20px' }}>
