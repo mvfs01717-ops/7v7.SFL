@@ -304,7 +304,9 @@ export function generatePlan(hostSquad: Lite[], guestSquad: Lite[], drawChance =
       plan.push(withPlayers(minute, 'gol', goalSides[goalIndex]));
       return;
     }
-    const type: PlanItem['type'] = minute % 5 === 0 ? 'finalização' : minute % 3 === 0 ? 'defesa' : 'posse';
+    // Tipo do lance sorteado (antes seguia um padrão fixo pelo minuto): mais variação a cada partida
+    const roll = Math.random();
+    const type: PlanItem['type'] = roll < 0.26 ? 'finalização' : roll < 0.52 ? 'defesa' : 'posse';
     const side: PlanItem['side'] = Math.random() < hostChance ? 'host' : 'guest';
     plan.push(type === 'posse' ? { minute, type, side } : withPlayers(minute, type, side));
   });
