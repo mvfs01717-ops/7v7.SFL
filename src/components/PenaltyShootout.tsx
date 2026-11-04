@@ -22,6 +22,7 @@ type KickPlan = {
   keeper: Point; // para onde o goleiro pula (0 a 1)
   dur: number;
   arc: number;
+  golaco?: boolean; // gol no ângulo: o goleiro pulou para o lado certo, mas não alcançou
 };
 type Props = {
   club: PenaltyTeam;
@@ -54,7 +55,7 @@ const zoneCenter = (z: Zone): Point => ({ x: COLS[z.col], y: ROWS[z.row] });
 // Chance base de defesa conforme o lado do chute e o lado para onde o goleiro pulou
 function savePct(shot: Zone, keeper: Zone) {
   const dc = Math.abs(shot.col - keeper.col);
-  if (dc === 0) return 0.6;
+  if (dc === 0) return 0.9;
   if (dc === 1) return 0.1;
   return 0;
 }
@@ -233,7 +234,10 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
           trave: ['NA TRAVE!', 'Bateu na trave!'],
         };
         const good = mine ? scored : !scored;
-        setFlash({ text: texts[plan.outcome][mine ? 0 : 1], good });
+        setFlash({
+          text: plan.golaco ? (mine ? 'GOLAÇO NO ÂNGULO!' : 'Golaço no ângulo!') : texts[plan.outcome][mine ? 0 : 1],
+          good,
+        });
         if (scored && netRef.current) {
           netRef.current.style.opacity = '0.5';
           later(() => {
@@ -302,6 +306,7 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
     } else if ((bx < 0.035 || bx > 0.965 || by < 0.05) && Math.random() < 0.5) {
       outcome = 'trave';
     }
+    let golaco = false;
     if (!outcome) {
       let pSave =
         savePct(zoneOf({ x: clamp(bx, 0, 1), y: clamp(by, 0, 1) }), keeperZone) +
@@ -311,6 +316,15 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
       if (Math.abs(bx - 0.5) > 0.37 && (by < 0.22 || by > 0.78)) pSave *= 0.55; // cantinho
       if (pw < 0.4) pSave = Math.max(pSave, 0.55); // chute fraco é fácil de pegar
       outcome = Math.random() < clamp(pSave, 0, 0.95) ? 'defesa' : 'gol';
+      if (outcome === 'gol') {
+        const shotCol = zoneOf({ x: clamp(bx, 0, 1), y: clamp(by, 0, 1) }).col;
+        if (shotCol === keeperZone.col) {
+          // O goleiro foi para o lado certo, mas a bola entrou no ângulo, fora do alcance dele
+          golaco = true;
+          bx = shotCol === 0 ? 0.05 : shotCol === 2 ? 0.95 : 0.5;
+          by = by < 0.5 ? 0.06 : 0.94;
+        }
+      }
     }
     setPhase('flying');
     playKick({
@@ -321,6 +335,7 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
       keeper: outcome === 'defesa' ? { x: bx, y: by } : zoneCenter(keeperZone),
       dur: 480 + (1 - pw) * 420,
       arc: 12,
+      golaco,
     });
   }
 
@@ -335,6 +350,7 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
     let target: Point = { x: center.x + rand(-0.06, 0.06), y: center.y + rand(-0.08, 0.08) };
     const missChance = clamp(0.07 + (80 - player.overall) * 0.004, 0.03, 0.2);
     let outcome: Outcome;
+    let golaco = false;
     if (Math.random() < missChance) {
       if (Math.random() < 0.4) {
         outcome = 'trave';
@@ -347,6 +363,11 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
       let pSave = savePct(shotZone, { col, row: 1 });
       if (pSave > 0) pSave = clamp(pSave + ((keepers.user?.overall ?? 75) - player.overall) / 300, 0.02, 0.95);
       outcome = Math.random() < pSave ? 'defesa' : 'gol';
+      if (outcome === 'gol' && shotZone.col === col) {
+        // Você pulou para o lado certo, mas ele chutou no ângulo
+        golaco = true;
+        target = { x: col === 0 ? 0.05 : col === 2 ? 0.95 : 0.5, y: target.y < 0.5 ? 0.06 : 0.94 };
+      }
     }
     setHover(-1);
     setPhase('flying');
@@ -358,6 +379,7 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
       keeper: outcome === 'defesa' ? target : zoneCenter({ col, row: 1 }),
       dur: rand(520, 640),
       arc: 14,
+      golaco,
     });
   }
 
