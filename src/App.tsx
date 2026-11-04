@@ -119,8 +119,8 @@ function pickByRoll(list: Player[], weight: (player: Player) => number, roll: nu
   return list[list.length - 1];
 }
 
-// Chance de uma partida contra o bot terminar empatada e ir para os pênaltis (0.2 = 20%)
-const SHOOTOUT_CHANCE = 0.2;
+// Chance de uma partida contra o bot terminar empatada e ir para os pênaltis (0.4 = 40%)
+const SHOOTOUT_CHANCE = 0.4;
 
 type PlanEntry = {
   minute: number;
@@ -326,7 +326,7 @@ function App() {
   const [mpBusy, setMpBusy] = useState(false);
   const [mpError, setMpError] = useState('');
   const [mpNotice, setMpNotice] = useState('');
-  const [spectating, setSpectating] = useState<{ host: string; guest: string } | null>(null);
+  const [spectating, setSpectating] = useState<{ host: string; guest: string; roomId: string } | null>(null);
   const planRef = useRef<PlanEntry[] | null>(null);
   const roomRef = useRef<Room | null>(null);
   roomRef.current = room;
@@ -347,6 +347,8 @@ function App() {
   // Sala da minha partida do torneio (quando eu ainda não estou nela)
   const [slotRoom, setSlotRoom] = useState<Room | null>(null);
   const chatRef = useRef<ReturnType<typeof openRoomChat> | null>(null);
+  // Guarda a sala dos pênaltis: se o rival sair, a sala some do estado mas a disputa continua em modo online
+  const shootoutNetRef = useRef<{ roomId: string; role: 'host' | 'guest' | 'spectator' } | null>(null);
   // Cartas sorteadas para cada posição no draft clássico (ficam fixas até escolher)
   const drawRef = useRef<Partial<Record<Position, string[]>>>({});
   // Placar mostrado na tela: só sobe quando a bola entra no gol na animação
@@ -632,7 +634,7 @@ function App() {
         shooter: item.shooter,
         keeper: item.keeper,
       }));
-    setSpectating({ host: target.host_nick, guest: target.guest_nick ?? 'Jogador' });
+    setSpectating({ host: target.host_nick, guest: target.guest_nick ?? 'Jogador', roomId: target.id });
     beginMatch(squadPlayers(target.host_squad), squadPlayers(target.guest_squad));
   }
   // Ao entrar como espectador, reconstrói o que já aconteceu até o minuto atual
@@ -744,6 +746,8 @@ function App() {
           guest_squad: {},
           host_ready: false,
           guest_ready: false,
+          shootout_host: null,
+          shootout_guest: null,
         };
         setRoom((current) => (current ? { ...current, ...fresh } : current));
         void patchRoom(room.id, fresh);
@@ -777,7 +781,7 @@ function App() {
       mpPlanRoom.current !== room.id
     ) {
       mpPlanRoom.current = room.id;
-      const plan = generatePlan(squadPlayers(room.host_squad), squadPlayers(room.guest_squad));
+      const plan = generatePlan(squadPlayers(room.host_squad), squadPlayers(room.guest_squad), SHOOTOUT_CHANCE);
       void patchRoom(room.id, { plan, status: 'playing' });
     }
     if (room.status === 'playing' && room.plan && mpMatchRoom.current !== room.id) {
@@ -793,14 +797,21 @@ function App() {
     mpRecorded.current = room.id;
     const goals = (side: 'host' | 'guest') =>
       room.plan!.filter((item) => item.type === 'gol' && item.side === side).length;
-    void recordResult(room, goals('host'), goals('guest'));
+    // Se foi para os pênaltis, o vencedor da disputa ganha +1 gol no registro (conta como vitória normal)
+    const shootoutWinner: 'host' | 'guest' | undefined =
+      shootout && myRole ? (shootout.winner === 'user' ? myRole : myRole === 'host' ? 'guest' : 'host') : undefined;
+    void recordResult(room, goals('host'), goals('guest'), shootoutWinner);
     // Partida de torneio: os dois lados calculam o mesmo vencedor e gravam (a gravação repetida não muda nada)
     const currentTournament = tournamentRef.current;
     const slot = currentTournament ? slotOfRoom(currentTournament, room.id) : null;
     if (currentTournament && slot && !currentTournament[slot].winner_id) {
       const hostGoals = goals('host');
       const guestGoals = goals('guest');
-      const decided = decideWinner(room, hostGoals, guestGoals);
+      const base = decideWinner(room, hostGoals, guestGoals);
+      // Empate no tempo normal: quem decide é a disputa de pênaltis jogada, igual nas duas telas
+      const decided = shootoutWinner
+        ? { ...base, winnerId: shootoutWinner === 'host' ? room.host_id : room.guest_id }
+        : base;
       void setTournamentMatch(currentTournament.id, slot, {
         room_id: room.id,
         winner_id: decided.winnerId,
@@ -1017,7 +1028,7 @@ function App() {
   }, [screen, minute, skipped]);
 
   // Depois dos 90 minutos, espera os gols aparecerem na animação antes de mostrar o resultado
-  const goesToShootout = !room && !spectating && score.user === score.bot;
+  const goesToShootout = score.user === score.bot;
   useEffect(() => {
     if (screen !== 'match' || minute < 90) return;
     if (goesToShootout && (penaltyPhase || shootout)) return; // pênaltis em andamento
@@ -1179,6 +1190,25 @@ function App() {
 
   const opponentTeam = selectedClub ? teams.find((team) => team.id !== selectedClub.id) : undefined;
   const inTournamentMatch = !!room && !!tournament && !!slotOfRoom(tournament, room.id);
+  // Pênaltis no multiplayer: os dois jogam ao vivo (um bate, o outro defende); espectador só assiste
+  const liveNet: { roomId: string; role: 'host' | 'guest' | 'spectator' } | undefined = spectating
+    ? { roomId: spectating.roomId, role: 'spectator' }
+    : room && myRole
+      ? { roomId: room.id, role: myRole }
+      : undefined;
+  if (!penaltyPhase) shootoutNetRef.current = null;
+  else if (liveNet) shootoutNetRef.current = liveNet;
+  const shootoutNet = liveNet ?? (penaltyPhase ? shootoutNetRef.current ?? undefined : undefined);
+  // O adversário saiu no meio da disputa
+  function abortShootout() {
+    setPenaltyPhase(false);
+    if (spectating) {
+      navigate('lobby', true);
+      return;
+    }
+    leaveRoom();
+    navigate(tournamentRef.current ? 'tournament' : 'lobby', true);
+  }
 
   return (
     <div className="app-shell">
@@ -1356,6 +1386,8 @@ function App() {
           onShootoutFinish={finishShootout}
           canSkip={!room && !spectating}
           multiplayer={!!room}
+          net={shootoutNet}
+          onAbort={abortShootout}
           userId={userId}
           chatMessages={chatMessages}
           onSendChat={sendChat}
@@ -3346,6 +3378,8 @@ function MatchScreen({
   onShootoutFinish,
   canSkip,
   multiplayer,
+  net,
+  onAbort,
   userId,
   chatMessages,
   onSendChat,
@@ -3365,6 +3399,8 @@ function MatchScreen({
   onShootoutFinish: (result: Shootout) => void;
   canSkip: boolean;
   multiplayer: boolean;
+  net?: { roomId: string; role: 'host' | 'guest' | 'spectator' };
+  onAbort?: () => void;
   userId: string | null;
   chatMessages: ChatMessage[];
   onSendChat: (text: string) => boolean;
@@ -3406,6 +3442,8 @@ function MatchScreen({
           userTeam={userTeam}
           botTeam={botTeam}
           onFinish={onShootoutFinish}
+          net={net}
+          onAbort={onAbort}
         />
       ) : (
         <MatchPitch
