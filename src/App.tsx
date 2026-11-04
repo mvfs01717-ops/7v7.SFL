@@ -810,21 +810,50 @@ function App() {
     if (currentTournament && slot && !currentTournament[slot].winner_id) {
       const hostGoals = goals('host');
       const guestGoals = goals('guest');
-      const base = decideWinner(room, hostGoals, guestGoals);
-      // Empate no tempo normal: quem decide é a disputa de pênaltis jogada, igual nas duas telas
-      const decided = shootoutWinner
-        ? { ...base, winnerId: shootoutWinner === 'host' ? room.host_id : room.guest_id }
-        : base;
-      void setTournamentMatch(currentTournament.id, slot, {
-        room_id: room.id,
-        winner_id: decided.winnerId,
-        score: `${hostGoals}x${guestGoals}`,
-        pens: decided.pens,
-      }).then((result) => {
-        if (result.tournament) setTournament(result.tournament);
-      });
-      if (decided.pens) {
-        setMpNotice(decided.winnerId === userId ? 'Empate! Você avançou nos pênaltis.' : 'Empate! Seu rival avançou nos pênaltis.');
+      const tId = currentTournament.id;
+      const roomSnapshot = room;
+      const localShootoutWinner = shootoutWinner;
+      // Vencedor dos pênaltis pelas cobranças gravadas na sala (fonte única, igual para os dois lados)
+      const winnerFromKicks = (source: Room | null): 'host' | 'guest' | undefined => {
+        const kicks = source?.shootout_host?.kicks;
+        if (!kicks || !kicks.length) return undefined;
+        const hostPens = kicks.filter((kick) => kick.shooter === 'host' && kick.outcome === 'gol').length;
+        const guestPens = kicks.filter((kick) => kick.shooter === 'guest' && kick.outcome === 'gol').length;
+        if (hostPens === guestPens) return undefined;
+        return hostPens > guestPens ? 'host' : 'guest';
+      };
+      const save = (winnerSide: 'host' | 'guest' | null, pens: boolean) => {
+        const base = decideWinner(roomSnapshot, hostGoals, guestGoals);
+        const winnerId = winnerSide
+          ? winnerSide === 'host'
+            ? roomSnapshot.host_id
+            : (roomSnapshot.guest_id as string)
+          : base.winnerId;
+        void setTournamentMatch(tId, slot, {
+          room_id: roomSnapshot.id,
+          winner_id: winnerId,
+          score: `${hostGoals}x${guestGoals}`,
+          pens,
+        }).then((result) => {
+          if (result.tournament) setTournament(result.tournament);
+        });
+        if (pens) {
+          setMpNotice(winnerId === userId ? 'Empate! Você avançou nos pênaltis.' : 'Empate! Seu rival avançou nos pênaltis.');
+        }
+      };
+      if (hostGoals !== guestGoals) {
+        save(hostGoals > guestGoals ? 'host' : 'guest', false);
+      } else {
+        // Empate no tempo normal: quem decide é a disputa de pênaltis. As cobranças gravadas na sala
+        // mandam; só se não existirem usa o resultado jogado nesta tela, e por último o desempate fixo.
+        void (async () => {
+          let side = winnerFromKicks(roomSnapshot);
+          for (let attempt = 0; !side && attempt < 4; attempt += 1) {
+            if (attempt > 0) await new Promise((resolve) => window.setTimeout(resolve, 1000));
+            side = winnerFromKicks(await fetchRoom(roomSnapshot.id));
+          }
+          save(side ?? localShootoutWinner ?? null, true);
+        })();
       }
     }
   }, [screen, room]);
