@@ -12,6 +12,23 @@ export type PlanItem = {
   shooter?: string;
   keeper?: string;
 };
+// Disputa de pênaltis do multiplayer. Cada jogador grava SÓ na própria coluna (sem sobrescrever o outro):
+//  - shootout_host:  { choices, kicks }  (o anfitrião também resolve cada cobrança e grava o resultado em `kicks`)
+//  - shootout_guest: { choices }
+export type NetChoice = { x?: number; y?: number; pw?: number; dive?: number };
+export type NetKick = {
+  shooter: 'host' | 'guest';
+  playerId: string;
+  outcome: 'gol' | 'defesa' | 'fora' | 'trave';
+  tx: number;
+  ty: number; // onde a bola chegou (0 a 1; fora disso = errou o gol)
+  kx: number;
+  ky: number; // para onde o goleiro pulou
+  dur: number;
+  arc: number;
+  golaco: boolean;
+};
+export type NetShootout = { choices?: Record<string, NetChoice>; kicks?: NetKick[] };
 export type Room = {
   id: string;
   code: string;
@@ -28,6 +45,8 @@ export type Room = {
   guest_ready: boolean;
   plan: PlanItem[] | null;
   status: RoomStatus;
+  shootout_host?: NetShootout | null;
+  shootout_guest?: NetShootout | null;
 };
 // `slot` é a posição em que o jogador foi escalado no draft (pode ser diferente da posição de origem)
 type Lite = { primary_position: string; overall: number; name?: string; slot?: string };
@@ -227,7 +246,8 @@ const GOAL_PER_EDGE = 0.16;
 // O anfitrião sorteia a partida inteira uma vez. Os dois lados reproduzem a mesma lista.
 // Cada time faz gols conforme o SEU ataque contra a defesa e o goleiro do RIVAL; quem finaliza é
 // sorteado entre os jogadores do time, favorecendo os melhores. A partida nunca termina empatada.
-export function generatePlan(hostSquad: Lite[], guestSquad: Lite[]): PlanItem[] {
+// `drawChance` (0 a 1): chance de a partida terminar empatada e ir para os pênaltis. Com 0 nunca empata.
+export function generatePlan(hostSquad: Lite[], guestSquad: Lite[], drawChance = 0): PlanItem[] {
   const edgeHost = attackRating(hostSquad) - defenseRating(guestSquad);
   const edgeGuest = attackRating(guestSquad) - defenseRating(hostSquad);
   const hostChance = clampNum(0.5 + (edgeHost - edgeGuest) * (GOAL_PER_EDGE / 6), 0.2, 0.8);
@@ -243,8 +263,13 @@ export function generatePlan(hostSquad: Lite[], guestSquad: Lite[]): PlanItem[] 
     if (Math.random() < hostChance) hostGoals += 1;
     else guestGoals += 1;
   }
-  // Sem empate: o gol que desempata vai, na maioria das vezes, para o time mais forte
-  if (hostGoals === guestGoals) {
+  // Às vezes a partida termina empatada (vai para os pênaltis): iguala os gols, com pelo menos 1 de cada lado
+  if (drawChance > 0 && Math.random() < drawChance) {
+    const level = Math.max(1, Math.min(hostGoals, guestGoals));
+    hostGoals = level;
+    guestGoals = level;
+  } else if (hostGoals === guestGoals) {
+    // Sem empate: o gol que desempata vai, na maioria das vezes, para o time mais forte
     if (Math.random() < hostChance) hostGoals += 1;
     else guestGoals += 1;
   }
@@ -287,8 +312,16 @@ export function generatePlan(hostSquad: Lite[], guestSquad: Lite[]): PlanItem[] 
 }
 
 // Salva o resultado da partida no ranking. Os dois lados tentam; só o primeiro grava (room_id é único).
-export async function recordResult(room: Room, hostGoals: number, guestGoals: number) {
+// Se a partida foi decidida nos pênaltis, `shootoutWinner` recebe +1 gol no registro para contar como vitória normal.
+export async function recordResult(
+  room: Room,
+  hostGoals: number,
+  guestGoals: number,
+  shootoutWinner?: 'host' | 'guest',
+) {
   if (!room.guest_id) return;
+  if (shootoutWinner === 'host') hostGoals += 1;
+  if (shootoutWinner === 'guest') guestGoals += 1;
   const { error } = await supabase.from('match_results').insert({
     room_id: room.id,
     host_id: room.host_id,
