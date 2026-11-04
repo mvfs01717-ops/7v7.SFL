@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { fetchRoom, patchRoom, type NetChoice, type NetKick } from '@/lib/multiplayer';
 
 // Disputa de pênaltis interativa (estilo FIFA):
 //  - Quando VOCÊ bate: toque/clique no gol para mirar, pare a barra de força na faixa verde.
 //  - Quando o ADVERSÁRIO bate: escolha o canto para o goleiro pular.
+//  - No multiplayer (prop `net`): os dois jogam ao mesmo tempo, um bate e o outro defende; o anfitrião resolve
+//    cada cobrança e as duas telas mostram a mesma animação. Espectadores só assistem.
 
 type Side = 'user' | 'bot';
 export type ShootoutKick = { side: Side; playerId: string; scored: boolean };
@@ -11,7 +14,7 @@ type PenaltyTeam = { name: string; abbreviation: string; primary_color: string; 
 type PenaltyPlayer = { id: string; name: string; overall: number; primary_position: string; slot?: string };
 const posOf = (player: PenaltyPlayer) => player.slot ?? player.primary_position;
 type Outcome = 'gol' | 'defesa' | 'fora' | 'trave';
-type Phase = 'aim' | 'power' | 'dive' | 'flying' | 'done';
+type Phase = 'aim' | 'power' | 'dive' | 'wait' | 'flying' | 'done';
 type Point = { x: number; y: number };
 type Zone = { col: number; row: number };
 type KickPlan = {
@@ -30,7 +33,12 @@ type Props = {
   userTeam: PenaltyPlayer[];
   botTeam: PenaltyPlayer[];
   onFinish: (result: Shootout) => void;
+  // Multiplayer: sala, e se eu sou o anfitrião, o convidado ou só espectador (o anfitrião é o lado "user")
+  net?: { roomId: string; role: 'host' | 'guest' | 'spectator' };
+  onAbort?: () => void;
 };
+const NET_MS = 12000; // tempo que cada jogador tem para escolher
+const NET_AUTO_MS = 19000; // o anfitrião escolhe pelo adversário que sumiu depois desse tempo
 
 // Cena em um SVG 400 x 270
 const VW = 400;
@@ -93,14 +101,75 @@ function status(kicks: ShootoutKick[]) {
   return { taken, goals, finished };
 }
 
-function buildResult(kicks: ShootoutKick[]): Shootout {
+function buildResult(kicks: ShootoutKick[], tieWinner?: Side): Shootout {
   const s = status(kicks);
   const winner: Side =
-    s.goals.user === s.goals.bot ? (Math.random() < 0.5 ? 'user' : 'bot') : s.goals.user > s.goals.bot ? 'user' : 'bot';
+    s.goals.user === s.goals.bot
+      ? (tieWinner ?? (Math.random() < 0.5 ? 'user' : 'bot'))
+      : s.goals.user > s.goals.bot
+        ? 'user'
+        : 'bot';
   return { kicks, userGoals: s.goals.user, botGoals: s.goals.bot, winner };
 }
 
-export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onFinish }: Props) {
+// Resolve uma cobrança: a mira e a força de quem bate, contra o lado para onde o goleiro pulou.
+function resolveShot(
+  player: PenaltyPlayer,
+  keeper: PenaltyPlayer | undefined,
+  mira: Point,
+  pw: number,
+  keeperZone: Zone,
+): Pick<KickPlan, 'outcome' | 'target' | 'keeper' | 'dur' | 'arc' | 'golaco'> {
+  const skill = (player.overall - 75) / 100;
+  const radius = clamp(0.1 + Math.abs(pw - 0.8) * 0.45 - skill * 0.15, 0.04, 0.4);
+  const spreadAngle = rand(0, Math.PI * 2);
+  const spread = radius * Math.sqrt(Math.random());
+  let bx = mira.x + Math.cos(spreadAngle) * spread;
+  let by = mira.y + Math.sin(spreadAngle) * spread * 0.9;
+  if (pw < 0.32) {
+    bx = lerp(bx, 0.5, 0.6); // chute fraco vai no meio
+    by = lerp(by, 0.62, 0.5);
+  }
+  let outcome: Outcome | null = null;
+  if (pw > 0.96) {
+    by = -0.2 - Math.random() * 0.15; // chutou forte demais: por cima do gol
+    outcome = 'fora';
+  } else if (bx < 0 || bx > 1 || by < 0 || by > 1) {
+    outcome = 'fora';
+  } else if ((bx < 0.035 || bx > 0.965 || by < 0.05) && Math.random() < 0.5) {
+    outcome = 'trave';
+  }
+  let golaco = false;
+  if (!outcome) {
+    let pSave =
+      savePct(zoneOf({ x: clamp(bx, 0, 1), y: clamp(by, 0, 1) }), keeperZone) +
+      ((keeper?.overall ?? 75) - player.overall) / 300;
+    pSave *= clamp(1.6 - pw * 0.9, 0.6, 1.4);
+    if (Math.abs(bx - 0.5) < 0.17) pSave *= 1.6; // bola no meio do gol é mais fácil de pegar
+    if (Math.abs(bx - 0.5) > 0.37 && (by < 0.22 || by > 0.78)) pSave *= 0.55; // cantinho
+    if (pw < 0.4) pSave = Math.max(pSave, 0.55); // chute fraco é fácil de pegar
+    outcome = Math.random() < clamp(pSave, 0, 0.95) ? 'defesa' : 'gol';
+    if (outcome === 'gol') {
+      const shotCol = zoneOf({ x: clamp(bx, 0, 1), y: clamp(by, 0, 1) }).col;
+      if (shotCol === keeperZone.col) {
+        // O goleiro foi para o lado certo, mas a bola entrou no ângulo, fora do alcance dele
+        golaco = true;
+        bx = shotCol === 0 ? 0.05 : shotCol === 2 ? 0.95 : 0.5;
+        by = by < 0.5 ? 0.06 : 0.94;
+      }
+    }
+  }
+  return {
+    outcome,
+    target: { x: bx, y: by },
+    keeper: outcome === 'defesa' ? { x: bx, y: by } : zoneCenter(keeperZone),
+    dur: 480 + (1 - pw) * 420,
+    arc: 12,
+    golaco,
+  };
+}
+
+export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onFinish, net, onAbort }: Props) {
   const takers = useMemo(() => ({ user: orderTakers(userTeam), bot: orderTakers(botTeam) }), [userTeam, botTeam]);
   const keepers = useMemo(() => ({ user: keeperOf(userTeam), bot: keeperOf(botTeam) }), [userTeam, botTeam]);
 
@@ -109,6 +178,23 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
   const [aim, setAim] = useState<Point>({ x: 0.5, y: 0.5 });
   const [hover, setHover] = useState(-1); // lado sob o dedo/mouse na hora de defender (0, 1 ou 2)
   const [flash, setFlash] = useState<{ text: string; good: boolean } | null>(null);
+
+  // ----- Multiplayer -----
+  const spectator = net?.role === 'spectator';
+  const hostSide: Side = net?.role === 'guest' ? 'bot' : 'user'; // quem bate primeiro
+  const otherSide = (side: Side): Side => (side === 'user' ? 'bot' : 'user');
+  const turnOf = (index: number): Side => (index % 2 === 0 ? hostSide : otherSide(hostSide));
+  const sideOfRole = (role: 'host' | 'guest'): Side => ((role === 'host') === (hostSide === 'user') ? 'user' : 'bot');
+  const [remote, setRemote] = useState<NetKick[]>([]); // cobranças já resolvidas (gravadas pelo anfitrião)
+  const remoteRef = useRef<NetKick[]>([]);
+  const myChoices = useRef<Record<string, NetChoice>>({});
+  const theirChoices = useRef<Record<string, NetChoice>>({});
+  const netLoaded = useRef(false);
+  const kickStart = useRef({ index: -1, at: 0 });
+  const deadline = useRef(0);
+  const aimed = useRef(false);
+  const [left, setLeft] = useState<number | null>(null);
+  const [netGone, setNetGone] = useState(false);
 
   const svgRef = useRef<SVGSVGElement | null>(null);
   const ballRef = useRef<SVGGElement | null>(null);
@@ -122,14 +208,14 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
   const timers = useRef<number[]>([]);
 
   const st = status(kicks);
-  const turn: Side = kicks.length % 2 === 0 ? 'user' : 'bot';
+  const turn: Side = turnOf(kicks.length);
   const shooterFor = (side: Side, list: ShootoutKick[] = kicks): PenaltyPlayer | undefined => {
     const count = list.filter((kick) => kick.side === side).length;
     const arr = takers[side];
     return arr[count % Math.max(1, arr.length)];
   };
   const shooter = shooterFor(turn);
-  const result = useMemo(() => (st.finished ? buildResult(kicks) : null), [kicks]);
+  const result = useMemo(() => (st.finished ? buildResult(kicks, net ? hostSide : undefined) : null), [kicks]);
 
   const later = (fn: () => void, ms: number) => {
     timers.current.push(window.setTimeout(fn, ms));
@@ -157,13 +243,167 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
       setPhase('done');
       return;
     }
-    if (kicks.length % 2 === 0) {
+    if (net && (spectator || remoteRef.current.length > kicks.length)) {
+      setPhase('wait'); // espectador, ou a cobrança já foi resolvida: só assiste
+      return;
+    }
+    deadline.current = Date.now() + NET_MS;
+    aimed.current = false;
+    if (turnOf(kicks.length) === 'user') {
       setAim({ x: 0.5, y: 0.5 });
       setPhase('aim');
     } else {
       setPhase('dive');
     }
   }, [kicks.length]);
+
+  // Multiplayer: busca a sala a cada segundo (escolhas do adversário e cobranças resolvidas)
+  useEffect(() => {
+    if (!net) return;
+    let alive = true;
+    async function pull() {
+      const room = await fetchRoom(net!.roomId);
+      if (!alive || !room) return;
+      if (room.status === 'cancelled') setNetGone(true);
+      const host = room.shootout_host ?? {};
+      const guest = room.shootout_guest ?? {};
+      if (net!.role === 'host') theirChoices.current = guest.choices ?? {};
+      if (net!.role === 'guest') theirChoices.current = host.choices ?? {};
+      if (!netLoaded.current) {
+        netLoaded.current = true;
+        if (net!.role === 'host') myChoices.current = host.choices ?? {};
+        if (net!.role === 'guest') myChoices.current = guest.choices ?? {};
+        const saved = host.kicks ?? [];
+        if (saved.length > 1) {
+          // Entrou no meio da disputa: pula o que já passou e só anima a última cobrança
+          setKicks(saved.slice(0, -1).map(netToKick));
+        }
+      }
+      const incoming = host.kicks ?? [];
+      if (net!.role !== 'host' && incoming.length > remoteRef.current.length) {
+        remoteRef.current = incoming;
+        setRemote(incoming);
+      } else if (net!.role === 'host' && remoteRef.current.length === 0 && incoming.length > 0) {
+        remoteRef.current = incoming;
+        setRemote(incoming);
+      }
+    }
+    void pull();
+    const id = window.setInterval(() => void pull(), 1000);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, [net?.roomId, net?.role]);
+
+  function netToKick(nk: NetKick): ShootoutKick {
+    return { side: sideOfRole(nk.shooter), playerId: nk.playerId, scored: nk.outcome === 'gol' };
+  }
+
+  // Quando a cobrança já foi resolvida, as duas telas (e os espectadores) tocam a mesma animação
+  useEffect(() => {
+    if (!net || phase === 'flying' || phase === 'done') return;
+    if (remote.length <= kicks.length || status(kicks).finished) return;
+    const nk = remote[kicks.length];
+    cancelAnimationFrame(rafRef.current);
+    setHover(-1);
+    setPhase('flying');
+    playKick({
+      side: sideOfRole(nk.shooter),
+      playerId: nk.playerId,
+      outcome: nk.outcome,
+      target: { x: nk.tx, y: nk.ty },
+      keeper: { x: nk.kx, y: nk.ky },
+      dur: nk.dur,
+      arc: nk.arc,
+      golaco: nk.golaco,
+    });
+  }, [remote, kicks.length, phase]);
+
+  // Envia a minha escolha (mira e força, ou lado do goleiro) para a sala
+  function submitChoice(index: number, choice: NetChoice) {
+    if (!net || net.role === 'spectator') return;
+    myChoices.current = { ...myChoices.current, [String(index)]: choice };
+    if (net.role === 'host') writeHost();
+    else void patchRoom(net.roomId, { shootout_guest: { choices: myChoices.current } });
+  }
+  function writeHost() {
+    if (!net) return;
+    void patchRoom(net.roomId, { shootout_host: { choices: myChoices.current, kicks: remoteRef.current } });
+  }
+
+  // Só o anfitrião resolve: quando as duas escolhas chegam (ou o tempo do adversário acaba), sorteia o desfecho
+  function tryResolve() {
+    if (!net || net.role !== 'host') return;
+    const list = remoteRef.current;
+    const index = list.length;
+    const played = list.map(netToKick);
+    if (status(played).finished) return;
+    if (kickStart.current.index !== index) kickStart.current = { index, at: Date.now() };
+    const shooterRole: 'host' | 'guest' = index % 2 === 0 ? 'host' : 'guest';
+    const shotChoice = (shooterRole === 'host' ? myChoices.current : theirChoices.current)[String(index)];
+    const diveChoice = (shooterRole === 'host' ? theirChoices.current : myChoices.current)[String(index)];
+    let shot = shotChoice && typeof shotChoice.pw === 'number' ? shotChoice : null;
+    let dive = diveChoice && typeof diveChoice.dive === 'number' ? diveChoice.dive : null;
+    if (!shot || dive === null) {
+      if (Date.now() - kickStart.current.at < NET_AUTO_MS) return;
+      if (!shot) shot = { x: rand(0.25, 0.75), y: rand(0.3, 0.7), pw: 0.75 };
+      if (dive === null) dive = Math.floor(Math.random() * 3);
+    }
+    const shooterSide = sideOfRole(shooterRole);
+    const player = shooterFor(shooterSide, played);
+    if (!player) return;
+    const plan = resolveShot(
+      player,
+      keepers[otherSide(shooterSide)],
+      { x: clamp(shot.x ?? 0.5, 0.02, 0.98), y: clamp(shot.y ?? 0.5, 0.03, 0.97) },
+      clamp(shot.pw ?? 0.75, 0, 1),
+      { col: clamp(Math.round(dive), 0, 2), row: Math.random() < 0.5 ? 0 : 1 },
+    );
+    const nk: NetKick = {
+      shooter: shooterRole,
+      playerId: player.id,
+      outcome: plan.outcome,
+      tx: plan.target.x,
+      ty: plan.target.y,
+      kx: plan.keeper.x,
+      ky: plan.keeper.y,
+      dur: plan.dur,
+      arc: plan.arc,
+      golaco: !!plan.golaco,
+    };
+    remoteRef.current = [...list, nk];
+    setRemote(remoteRef.current);
+    writeHost();
+  }
+  const resolveRef = useRef(tryResolve);
+  resolveRef.current = tryResolve;
+  useEffect(() => {
+    if (!net || net.role !== 'host') return;
+    const id = window.setInterval(() => resolveRef.current(), 400);
+    return () => window.clearInterval(id);
+  }, [net?.role]);
+
+  // Contagem regressiva da minha escolha; ao zerar, o jogo escolhe por mim
+  useEffect(() => {
+    if (!net || spectator || (phase !== 'aim' && phase !== 'power' && phase !== 'dive')) {
+      setLeft(null);
+      return;
+    }
+    const id = window.setInterval(() => {
+      const secs = Math.ceil((deadline.current - Date.now()) / 1000);
+      setLeft(Math.max(0, secs));
+      if (secs > 0) return;
+      window.clearInterval(id);
+      if (phase === 'dive') chooseDive(Math.floor(Math.random() * 3));
+      else {
+        if (!aimed.current) aimRef.current = { x: rand(0.25, 0.75), y: rand(0.3, 0.7) };
+        if (phase === 'aim') powerRef.current = 0.75;
+        shootUser(true);
+      }
+    }, 250);
+    return () => window.clearInterval(id);
+  }, [phase, kicks.length]);
 
   // Barra de força: vai e volta; o jogador para na faixa verde
   useEffect(() => {
@@ -271,6 +511,7 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
   function onScenePointer(event: ReactPointerEvent<SVGSVGElement>, down: boolean) {
     if (phase !== 'aim') return;
     const p = pointerToGoal(event);
+    aimed.current = true;
     setAim(p);
     if (down) {
       powerRef.current = 0;
@@ -279,69 +520,33 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
   }
 
   // Você bate: a mira e a força definem onde a bola vai e se o goleiro pega
-  function shootUser() {
-    if (phase !== 'power') return;
-    const player = shooterFor('user');
-    const keeper = keepers.bot;
-    if (!player) return;
-    const pw = powerRef.current;
+  function shootUser(force = false) {
+    if (phase !== 'power' && !force) return;
     const mira = aimRef.current;
-    const skill = (player.overall - 75) / 100;
-    const radius = clamp(0.1 + Math.abs(pw - 0.8) * 0.45 - skill * 0.15, 0.04, 0.4);
-    const angle = rand(0, Math.PI * 2);
-    const spread = radius * Math.sqrt(Math.random());
-    let bx = mira.x + Math.cos(angle) * spread;
-    let by = mira.y + Math.sin(angle) * spread * 0.9;
-    if (pw < 0.32) {
-      bx = lerp(bx, 0.5, 0.6); // chute fraco vai no meio
-      by = lerp(by, 0.62, 0.5);
+    const pw = powerRef.current;
+    if (net) {
+      // Multiplayer: só envia a minha escolha; o anfitrião resolve e as duas telas animam juntas
+      submitChoice(kicks.length, { x: mira.x, y: mira.y, pw });
+      setPhase('wait');
+      return;
     }
+    const player = shooterFor('user');
+    if (!player) return;
     const keeperZone = pickKeeperZone();
-    let outcome: Outcome | null = null;
-    if (pw > 0.96) {
-      by = -0.2 - Math.random() * 0.15; // chutou forte demais: por cima do gol
-      outcome = 'fora';
-    } else if (bx < 0 || bx > 1 || by < 0 || by > 1) {
-      outcome = 'fora';
-    } else if ((bx < 0.035 || bx > 0.965 || by < 0.05) && Math.random() < 0.5) {
-      outcome = 'trave';
-    }
-    let golaco = false;
-    if (!outcome) {
-      let pSave =
-        savePct(zoneOf({ x: clamp(bx, 0, 1), y: clamp(by, 0, 1) }), keeperZone) +
-        ((keeper?.overall ?? 75) - player.overall) / 300;
-      pSave *= clamp(1.6 - pw * 0.9, 0.6, 1.4);
-      if (Math.abs(bx - 0.5) < 0.17) pSave *= 1.6; // bola no meio do gol é mais fácil de pegar
-      if (Math.abs(bx - 0.5) > 0.37 && (by < 0.22 || by > 0.78)) pSave *= 0.55; // cantinho
-      if (pw < 0.4) pSave = Math.max(pSave, 0.55); // chute fraco é fácil de pegar
-      outcome = Math.random() < clamp(pSave, 0, 0.95) ? 'defesa' : 'gol';
-      if (outcome === 'gol') {
-        const shotCol = zoneOf({ x: clamp(bx, 0, 1), y: clamp(by, 0, 1) }).col;
-        if (shotCol === keeperZone.col) {
-          // O goleiro foi para o lado certo, mas a bola entrou no ângulo, fora do alcance dele
-          golaco = true;
-          bx = shotCol === 0 ? 0.05 : shotCol === 2 ? 0.95 : 0.5;
-          by = by < 0.5 ? 0.06 : 0.94;
-        }
-      }
-    }
+    const plan = resolveShot(player, keepers.bot, mira, pw, keeperZone);
     setPhase('flying');
-    playKick({
-      side: 'user',
-      playerId: player.id,
-      outcome,
-      target: { x: bx, y: by },
-      keeper: outcome === 'defesa' ? { x: bx, y: by } : zoneCenter(keeperZone),
-      dur: 480 + (1 - pw) * 420,
-      arc: 12,
-      golaco,
-    });
+    playKick({ side: 'user', playerId: player.id, ...plan });
   }
 
   // O adversário bate: você escolhe o canto onde o goleiro pula
   function chooseDive(col: number) {
     if (phase !== 'dive') return;
+    if (net) {
+      submitChoice(kicks.length, { dive: col });
+      setHover(-1);
+      setPhase('wait');
+      return;
+    }
     const player = shooterFor('bot');
     if (!player) return;
     const r = Math.random();
@@ -385,7 +590,7 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
 
   // Resolve o que falta automaticamente
   function autoRest() {
-    if (phase === 'flying' || phase === 'done') return;
+    if (net || phase === 'flying' || phase === 'done') return;
     cancelAnimationFrame(rafRef.current);
     const list = [...kicks];
     while (!status(list).finished && list.length < 60) {
@@ -438,11 +643,15 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
   const headline =
     phase === 'done'
       ? result?.winner === 'user'
-        ? 'Você venceu nos pênaltis!'
+        ? spectator
+          ? `${club.name} vence nos pênaltis`
+          : 'Você venceu nos pênaltis!'
         : `${opponent.name} vence nos pênaltis`
-      : turn === 'user'
-        ? `Sua vez de bater: ${shooter?.name ?? ''}`
-        : `${shooter?.name ?? 'O adversário'} vai bater. Defenda!`;
+      : spectator
+        ? `${(turn === 'user' ? club : opponent).abbreviation}: ${shooter?.name ?? ''} vai bater`
+        : turn === 'user'
+          ? `Sua vez de bater: ${shooter?.name ?? ''}`
+          : `${shooter?.name ?? 'O adversário'} vai bater. Defenda!`;
   const hint =
     phase === 'aim'
       ? 'Toque ou clique no gol para mirar.'
@@ -450,7 +659,11 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
         ? 'Pare a barra na faixa verde para chutar com precisão!'
         : phase === 'dive'
           ? 'Toque no lado para onde o goleiro deve pular: esquerda, meio ou direita.'
-          : '';
+          : phase === 'wait' && net && !spectator
+            ? 'Escolha enviada. Aguardando o adversário…'
+            : phase === 'wait' && spectator
+              ? 'Você está assistindo a disputa.'
+              : '';
 
   return (
     <section
@@ -635,6 +848,19 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
       )}
 
       {hint && <p style={{ margin: 0, textAlign: 'center', opacity: 0.8, fontSize: 14 }}>{hint}</p>}
+      {net && left !== null && (
+        <p style={{ margin: 0, textAlign: 'center', fontWeight: 800, color: left <= 3 ? '#f87171' : '#F5B800' }}>
+          ⏱ {left}s
+        </p>
+      )}
+      {netGone && phase !== 'done' && (
+        <div style={{ display: 'grid', gap: 8, justifyItems: 'center' }}>
+          <p style={{ margin: 0, color: '#f87171', fontWeight: 700 }}>O adversário saiu da sala.</p>
+          <button className="outline-button" onClick={() => onAbort?.()}>
+            Voltar ao início
+          </button>
+        </div>
+      )}
 
       {phase === 'done' && result && (
         <div style={{ display: 'flex', justifyContent: 'center' }}>
@@ -643,7 +869,7 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
           </button>
         </div>
       )}
-      {phase !== 'done' && phase !== 'flying' && (
+      {!net && phase !== 'done' && phase !== 'flying' && (
         <div style={{ display: 'flex', justifyContent: 'center' }}>
           <button className="outline-button" onClick={autoRest}>
             Simular o resto automaticamente
