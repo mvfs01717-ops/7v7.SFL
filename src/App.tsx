@@ -39,6 +39,9 @@ type MatchEvent = {
   type: 'posse' | 'finalização' | 'defesa' | 'gol';
   text: string;
   team: 'user' | 'bot';
+  // Quem finalizou e quem deu o passe: a animação do campo usa isso para encenar a jogada certa
+  actor?: string;
+  assist?: string;
 };
 type MatchStats = {
   userPossession: number;
@@ -1099,17 +1102,85 @@ function App() {
       side === 'user'
         ? selectedClub?.abbreviation
         : teams.find((team) => team.id !== selectedClub?.id)?.abbreviation;
+    // Sorteio de variações da narração. No multiplayer/espectador sai do minuto (igual nos dois lados);
+    // no modo solo é aleatório.
+    const shared = !!roomRef.current || !!spectating;
+    const roll = (salt: number) =>
+      shared ? Math.abs(Math.sin(currentMinute * 12.9898 + salt * 78.233) * 43758.5453) % 1 : Math.random();
+    const choose = <T,>(list: T[], salt: number): T => list[Math.floor(roll(salt) * list.length) % list.length];
+    // Assistência sorteada na hora do gol (igual nos dois lados do multiplayer)
+    let assist: Player | undefined;
+    if (type === 'gol' && attackPlayer) {
+      const mates = attackSquad.filter((player) => player.id !== attackPlayer.id && slotOf(player) !== 'GK');
+      const assistRoll = Math.abs(Math.sin(currentMinute * 39.3468 + 11.135) * 24634.6345) % 1;
+      assist = assistRoll < 0.75 ? pickByRoll(mates, (player) => player.overall, assistRoll / 0.75) : undefined;
+    }
+    const shooterName = attackPlayer?.name ?? 'O atacante';
+    const keeperName = defensePlayer?.name ?? 'O goleiro';
+    const middle = pickByRoll(
+      attackSquad.filter((player) => ['CM', 'LB', 'RB'].includes(slotOf(player))),
+      () => 1,
+      roll(5),
+    );
+    const mate = pickByRoll(
+      attackSquad.filter((player) => player.id !== middle?.id && slotOf(player) !== 'GK'),
+      () => 1,
+      roll(6),
+    );
+    const goalTexts = [
+      `${shooterName} bate colocado, no canto, e marca para ${club}!`,
+      `${shooterName} chuta forte de fora da área e a bola explode na rede!`,
+      `${shooterName} sobe mais que a zaga e cabeceia para o gol de ${club}!`,
+      `${shooterName} bate de primeira, sem chance para ${keeperName}!`,
+      `${shooterName} limpa a marcação e finaliza com categoria: gol de ${club}!`,
+      `Contra-ataque fulminante e ${shooterName} guarda para ${club}!`,
+      `${shooterName} aproveita o rebote e empurra para o fundo da rede!`,
+      `${shooterName} dá uma cavadinha em cima de ${keeperName} e marca!`,
+      `${shooterName} chuta cruzado, a bola passa por ${keeperName} e é gol!`,
+    ];
+    const goalText = assist
+      ? `${choose(goalTexts, 1)} Passe de ${assist.name}.`
+      : `${choose(goalTexts, 1)} Jogada individual.`;
+    const shotTexts = [
+      `${shooterName} finaliza de primeira, mas a bola passa por cima do gol.`,
+      `${shooterName} bate cruzado e a bola sai rente à trave.`,
+      `${shooterName} arrisca de longe e isola.`,
+      `${shooterName} chuta torto e a bola vai pela linha de fundo.`,
+      `Bola na trave! ${shooterName} quase abre o placar para ${club}.`,
+      `${shooterName} cabeceia, mas sem direção.`,
+      `${shooterName} fica de frente para o gol e chuta para fora.`,
+    ];
+    const saveTexts = [
+      `${keeperName} espalma o chute de ${shooterName} para escanteio!`,
+      `${keeperName} voa no canto e tira a bola do ângulo!`,
+      `${keeperName} sai bem do gol e fecha o ângulo de ${shooterName}.`,
+      `Defesaça de ${keeperName} no chute à queima-roupa de ${shooterName}!`,
+      `${keeperName} faz a defesa segura e domina a bola.`,
+      `${keeperName} cresce na hora certa e impede o gol de ${shooterName}.`,
+    ];
+    const possessionTexts = [
+      `${club} organiza a posse no meio-campo.`,
+      `${middle?.name ?? club} toca para ${mate?.name ?? 'o companheiro'} e ${club} trabalha a bola.`,
+      `${club} acelera pela ponta, mas a defesa se recompõe.`,
+      `${mate?.name ?? club} tenta o lançamento, a zaga corta.`,
+      `Jogo disputado no meio: ${middle?.name ?? club} segura a bola para ${club}.`,
+      `${club} troca passes e espera o espaço para atacar.`,
+      `${middle?.name ?? club} arma o contra-ataque de ${club}.`,
+      `Bola longa de ${middle?.name ?? club}, mas ${mate?.name ?? 'o atacante'} não alcança.`,
+    ];
     const text =
       type === 'gol'
-        ? `${attackPlayer?.name} marca para ${club}. Que finalização!`
+        ? goalText
         : type === 'finalização'
-          ? `${attackPlayer?.name} finaliza de primeira.`
+          ? choose(shotTexts, 2)
           : type === 'defesa'
-            ? `${defensePlayer?.name} faz uma defesa segura.`
-            : `${club} organiza a posse no meio-campo.`;
+            ? choose(saveTexts, 3)
+            : choose(possessionTexts, 4);
     eventSeq.current += 1;
     const id = eventSeq.current;
-    setEvents((current) => [{ id, minute: currentMinute, type, text, team: side }, ...current].slice(0, 18));
+    setEvents((current) =>
+      [{ id, minute: currentMinute, type, text, team: side, actor: attackPlayer?.name, assist: assist?.name }, ...current].slice(0, 18),
+    );
     // Toda finalização, defesa ou gol é um chute do time que ataca.
     // No alvo = defesa do goleiro ou gol. "Finalização" simples é o chute que sai para fora.
     const isShot = type === 'finalização' || type === 'defesa' || type === 'gol';
@@ -1132,12 +1203,6 @@ function App() {
     if (type === 'gol') {
       setScore((current) => ({ ...current, [side]: current[side] + 1 }));
       if (attackPlayer) {
-        // Assistência sorteada na hora do gol (igual nos dois lados do multiplayer)
-        const mates = (side === 'user' ? userTeam : botTeam).filter(
-          (player) => player.id !== attackPlayer.id && slotOf(player) !== 'GK',
-        );
-        const assistRoll = Math.abs(Math.sin(currentMinute * 39.3468 + 11.135) * 24634.6345) % 1;
-        const assist = assistRoll < 0.75 ? pickByRoll(mates, (player) => player.overall, assistRoll / 0.75) : undefined;
         setGoalLog((current) => [
           ...current,
           { minute: currentMinute, scorerId: attackPlayer.id, assistId: assist?.id, side },
