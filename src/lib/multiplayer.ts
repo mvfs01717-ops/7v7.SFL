@@ -240,77 +240,110 @@ function pickGoalMinutes(count: number, slots: number[]): number[] {
 
 const MIN_GOALS = 3;
 const MAX_GOALS = 7;
-// Quanto cada ponto de vantagem (ataque contra a defesa do rival) vale em gols esperados
+// Quanto cada ponto de vantagem (ataque contra a defesa do rival) vale na chance de a partida pender para um lado
 const GOAL_PER_EDGE = 0.16;
+// Quanto cada ponto de vantagem (ataque contra a defesa do rival) vale em chutes a mais
+const SHOTS_PER_EDGE = 0.5;
+// Duelo atacante x goleiro: cada ponto de overall a mais do atacante (ou do goleiro) muda a chance de gol em 1,4 ponto percentual
+const DUEL_PER_POINT = 0.014;
+
+type Shot = { side: 'host' | 'guest'; shooter?: Lite; keeper?: Lite; outcome: 'gol' | 'defesa' | 'fora' };
 
 // O anfitrião sorteia a partida inteira uma vez. Os dois lados reproduzem a mesma lista.
-// Cada time faz gols conforme o SEU ataque contra a defesa e o goleiro do RIVAL; quem finaliza é
-// sorteado entre os jogadores do time, favorecendo os melhores. A partida nunca termina empatada.
+// A partida é feita de chutes: o ataque de um time contra a defesa do rival define quantas chances ele cria,
+// e cada chute é um duelo entre o finalizador (sorteado, melhor overall aparece mais) e o goleiro do rival.
+// Atacante muito melhor que o goleiro faz mais gols; goleiro muito melhor defende mais.
+// A partida nunca termina empatada, e tem entre 3 e 7 gols no total.
 // `drawChance` (0 a 1): chance de a partida terminar empatada e ir para os pênaltis. Com 0 nunca empata.
 export function generatePlan(hostSquad: Lite[], guestSquad: Lite[], drawChance = 0): PlanItem[] {
   const edgeHost = attackRating(hostSquad) - defenseRating(guestSquad);
   const edgeGuest = attackRating(guestSquad) - defenseRating(hostSquad);
   const hostChance = clampNum(0.5 + (edgeHost - edgeGuest) * (GOAL_PER_EDGE / 6), 0.2, 0.8);
 
-  let hostGoals = poisson(clampNum(2.4 + edgeHost * GOAL_PER_EDGE, 0.4, 5));
-  let guestGoals = poisson(clampNum(2.4 + edgeGuest * GOAL_PER_EDGE, 0.4, 5));
-  while (hostGoals + guestGoals > MAX_GOALS) {
+  // Um chute: quem bate, quem defende e o desfecho do duelo
+  const takeShot = (side: Shot['side']): Shot => {
+    const shooter = pickShooter(side === 'host' ? hostSquad : guestSquad);
+    const keeper = keeperOf(side === 'host' ? guestSquad : hostSquad);
+    const skill = shooter?.overall ?? 75;
+    const keeperSkill = keeper?.overall ?? 75;
+    // Chutar no gol: atacante melhor erra menos
+    const onTarget = Math.random() < clampNum(0.6 + (skill - 78) * 0.006, 0.4, 0.8);
+    if (!onTarget) return { side, shooter, keeper, outcome: 'fora' };
+    // No gol: atacante melhor que o goleiro marca mais; goleiro melhor que o atacante defende mais
+    const pGoal = clampNum(0.36 + (skill - keeperSkill) * DUEL_PER_POINT, 0.1, 0.75);
+    return { side, shooter, keeper, outcome: Math.random() < pGoal ? 'gol' : 'defesa' };
+  };
+  const shotCount = (edge: number) =>
+    Math.max(4, Math.round(clampNum(9 + edge * SHOTS_PER_EDGE, 5, 14) + (Math.random() * 3 - 1.5)));
+  const shots: Shot[] = [];
+  for (let i = shotCount(edgeHost); i > 0; i -= 1) shots.push(takeShot('host'));
+  for (let i = shotCount(edgeGuest); i > 0; i -= 1) shots.push(takeShot('guest'));
+
+  const goalsOf = (side: Shot['side']) => shots.filter((shot) => shot.side === side && shot.outcome === 'gol').length;
+  // Transforma um chute do lado em gol (prefere uma defesa; se não houver chute, cria um)
+  const addGoal = (side: Shot['side']) => {
+    const mine = shots.filter((shot) => shot.side === side && shot.outcome !== 'gol');
+    const saved = mine.filter((shot) => shot.outcome === 'defesa');
+    const pool = saved.length ? saved : mine;
+    if (pool.length) pool[Math.floor(Math.random() * pool.length)].outcome = 'gol';
+    else shots.push({ ...takeShot(side), outcome: 'gol' });
+  };
+  // Transforma um gol do lado em defesa do goleiro
+  const removeGoal = (side: Shot['side']) => {
+    const goals = shots.filter((shot) => shot.side === side && shot.outcome === 'gol');
+    if (goals.length) goals[Math.floor(Math.random() * goals.length)].outcome = 'defesa';
+  };
+
+  while (goalsOf('host') + goalsOf('guest') > MAX_GOALS) {
     // Corta do lado que fez mais; em empate sorteia, para não prejudicar sempre o mesmo time
-    if (hostGoals > guestGoals || (hostGoals === guestGoals && Math.random() < 0.5)) hostGoals -= 1;
-    else guestGoals -= 1;
+    const h = goalsOf('host');
+    const g = goalsOf('guest');
+    removeGoal(h > g || (h === g && Math.random() < 0.5) ? 'host' : 'guest');
   }
-  while (hostGoals + guestGoals < MIN_GOALS) {
-    if (Math.random() < hostChance) hostGoals += 1;
-    else guestGoals += 1;
+  while (goalsOf('host') + goalsOf('guest') < MIN_GOALS) {
+    addGoal(Math.random() < hostChance ? 'host' : 'guest');
   }
   // Às vezes a partida termina empatada (vai para os pênaltis): iguala os gols, com pelo menos 1 de cada lado
   if (drawChance > 0 && Math.random() < drawChance) {
-    const level = Math.max(1, Math.min(hostGoals, guestGoals));
-    hostGoals = level;
-    guestGoals = level;
-  } else if (hostGoals === guestGoals) {
+    const level = Math.max(1, Math.min(goalsOf('host'), goalsOf('guest')));
+    while (goalsOf('host') > level) removeGoal('host');
+    while (goalsOf('guest') > level) removeGoal('guest');
+    while (goalsOf('host') < level) addGoal('host');
+    while (goalsOf('guest') < level) addGoal('guest');
+  } else if (goalsOf('host') === goalsOf('guest')) {
     // Sem empate: o gol que desempata vai, na maioria das vezes, para o time mais forte
-    if (Math.random() < hostChance) hostGoals += 1;
-    else guestGoals += 1;
+    addGoal(Math.random() < hostChance ? 'host' : 'guest');
   }
 
   const slots: number[] = [];
   for (let minute = 1; minute <= 90; minute += 1) {
     if (minute % 4 === 0 || minute % 7 === 0) slots.push(minute);
   }
-  const goalMinutes = pickGoalMinutes(hostGoals + guestGoals, slots);
-  const goalSides = shuffled<PlanItem['side']>([
-    ...Array.from({ length: hostGoals }, () => 'host' as const),
-    ...Array.from({ length: guestGoals }, () => 'guest' as const),
-  ]);
+  const goals = shuffled(shots.filter((shot) => shot.outcome === 'gol'));
+  const goalMinutes = pickGoalMinutes(goals.length, slots);
+  const free = shuffled(slots.filter((minute) => !goalMinutes.includes(minute)));
+  // Os outros chutes ocupam minutos livres; sobram alguns só de posse de bola
+  const others = shuffled(shots.filter((shot) => shot.outcome !== 'gol')).slice(0, Math.max(0, free.length - 6));
 
-  // Acrescenta quem finalizou e quem defendeu ao lance
-  const withPlayers = (minute: number, type: PlanItem['type'], side: PlanItem['side']): PlanItem => {
-    const attack = side === 'host' ? hostSquad : guestSquad;
-    const defend = side === 'host' ? guestSquad : hostSquad;
-    const item: PlanItem = { minute, type, side };
-    const shooter = pickShooter(attack)?.name;
-    const keeper = keeperOf(defend)?.name;
-    if (shooter) item.shooter = shooter;
-    if (keeper) item.keeper = keeper;
+  const itemOf = (minute: number, shot: Shot): PlanItem => {
+    const item: PlanItem = {
+      minute,
+      type: shot.outcome === 'gol' ? 'gol' : shot.outcome === 'defesa' ? 'defesa' : 'finalização',
+      side: shot.side,
+    };
+    if (shot.shooter?.name) item.shooter = shot.shooter.name;
+    if (shot.keeper?.name) item.keeper = shot.keeper.name;
     return item;
   };
 
   // Item "meta" no minuto 0: nunca é um lance, só guarda a hora de início da partida
   const plan: PlanItem[] = [{ minute: 0, type: 'posse', side: 'host', startedAt: Date.now() }];
-  slots.forEach((minute) => {
-    const goalIndex = goalMinutes.indexOf(minute);
-    if (goalIndex >= 0) {
-      plan.push(withPlayers(minute, 'gol', goalSides[goalIndex]));
-      return;
-    }
-    // Tipo do lance sorteado (antes seguia um padrão fixo pelo minuto): mais variação a cada partida
-    const roll = Math.random();
-    const type: PlanItem['type'] = roll < 0.26 ? 'finalização' : roll < 0.52 ? 'defesa' : 'posse';
-    const side: PlanItem['side'] = Math.random() < hostChance ? 'host' : 'guest';
-    plan.push(type === 'posse' ? { minute, type, side } : withPlayers(minute, type, side));
+  goals.forEach((shot, i) => plan.push(itemOf(goalMinutes[i], shot)));
+  others.forEach((shot, i) => plan.push(itemOf(free[i], shot)));
+  free.slice(others.length).forEach((minute) => {
+    plan.push({ minute, type: 'posse', side: Math.random() < hostChance ? 'host' : 'guest' });
   });
-  return plan;
+  return plan.sort((a, b) => a.minute - b.minute);
 }
 
 // Salva o resultado da partida no ranking. Os dois lados tentam; só o primeiro grava (room_id é único).
