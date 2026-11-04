@@ -1479,7 +1479,7 @@ function App() {
         </div>
       )}
 
-      {screen === 'match' && selectedClub && opponentTeam && (
+      {screen === 'match' && selectedClub && opponentTeam && !lineupReveal && (
         <MatchScreen
           club={selectedClub}
           opponent={opponentTeam}
@@ -3304,7 +3304,17 @@ function TeamReveal({ club, squad, onDone }: { club: Team; squad: Partial<Record
   );
 }
 
-// Animação antes da partida: a escalação do rival entra jogador por jogador (posição e overall), depois o overall do time
+// Animação antes da partida: o rival entra em campo, jogador por jogador, na formação (goleiro primeiro), e depois aparece o overall do time
+const REVEAL_SPOTS: Record<Position, [number, number]> = {
+  GK: [50, 9],
+  LB: [20, 30],
+  RB: [80, 30],
+  CM: [50, 50],
+  LF: [20, 72],
+  RF: [80, 72],
+  CF: [50, 88],
+};
+
 function RivalReveal({
   opponent,
   rivalName,
@@ -3324,8 +3334,8 @@ function RivalReveal({
   const atk = groupAverage(bySlot, ['LF', 'RF', 'CF']);
   const def = groupAverage(bySlot, ['GK', 'LB', 'RB', 'CM']);
   const overall = average(squad);
-  const STEP = 380; // intervalo entre um jogador e o próximo
-  const statsAt = ordered.length * STEP + 500;
+  const STEP = 600; // intervalo entre um jogador e o próximo
+  const statsAt = ordered.length * STEP + 300;
   const [t, setT] = useState(0);
   const done = useRef(false);
   const finish = () => {
@@ -3359,6 +3369,8 @@ function RivalReveal({
   const ovrP = ease((t - statsAt - 700) / 1200);
   const tones = { special: '#F5B800', gold: '#d4a63a', silver: '#bcc3cd', bronze: '#b8743f' };
   const ready = t >= statsAt + 1800;
+  const line = '#123a85';
+  const SIZE = 60;
   return (
     <div
       role="dialog"
@@ -3370,91 +3382,137 @@ function RivalReveal({
         overflowY: 'auto',
         display: 'grid',
         placeItems: 'center',
-        padding: 16,
-        background: 'rgba(5,8,12,.94)',
+        padding: 12,
+        background: '#000c3d',
         animation: 'lr-fade .35s ease-out',
       }}
     >
       <style>{`
         @keyframes lr-fade { from { opacity: 0 } to { opacity: 1 } }
-        @keyframes lr-in { from { opacity: 0; transform: translateX(-40px) } to { opacity: 1; transform: translateX(0) } }
+        @keyframes lr-spot { 0% { opacity: 0; transform: translateY(-26px) scale(.3) } 60% { opacity: 1; transform: translateY(2px) scale(1.15) } 100% { opacity: 1; transform: translateY(0) scale(1) } }
         @keyframes lr-pop { 0% { transform: scale(.6); opacity: 0 } 70% { transform: scale(1.08) } 100% { transform: scale(1); opacity: 1 } }
-        @media (prefers-reduced-motion: reduce) { .lr-row, .lr-pop { animation: none !important; opacity: 1 !important } }
+        @media (prefers-reduced-motion: reduce) { .lr-spot, .lr-pop { animation: none !important; opacity: 1 !important } }
       `}</style>
-      <div style={{ width: 'min(460px, 100%)', textAlign: 'center' }}>
+      <div style={{ width: 'min(400px, 100%)', textAlign: 'center' }}>
         <div className="eyebrow">{rivalName ? `SEU RIVAL · ${rivalName.toUpperCase()}` : 'SEU RIVAL'}</div>
-        <h2 style={{ margin: '6px 0 16px' }}>{opponent.name.toUpperCase()}</h2>
-        <div style={{ display: 'grid', gap: 6, textAlign: 'left' }}>
+        <h2 style={{ margin: '4px 0 8px' }}>{opponent.name.toUpperCase()}</h2>
+        <div style={{ position: 'relative', width: '100%', aspectRatio: '3 / 4', background: '#000f52', borderRadius: 10, overflow: 'hidden' }}>
+          <svg viewBox="0 0 300 400" width="100%" height="100%" style={{ position: 'absolute', inset: 0 }} aria-hidden="true">
+            <g fill="none" stroke={line} strokeWidth={4}>
+              <rect x={15} y={10} width={270} height={380} />
+              <line x1={15} y1={200} x2={285} y2={200} />
+              <circle cx={150} cy={200} r={48} />
+              <rect x={95} y={10} width={110} height={62} />
+              <rect x={125} y={10} width={50} height={26} />
+              <rect x={95} y={328} width={110} height={62} />
+              <rect x={125} y={364} width={50} height={26} />
+            </g>
+            <circle cx={150} cy={200} r={5} fill={line} />
+          </svg>
           {ordered.map((player, index) => {
+            const [x, y] = REVEAL_SPOTS[slotOf(player)];
             const color = tones[colorForOverall(player.overall) as keyof typeof tones];
             return (
               <div
                 key={player.id}
-                className="lr-row"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 12,
-                  padding: '8px 12px',
-                  borderRadius: 12,
-                  border: `1px solid ${color}`,
-                  background: 'linear-gradient(90deg, rgba(255,255,255,.07), rgba(255,255,255,.02))',
-                  opacity: 0,
-                  animation: `lr-in .35s ease-out ${index * STEP}ms forwards`,
-                }}
+                style={{ position: 'absolute', left: `${x}%`, top: `${y}%`, transform: 'translate(-50%, -50%)', width: 96 }}
               >
-                <b
+                <div
+                  className="lr-spot"
                   style={{
-                    flex: '0 0 44px',
-                    textAlign: 'center',
-                    padding: '5px 0',
-                    borderRadius: 8,
-                    background: '#F5B800',
-                    color: '#0B1016',
-                    fontSize: 14,
+                    display: 'grid',
+                    justifyItems: 'center',
+                    gap: 3,
+                    opacity: 0,
+                    animation: `lr-spot .5s ease-out ${index * STEP}ms forwards`,
                   }}
                 >
-                  {slotOf(player)}
-                </b>
-                <span style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ display: 'block', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {player.name}
+                  <div style={{ position: 'relative', width: SIZE, height: SIZE }}>
+                    <div
+                      style={{
+                        width: SIZE,
+                        height: SIZE,
+                        borderRadius: '50%',
+                        overflow: 'hidden',
+                        background: opponent.primary_color,
+                        border: `2px solid ${color}`,
+                        display: 'grid',
+                        placeItems: 'center',
+                        fontWeight: 900,
+                        fontSize: 24,
+                      }}
+                    >
+                      {player.image_url ? (
+                        <img
+                          src={player.image_url}
+                          alt=""
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            objectPosition: '50% 22%',
+                            transform: 'scale(1.7)',
+                            transformOrigin: '50% 22%',
+                          }}
+                        />
+                      ) : (
+                        player.name.slice(0, 1).toUpperCase()
+                      )}
+                    </div>
+                    <b
+                      style={{
+                        position: 'absolute',
+                        right: -8,
+                        bottom: -4,
+                        minWidth: 26,
+                        textAlign: 'center',
+                        padding: '1px 4px',
+                        borderRadius: 8,
+                        background: '#0B1016',
+                        border: `1.5px solid ${color}`,
+                        color,
+                        fontSize: 13,
+                        lineHeight: '18px',
+                      }}
+                    >
+                      {player.overall}
+                    </b>
+                  </div>
+                  <span
+                    style={{
+                      maxWidth: 96,
+                      padding: '1px 7px',
+                      borderRadius: 6,
+                      background: 'rgba(0,0,0,.55)',
+                      fontSize: 11,
+                      fontWeight: 800,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    <span style={{ color: '#F5B800' }}>{slotOf(player)}</span> {player.name}
                   </span>
-                  <small style={{ opacity: 0.6, fontSize: 11 }}>{getPlayerPositions(player).join(' · ')}</small>
-                </span>
-                <strong style={{ fontSize: 26, color, fontVariantNumeric: 'tabular-nums' }}>{player.overall}</strong>
+                </div>
               </div>
             );
           })}
         </div>
-        <div style={{ marginTop: 18, display: 'grid', gap: 10, opacity: statP > 0 ? 1 : 0 }}>
+        <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, opacity: statP > 0 ? 1 : 0 }}>
           {[
-            { label: 'ATAQUE', value: atk, color: '#ef4444' },
-            { label: 'DEFESA', value: def, color: '#3b82f6' },
+            { label: 'ATAQUE', value: atk, color: '#ef4444', progress: statP },
+            { label: 'DEFESA', value: def, color: '#3b82f6', progress: statP },
+            { label: 'OVERALL', value: overall, color: '#F5B800', progress: ovrP },
           ].map((row) => (
-            <div key={row.label} style={{ textAlign: 'left' }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-                <span style={{ fontWeight: 800, letterSpacing: 2, fontSize: 12 }}>{row.label}</span>
-                <strong style={{ fontSize: 30, lineHeight: 1, color: row.color, fontVariantNumeric: 'tabular-nums' }}>
-                  {Math.round(row.value * statP)}
-                </strong>
-              </div>
-              <div style={{ height: 8, borderRadius: 6, background: 'rgba(255,255,255,.1)', overflow: 'hidden', marginTop: 4 }}>
-                <div style={{ width: `${Math.min(100, row.value * statP)}%`, height: '100%', borderRadius: 6, background: row.color }} />
+            <div key={row.label} className={row.label === 'OVERALL' ? 'lr-pop' : undefined} style={{ textAlign: 'center' }}>
+              <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.5 }}>{row.label}</span>
+              <div style={{ fontSize: 34, fontWeight: 900, lineHeight: 1.1, color: row.color, fontVariantNumeric: 'tabular-nums' }}>
+                {Math.round(row.value * row.progress)}
               </div>
             </div>
           ))}
         </div>
-        <div
-          className="lr-pop"
-          style={{ marginTop: 14, opacity: ovrP, animation: ovrP > 0 ? 'lr-pop .5s ease-out' : undefined }}
-        >
-          <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: 2, color: '#F5B800' }}>OVERALL DO RIVAL</span>
-          <div style={{ fontSize: 56, fontWeight: 900, lineHeight: 1.05, fontVariantNumeric: 'tabular-nums' }}>
-            {Math.round(overall * ovrP)}
-          </div>
-        </div>
-        <button className="gold-button large lobby-main" onClick={finish} style={{ opacity: ready ? 1 : 0.6 }}>
+        <button className="gold-button large lobby-main" onClick={finish} style={{ opacity: ready ? 1 : 0.6, marginTop: 10 }}>
           Começar partida
         </button>
       </div>
