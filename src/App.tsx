@@ -3369,7 +3369,6 @@ function RivalReveal({
   const ovrP = ease((t - statsAt - 700) / 1200);
   const tones = { special: '#F5B800', gold: '#d4a63a', silver: '#bcc3cd', bronze: '#b8743f' };
   const ready = t >= statsAt + 1800;
-  const line = '#123a85';
   const SIZE = 60;
   return (
     <div
@@ -3383,7 +3382,7 @@ function RivalReveal({
         display: 'grid',
         placeItems: 'center',
         padding: 12,
-        background: '#000c3d',
+        background: 'rgba(5,8,12,.96)',
         animation: 'lr-fade .35s ease-out',
       }}
     >
@@ -3396,19 +3395,12 @@ function RivalReveal({
       <div style={{ width: 'min(400px, 100%)', textAlign: 'center' }}>
         <div className="eyebrow">{rivalName ? `SEU RIVAL · ${rivalName.toUpperCase()}` : 'SEU RIVAL'}</div>
         <h2 style={{ margin: '4px 0 8px' }}>{opponent.name.toUpperCase()}</h2>
-        <div style={{ position: 'relative', width: '100%', aspectRatio: '3 / 4', background: '#000f52', borderRadius: 10, overflow: 'hidden' }}>
-          <svg viewBox="0 0 300 400" width="100%" height="100%" style={{ position: 'absolute', inset: 0 }} aria-hidden="true">
-            <g fill="none" stroke={line} strokeWidth={4}>
-              <rect x={15} y={10} width={270} height={380} />
-              <line x1={15} y1={200} x2={285} y2={200} />
-              <circle cx={150} cy={200} r={48} />
-              <rect x={95} y={10} width={110} height={62} />
-              <rect x={125} y={10} width={50} height={26} />
-              <rect x={95} y={328} width={110} height={62} />
-              <rect x={125} y={364} width={50} height={26} />
-            </g>
-            <circle cx={150} cy={200} r={5} fill={line} />
-          </svg>
+        {/* Usa o mesmo campo do app (classes .pitch / .pitch-lines), então as cores acompanham o resto do jogo */}
+        <div
+          className="pitch"
+          style={{ position: 'relative', width: '100%', height: 'auto', aspectRatio: '3 / 4', maxWidth: 'none', margin: 0, overflow: 'hidden' }}
+        >
+          <div className="pitch-lines" />
           {ordered.map((player, index) => {
             const [x, y] = REVEAL_SPOTS[slotOf(player)];
             const color = tones[colorForOverall(player.overall) as keyof typeof tones];
