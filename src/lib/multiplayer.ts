@@ -241,11 +241,17 @@ function pickGoalMinutes(count: number, slots: number[]): number[] {
 const MIN_GOALS = 3;
 const MAX_GOALS = 7;
 // Quanto cada ponto de vantagem (ataque contra a defesa do rival) vale na chance de a partida pender para um lado
-const GOAL_PER_EDGE = 0.16;
+const GOAL_PER_EDGE = 0.06;
 // Quanto cada ponto de vantagem (ataque contra a defesa do rival) vale em chutes a mais
-const SHOTS_PER_EDGE = 0.5;
-// Duelo atacante x goleiro: cada ponto de overall a mais do atacante (ou do goleiro) muda a chance de gol em 1,4 ponto percentual
-const DUEL_PER_POINT = 0.014;
+const SHOTS_PER_EDGE = 0.15;
+// Duelo atacante x goleiro: cada ponto de overall a mais do atacante (ou do goleiro) muda a chance de gol em 0,5 ponto percentual
+const DUEL_PER_POINT = 0.005;
+
+// Zebra: chance mínima de o time mais fraco vencer (0,30 = 30%). Em jogos parelhos não muda nada;
+// quando um time é muito melhor, parte das vitórias dele vira vitória do azarão até chegar nesse mínimo.
+const ZEBRA_CHANCE = 0.3;
+// Quanto cada ponto de overall de diferença pesa na chance natural do azarão (calibrado pela simulação)
+const UPSET_SLOPE = 0.133;
 
 type Shot = { side: 'host' | 'guest'; shooter?: Lite; keeper?: Lite; outcome: 'gol' | 'defesa' | 'fora' };
 
@@ -267,7 +273,7 @@ export function generatePlan(hostSquad: Lite[], guestSquad: Lite[], drawChance =
     const skill = shooter?.overall ?? 75;
     const keeperSkill = keeper?.overall ?? 75;
     // Chutar no gol: atacante melhor erra menos
-    const onTarget = Math.random() < clampNum(0.6 + (skill - 78) * 0.006, 0.4, 0.8);
+    const onTarget = Math.random() < clampNum(0.6 + (skill - 78) * 0.002, 0.4, 0.8);
     if (!onTarget) return { side, shooter, keeper, outcome: 'fora' };
     // No gol: atacante melhor que o goleiro marca mais; goleiro melhor que o atacante defende mais
     const pGoal = clampNum(0.36 + (skill - keeperSkill) * DUEL_PER_POINT, 0.1, 0.75);
@@ -310,9 +316,23 @@ export function generatePlan(hostSquad: Lite[], guestSquad: Lite[], drawChance =
     while (goalsOf('guest') > level) removeGoal('guest');
     while (goalsOf('host') < level) addGoal('host');
     while (goalsOf('guest') < level) addGoal('guest');
-  } else if (goalsOf('host') === goalsOf('guest')) {
-    // Sem empate: o gol que desempata vai, na maioria das vezes, para o time mais forte
-    addGoal(Math.random() < hostChance ? 'host' : 'guest');
+  } else {
+    if (goalsOf('host') === goalsOf('guest')) {
+      // Sem empate: o gol que desempata vai, na maioria das vezes, para o time mais forte
+      addGoal(Math.random() < hostChance ? 'host' : 'guest');
+    }
+    // Zebra: se o favorito ganhou, às vezes o azarão vence no lugar, para ele ter ao menos ZEBRA_CHANCE de vitória
+    const gap = Math.abs(edgeHost - edgeGuest) / 2; // diferença aproximada de overall entre os times
+    const natural = 1 / (1 + Math.exp(UPSET_SLOPE * gap)); // chance que o azarão já tem
+    const flip = Math.max(0, (ZEBRA_CHANCE - natural) / (1 - natural));
+    const favorite: Shot['side'] = edgeHost >= edgeGuest ? 'host' : 'guest';
+    const underdog: Shot['side'] = favorite === 'host' ? 'guest' : 'host';
+    if (goalsOf(favorite) > goalsOf(underdog) && Math.random() < flip) {
+      for (let guard = 0; guard < 30 && goalsOf(underdog) <= goalsOf(favorite); guard += 1) {
+        if (goalsOf('host') + goalsOf('guest') < MAX_GOALS) addGoal(underdog);
+        else removeGoal(favorite);
+      }
+    }
   }
 
   const slots: number[] = [];
