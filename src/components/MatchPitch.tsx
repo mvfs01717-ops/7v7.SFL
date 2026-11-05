@@ -77,6 +77,8 @@ type Engine = {
   overrides: Record<string, Override>;
   kickoff: { side: Side; until: number; maxUntil: number } | null;
   lastKey: string;
+  // Intervalo mínimo entre dois botes de desarme
+  tackleAt: number;
 };
 
 // Campo em coordenadas de um SVG 740 x 440
@@ -246,6 +248,7 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
     overrides: {},
     kickoff: null,
     lastKey: '',
+    tackleAt: 0,
   });
   const nodes = useRef<Record<string, SVGGElement | null>>({});
   const ballNode = useRef<SVGGElement | null>(null);
@@ -269,7 +272,7 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
   }
 
   // Comemoração: o autor do gol sai correndo para o canto (na maioria das vezes) e o time vai atrás dele
-  function startCelebration(side: Side, actorKey: string) {
+  function startCelebration(side: Side, actorKey: string, label = 'GOL!') {
     const st = engine.current;
     const a = find(actorKey);
     const dir = dirOf(side);
@@ -280,7 +283,7 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
     st.holder = null;
     st.overrides = {};
     const who = a?.name ?? '';
-    setGoalText(`GOL! ${who}`.trim());
+    setGoalText(`${label} ${who}`.trim());
     window.setTimeout(() => setGoalText(''), 2000);
   }
 
@@ -424,6 +427,13 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
 
     const text = ev.text.toLowerCase();
     const all = slotsRef.current;
+    // Bola parada: escanteio cobrado e gol olímpico (a narração diz qual)
+    type SetPiece = 'escanteio' | 'olimpico';
+    const special: SetPiece | null = text.includes('olímpico')
+      ? 'olimpico'
+      : text.includes('escanteio cobrado')
+        ? 'escanteio'
+        : null;
     const mine = all.filter((s) => s.side === S && s.pos !== 'GK');
 
     // Quem finaliza: o nome que veio com o lance ou, na falta dele, o primeiro nome que aparece no texto
@@ -450,10 +460,10 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
     type Play = 'central' | 'ponta' | 'lancamento' | 'tabela' | 'solo' | 'contra' | 'longe';
     let play: Play;
     if (backlog > 4 && !critical) play = 'longe'; // jogada curta para não acumular fila
-    else if (text.includes('cabece')) play = 'ponta';
+    else if (text.includes('cabece') || text.includes('voleio') || text.includes('bicicleta')) play = 'ponta';
     else if (text.includes('fora da área') || text.includes('de longe') || text.includes('arrisca')) play = 'longe';
     else if (text.includes('contra-ataque')) play = 'contra';
-    else if (text.includes('cavadinha')) play = 'solo';
+    else if (text.includes('cavadinha') || text.includes('chapéu')) play = 'solo';
     else {
       const table: [Play, number][] = [
         ['central', 3],
@@ -498,8 +508,10 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
             : pick(backs.length ? backs : mine)
           : find(`${S}-CM`);
     const starterKey = starter?.key ?? `${S}-CM`;
-    if (holderSide !== S) q.push(mk({ kind: 'move', to: { slot: starterKey }, dur: 520 }));
-    else if (starterKey !== st.holder && starterKey !== `${S}-CM`) q.push(mk({ kind: 'pass', to: { slot: starterKey }, dur: 480 }));
+    if (!special) {
+      if (holderSide !== S) q.push(mk({ kind: 'move', to: { slot: starterKey }, dur: 520 }));
+      else if (starterKey !== st.holder && starterKey !== `${S}-CM`) q.push(mk({ kind: 'pass', to: { slot: starterKey }, dur: 480 }));
+    }
 
     // Condução até um ponto; às vezes o atacante ainda dribla um marcador antes de finalizar
     const carryTo = (at: Point, dur: number, speed: number | undefined, dribble: boolean) => {
@@ -532,7 +544,9 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
     };
     const canDribble = ev.type !== 'defesa';
 
-    if (play === 'central') {
+    if (special) {
+      // A bola parada é montada mais abaixo, junto do desfecho
+    } else if (play === 'central') {
       const via = passer ?? find(`${S}-CM`);
       if (via && via.key !== actorKey && via.key !== starterKey && (passer || Math.random() < 0.55)) {
         q.push(mk({ kind: 'pass', to: { slot: via.key }, dur: 520 }));
@@ -582,7 +596,8 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
     const gkKey = `${O}-GK`;
     const gk = find(gkKey);
     const gkX = gk ? gk.x : goalX - dir * 24;
-    const header = play === 'ponta';
+    const header = play === 'ponta' || special === 'escanteio';
+    const abbrOf = S === 'user' ? club.abbreviation : opponent.abbreviation;
     const tiroDeMeta = (): void => {
       st.queue.unshift({ kind: 'move', to: { slot: gkKey }, dur: 800, caption: 'Tiro de meta', scripted: true });
     };
@@ -613,21 +628,104 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
       ];
     };
 
+    // Montagem da bola parada: bola na marca, barreira ou cobrador posicionado, time na área
+    const boxSpot = (d: number, dy: number): Point => ({ x: goalX - dir * d, y: MID_Y + dy });
+    if (special === 'escanteio' || special === 'olimpico') {
+      const cy = Math.random() < 0.5 ? FY0 + 6 : FY1 - 6;
+      const corner: Point = { x: goalX - dir * 5, y: cy };
+      const direct = special === 'olimpico';
+      const taker = direct
+        ? actorSlot
+        : (passer && passer.key !== actorKey ? passer : undefined) ??
+          mine.find((s) => s.key !== actorKey && (s.pos === 'LF' || s.pos === 'RF')) ??
+          mine.find((s) => s.key !== actorKey) ??
+          actorSlot;
+      const setup: Setup[] = [{ key: taker.key, x: corner.x - dir * 8, y: cy < MID_Y ? cy + 6 : cy - 6, speed: 2 }];
+      mine.forEach((s) => {
+        if (s.key === taker.key) return;
+        const p = s.key === actorKey ? boxSpot(rand(55, 80), rand(-16, 16)) : boxSpot(rand(95, 135), rand(-48, 48));
+        setup.push({ key: s.key, x: p.x, y: p.y, speed: 1.5 });
+      });
+      all.filter((s) => s.side === O && s.pos !== 'GK').forEach((s) => {
+        const p = boxSpot(rand(40, 90), rand(-42, 42));
+        setup.push({ key: s.key, x: p.x, y: p.y, speed: 1.5 });
+      });
+      q.push(mk({ kind: 'shot', to: corner, dur: 520, caption: `Escanteio para ${abbrOf}`, setup, after: () => { st.poss = S; } }));
+      q.push(waitStep(1700, setup, direct ? `${taker.name} vai cobrar o escanteio direto` : `${taker.name} se prepara para o escanteio`));
+      if (!direct) {
+        q.push(mk({ kind: 'pass', to: { slot: actorKey }, dur: 760, arc: 18, caption: `${taker.name} cobra o escanteio` }));
+      }
+    }
+
     if (ev.type === 'gol') {
-      const style = text.includes('cavadinha') ? 'cavadinha' : play === 'longe' ? 'longe' : Math.random() < 0.55 ? 'canto' : 'meio';
-      const gy = style === 'canto' ? (Math.random() < 0.5 ? GOAL_TOP + 9 : GOAL_BOTTOM - 9) : MID_Y + rand(-20, 20);
+      const style =
+        special === 'olimpico'
+          ? 'olimpico'
+          : text.includes('voleio') || text.includes('bicicleta')
+            ? 'voleio'
+            : text.includes('cavadinha') || text.includes('chapéu')
+              ? 'cavadinha'
+              : play === 'longe'
+                ? 'longe'
+                : Math.random() < 0.55
+                  ? 'canto'
+                  : 'meio';
+      const gy =
+        style === 'canto' || style === 'olimpico'
+          ? Math.random() < 0.5
+            ? GOAL_TOP + 9
+            : GOAL_BOTTOM - 9
+          : MID_Y + rand(-20, 20);
+      // Rebote: o goleiro defende, a bola sobra na área e o atacante empurra para a rede
+      if (text.includes('rebote') && !special) {
+        const spot: Point = { x: goalX - dir * 20, y: MID_Y + rand(-28, 28) };
+        q.push(
+          mk({
+            kind: 'shot',
+            to: spot,
+            dur: 380,
+            caption: `${gk?.name ?? 'O goleiro'} defende, mas a bola sobra na área!`,
+            setup: gk ? [{ key: gkKey, x: gkX, y: MID_Y + rand(-30, 30), speed: 2.2 }] : undefined,
+          }),
+        );
+        q.push(waitStep(300, [run(actorKey, { x: spot.x - dir * 12, y: spot.y }, 1.8)]));
+      }
+      const label =
+        special === 'olimpico'
+          ? 'GOL OLÍMPICO!'
+          : text.includes('bicicleta')
+            ? 'GOL DE PLACA!'
+            : text.includes('voleio')
+              ? 'VOLEIO ESPETACULAR!'
+              : text.includes('chapéu')
+                ? 'QUE CHAPÉU!'
+                : header
+                  ? 'GOL DE CABEÇA!'
+                  : 'GOL!';
       // O goleiro pula para o lado errado ou chega atrasado
       const diveY = gy >= MID_Y ? MID_Y - rand(10, 24) : MID_Y + rand(10, 24);
       q.push(
         mk({
           kind: 'shot',
           to: { x: goalX + dir * 12, y: gy },
-          dur: style === 'longe' ? 520 : style === 'cavadinha' ? 600 : header ? 320 : 360,
-          arc: style === 'cavadinha' ? 14 : style === 'longe' ? 8 : 0,
+          dur:
+            style === 'olimpico'
+              ? 900
+              : style === 'longe'
+                ? 520
+                : style === 'cavadinha'
+                  ? 600
+                  : style === 'voleio'
+                    ? 300
+                    : header
+                      ? 320
+                      : 360,
+          arc:
+            style === 'olimpico' ? 26 : style === 'cavadinha' ? 14 : style === 'longe' ? 8 : style === 'voleio' ? 6 : 0,
           caption: ev.text,
           setup: gk ? [{ key: gkKey, x: gkX, y: diveY, speed: 2.2 }] : undefined,
           after: () => {
-            startCelebration(S, actorKey);
+            startCelebration(S, actorKey, label);
             flashNet(S);
             onGoalRef.current?.(ev.id ?? -1, S);
           },
@@ -852,19 +950,88 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
         followHolder();
       }
 
-      // Desarme: quem está com a bola e é pressionado pode perdê-la (só em jogadas de rotina)
+      // Desarme: o marcador colado dá o bote (corre até o jogador) e o resultado depende do overall dos dois.
+      // Só em jogadas de rotina: lances do plano (gols, defesas) não são interrompidos.
       const scriptedPending = st.queue.some((s) => s.scripted) || !!(st.active && st.active.step.scripted);
-      if (!celebrating && !scriptedPending && st.holder && (!st.active || st.active.step.kind === 'carry') && !(st.active && st.active.step.dribble)) {
+      if (
+        !celebrating &&
+        !kickoffOn &&
+        !scriptedPending &&
+        st.holder &&
+        now >= st.tackleAt &&
+        (!st.active || st.active.step.kind === 'carry') &&
+        !(st.active && st.active.step.dribble)
+      ) {
         const h = get(st.holder);
         if (h && h.pos !== 'GK') {
           const near = nearestOpp(all, h.side, h);
-          if (near.slot && near.d < 21 && Math.random() < (0.4 * dt) / 1000) {
-            st.active = null;
-            st.holder = near.slot.key;
-            st.poss = near.slot.side;
+          const dfn = near.slot;
+          if (dfn && near.d < 30 && Math.random() < (0.9 * dt) / 1000) {
+            // Quem tem overall maior leva vantagem; o marcador perto do gol do adversário chega mais atrasado
+            const win = Math.random() < clamp(0.5 + (dfn.ovr - h.ovr) / 90, 0.25, 0.75);
+            const dirH = dirOf(h.side);
+            const slide = Math.random() < 0.25;
+            st.tackleAt = now + 1000;
+            st.queue = [];
             st.overrides = {};
-            st.ambientAt = now + 450;
-            setCaption(`${near.slot.name} desarma ${h.name}`);
+            st.active = {
+              step: {
+                kind: 'wait',
+                to: { x: h.x, y: h.y },
+                dur: slide ? 330 : 260,
+                ambient: true,
+                setup: [{ key: dfn.key, x: h.x, y: h.y, speed: slide ? 3 : 2.3 }],
+                after: () => {
+                  const t = performance.now();
+                  st.overrides = {};
+                  if (win) {
+                    // A bola é do marcador: quem perdeu fica desequilibrado, quem ganhou sai jogando
+                    st.holder = dfn.key;
+                    st.poss = dfn.side;
+                    st.overrides[h.key] = { x: h.x, y: h.y, until: t + 800, speed: 0.15 };
+                    st.overrides[dfn.key] = {
+                      x: clamp(dfn.x - dirH * 55, FX0 + 20, FX1 - 20),
+                      y: clamp(dfn.y + rand(-30, 30), FY0 + 20, FY1 - 20),
+                      until: t + 650,
+                      speed: 1.2,
+                    };
+                    st.ambientAt = t + 500;
+                    setCaption(
+                      pick([
+                        `${dfn.name} desarma ${h.name}`,
+                        `${dfn.name} chega firme e rouba a bola de ${h.name}`,
+                        `${dfn.name} dá o bote certo em ${h.name}`,
+                        slide ? `Carrinho de ${dfn.name}! A bola é dele` : `${dfn.name} antecipa e leva a bola`,
+                        `${dfn.name} faz o desarme e sai jogando`,
+                      ]),
+                    );
+                  } else {
+                    // O jogador escapa e o marcador fica para trás
+                    st.overrides[dfn.key] = { x: dfn.x, y: dfn.y, until: t + 900, speed: 0.18 };
+                    st.overrides[h.key] = {
+                      x: clamp(h.x + dirH * 70, FX0 + 20, FX1 - 20),
+                      y: clamp(h.y + rand(-26, 26), FY0 + 20, FY1 - 20),
+                      until: t + 650,
+                      speed: 1.35,
+                    };
+                    st.ambientAt = t + 350;
+                    setCaption(
+                      pick([
+                        `${h.name} escapa do bote de ${dfn.name}`,
+                        `${h.name} passa por ${dfn.name} no corpo`,
+                        `${dfn.name} chega atrasado em ${h.name}`,
+                        slide ? `${dfn.name} vai no carrinho, mas ${h.name} pula e segue` : `${h.name} protege a bola de ${dfn.name}`,
+                      ]),
+                    );
+                  }
+                },
+              },
+              from: { x: st.ballX, y: st.ballY },
+              start: now,
+              dest: null,
+            };
+            // O marcador começa o bote já (o passo 'wait' só começa os movimentos combinados ao iniciar pela fila)
+            st.overrides[dfn.key] = { x: h.x, y: h.y, until: now + 500, speed: slide ? 3 : 2.3 };
           }
         }
       }
