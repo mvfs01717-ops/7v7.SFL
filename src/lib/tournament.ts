@@ -39,7 +39,14 @@ function one(data: unknown): Tournament | null {
 export async function createTournament(nick: string, mode: 'classic' | 'dice', size: 4 | 6 | 8 = 4) {
   const { data, error } = await supabase.rpc('create_tournament', { p_nick: nick, p_mode: mode, p_size: size });
   if (error) return { error: error.message };
-  return { tournament: one(data) ?? undefined };
+  const created = one(data) ?? undefined;
+  // Se o banco ainda não conhece o tamanho pedido, ele cria um torneio menor em silêncio (ex.: 8 vira 4).
+  // Melhor avisar e desfazer do que deixar o anfitrião esperando numa sala do tamanho errado.
+  if (created && created.size !== size) {
+    await supabase.rpc('leave_tournament', { p_id: created.id });
+    return { error: `O banco ainda não aceita torneio de ${size} jogadores (ele criou de ${created.size}). Atualize as funções do torneio no Supabase.` };
+  }
+  return { tournament: created };
 }
 
 export async function joinTournament(code: string, nick: string) {
@@ -54,8 +61,11 @@ export async function leaveTournament(id: string) {
   await supabase.rpc('leave_tournament', { p_id: id });
 }
 
-export async function startTournament(id: string) {
-  const { data, error } = await supabase.rpc('start_tournament', { p_id: id });
+// Sem `seed` o banco sorteia o chaveamento. Com `seed` (ids na ordem do chaveamento) o anfitrião monta o dele.
+export async function startTournament(id: string, seed?: string[]) {
+  const { data, error } = seed
+    ? await supabase.rpc('start_tournament_seeded', { p_id: id, p_seed: seed })
+    : await supabase.rpc('start_tournament', { p_id: id });
   if (error) return { error: error.message };
   return { tournament: one(data) ?? undefined };
 }
@@ -69,6 +79,30 @@ export async function setTournamentMatch(id: string, slot: Slot, patch: TMatch) 
 export async function fetchTournament(id: string): Promise<Tournament | null> {
   const { data } = await supabase.from('tournaments').select('*').eq('id', id).maybeSingle();
   return norm((data as Tournament | null) ?? null);
+}
+
+// Como a ordem do chaveamento (seed) vira confrontos, para o anfitrião montar: cada grupo é uma partida (ou folga)
+export function seedGroups(size: 4 | 6 | 8): { label: string; indexes: number[] }[] {
+  if (size === 8) {
+    return [
+      { label: 'Quartas 1', indexes: [0, 1] },
+      { label: 'Quartas 2', indexes: [2, 3] },
+      { label: 'Quartas 3', indexes: [4, 5] },
+      { label: 'Quartas 4', indexes: [6, 7] },
+    ];
+  }
+  if (size === 6) {
+    return [
+      { label: 'Folga: vai direto à Semifinal 1', indexes: [0] },
+      { label: 'Folga: vai direto à Semifinal 2', indexes: [1] },
+      { label: 'Quartas 1', indexes: [2, 3] },
+      { label: 'Quartas 2', indexes: [4, 5] },
+    ];
+  }
+  return [
+    { label: 'Semifinal 1', indexes: [0, 1] },
+    { label: 'Semifinal 2', indexes: [2, 3] },
+  ];
 }
 
 // Quais partidas existem nesse torneio (4 jogadores: semis + final; 6 jogadores: quartas + semis + final)
