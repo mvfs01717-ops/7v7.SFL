@@ -56,6 +56,8 @@ type Step = {
   caption?: string;
   // Altura da bola no meio do trajeto (passe/chute por cima), em pixels
   arc?: number;
+  // Efeito: quanto a bola se desvia de lado no meio do trajeto, em pixels (com sinal). A bola faz uma curva até o destino.
+  curve?: number;
   // Velocidade do condutor (só em passos de condução)
   speed?: number;
   // Movimentos combinados que começam junto com o passo (corrida do atacante, mergulho do goleiro...)
@@ -630,8 +632,10 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
 
     // Montagem da bola parada: bola na marca, barreira ou cobrador posicionado, time na área
     const boxSpot = (d: number, dy: number): Point => ({ x: goalX - dir * d, y: MID_Y + dy });
+    let cornerY = MID_Y; // de que canto sai o escanteio (usado na curva do gol olímpico)
     if (special === 'escanteio' || special === 'olimpico') {
       const cy = Math.random() < 0.5 ? FY0 + 6 : FY1 - 6;
+      cornerY = cy;
       const corner: Point = { x: goalX - dir * 5, y: cy };
       const direct = special === 'olimpico';
       const taker = direct
@@ -721,7 +725,9 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
                       ? 320
                       : 360,
           arc:
-            style === 'olimpico' ? 26 : style === 'cavadinha' ? 14 : style === 'longe' ? 8 : style === 'voleio' ? 6 : 0,
+            style === 'olimpico' ? 22 : style === 'cavadinha' ? 14 : style === 'longe' ? 8 : style === 'voleio' ? 6 : 0,
+          // Gol olímpico: a bola sai do canto, faz a curva para dentro do campo e morre no gol
+          curve: style === 'olimpico' ? 85 * dir * Math.sign(gy - cornerY) : undefined,
           caption: ev.text,
           setup: gk ? [{ key: gkKey, x: gkX, y: diveY, speed: 2.2 }] : undefined,
           after: () => {
@@ -925,6 +931,15 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
         }
         st.ballX = from.x + (tx - from.x) * e;
         st.ballY = from.y + (ty - from.y) * e;
+        if (step.curve) {
+          // Curva: desvia a bola para o lado, perpendicular ao trajeto, e volta ao destino (efeito)
+          const cdx = tx - from.x;
+          const cdy = ty - from.y;
+          const clen = Math.hypot(cdx, cdy) || 1;
+          const off = step.curve * Math.sin(Math.PI * e);
+          st.ballX += (-cdy / clen) * off;
+          st.ballY += (cdx / clen) * off;
+        }
         lift = (step.arc ?? 0) * Math.sin(Math.PI * p);
         if (p >= 1) {
           st.active = null;
