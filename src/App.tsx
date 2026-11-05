@@ -9,12 +9,13 @@ import AdminScreen from '@/components/AdminScreen';
 import MatchPitch from '@/components/MatchPitch';
 import PenaltyShootout, { type Shootout } from '@/components/PenaltyShootout';
 import {
-  createRoom, joinRoom, fetchRoom, patchRoom, listLiveRooms, isRoomLive, lookupRoom, generatePlan, recordResult, openRoomChat,
-  type Room, type PlanItem, type ChatMessage,
+  createRoom, joinRoom, fetchRoom, patchRoom, listLiveRooms, isRoomLive, lookupRoom, generatePlan, recordResult, openRoomChat, tacticOf, TACTICS, TACTIC_INFO,
+  staminaAt, effortLoss, captainTeamBonus, CAPTAIN_SELF_BONUS, slowdown, substitutionGain, fitsSlot, reshapeSecondHalf, autoSubstitutions, SUBS_MAX,
+  type Room, type PlanItem, type ChatMessage, type Tactic, type FieldLite,
 } from '@/lib/multiplayer';
 import {
   createTournament, joinTournament, leaveTournament, startTournament, setTournamentMatch, fetchTournament,
-  slotPlayers, currentSlot, slotOfRoom, slotsFor, decideWinner, SLOT_LABEL,
+  seedGroups, slotPlayers, currentSlot, slotOfRoom, slotsFor, decideWinner, SLOT_LABEL,
   type Tournament, type Slot, type TPlayer,
 } from '@/lib/tournament';
 
@@ -32,6 +33,14 @@ type Player = {
   team?: Team;
   // Posição em que o jogador realmente jogou na partida (pode ser diferente da principal)
   slot?: Position;
+  // Substituições: minuto em que entrou no jogo (0 = titular) e se joga fora de posição
+  since?: number;
+  oop?: boolean;
+  // Fôlego já gasto por esforço até o intervalo (pontos) e ritmo de esforço (pontos por minuto)
+  carried?: number;
+  work?: number;
+  // Capitão do time (dá bônus ao time e não pode ser substituído)
+  captain?: boolean;
 };
 type MatchEvent = {
   id: number;
@@ -126,6 +135,11 @@ function pickByRoll(list: Player[], weight: (player: Player) => number, roll: nu
 const SHOOTOUT_CHANCE = 0.4;
 // Tempo da animação da escalação do rival antes da bola rolar (o modo espectador desconta isso do relógio)
 const LINEUP_REVEAL_MS = 9000;
+// Intervalo entre os tempos (animação dos jogadores saindo e voltando) e transição para os pênaltis
+const HALFTIME_MS = 6200;
+const PENALTY_PREP_MS = 4500;
+// Cada minuto da partida (e cada minuto de acréscimo) dura 900 ms
+const MINUTE_MS = 900;
 
 type PlanEntry = {
   minute: number;
@@ -306,15 +320,32 @@ function App() {
   // Animação com o overall de ataque e defesa do time, mostrada quando o time fica pronto
   const [reveal, setReveal] = useState<{ squad: Partial<Record<Position, Player>>; next: () => void } | null>(null);
   // Animação da escalação do rival, mostrada antes de a partida começar
-  const [lineupReveal, setLineupReveal] = useState<{ squad: Player[]; team?: Team; name?: string } | null>(null);
+  const [lineupReveal, setLineupReveal] = useState<{ squad: Player[]; team?: Team; name?: string; tactic?: Tactic } | null>(null);
+  // Escolha da tática depois do draft: `next` continua o fluxo com a tática escolhida
+  const [tacticStep, setTacticStep] = useState<{ squad: Partial<Record<Position, Player>>; next: (tactic: Tactic, captain: string) => void } | null>(null);
   const [mode, setMode] = useState<'classic' | 'dice'>('classic');
   const [botTeam, setBotTeam] = useState<Player[]>([]);
   const [userTeam, setUserTeam] = useState<Player[]>([]);
   const [events, setEvents] = useState<MatchEvent[]>([]);
   const [minute, setMinute] = useState(0);
+  // Acréscimos: minutos extras já corridos no fim do 1º (45+n) ou do 2º tempo (90+n)
+  const [extra, setExtra] = useState(0);
+  // 'halftime' enquanto a animação do intervalo está na tela
+  const [pause, setPause] = useState<'halftime' | 'subs' | null>(null);
+  // Cansaço e substituições (só contra o bot): reservas, táticas da partida, quem saiu e o resumo das trocas
+  const [userBench, setUserBench] = useState<Player[]>([]);
+  const [botBench, setBotBench] = useState<Player[]>([]);
+  const [matchTactics, setMatchTactics] = useState<{ user: Tactic; bot: Tactic }>({ user: 'equilibrada', bot: 'equilibrada' });
+  const [leftUser, setLeftUser] = useState<Player[]>([]);
+  const [leftBot, setLeftBot] = useState<Player[]>([]);
+  const [subsLog, setSubsLog] = useState<{ user: string[]; bot: string[] }>({ user: [], bot: [] });
+  // O campo soma o esforço de cada jogador (`effort`) e lê o quanto cada um está lento por cansaço (`slow`)
+  const workRef = useRef<{ effort: Record<string, number>; slow: Record<string, number> }>({ effort: {}, slow: {} });
   const [score, setScore] = useState({ user: 0, bot: 0 });
   const [stats, setStats] = useState<MatchStats>(emptyStats);
   const [goalLog, setGoalLog] = useState<GoalRecord[]>([]);
+  // Todos os lances da partida (menos posse de bola), para o resumo "Melhores momentos" da tela final
+  const [highlights, setHighlights] = useState<MatchEvent[]>([]);
   const [shootout, setShootout] = useState<Shootout | null>(null);
   // Botão de teste: força a próxima partida contra o bot a terminar empatada (vai para os pênaltis)
   const [forceShootout, setForceShootout] = useState(false);
@@ -360,11 +391,19 @@ function App() {
   const shootoutNetRef = useRef<{ roomId: string; role: 'host' | 'guest' | 'spectator' } | null>(null);
   // Cartas sorteadas para cada posição no draft clássico (ficam fixas até escolher)
   const drawRef = useRef<Partial<Record<Position, string[]>>>({});
+  // Trocas de cartas do draft: só 1 por draft (reembaralha as 3 cartas da posição, ou rola o dado de novo)
+  const [rerolls, setRerolls] = useState(1);
   // Placar mostrado na tela: só sobe quando a bola entra no gol na animação
   const [shownScore, setShownScore] = useState({ user: 0, bot: 0 });
   const [shownGoalIds, setShownGoalIds] = useState<number[]>([]);
   const [skipped, setSkipped] = useState(false);
   const eventSeq = useRef(0);
+  const halftimeDone = useRef(false);
+  // Tempo de espera fixo antes do intervalo quando saiu gol no fim do 1º tempo (para a jogada terminar na animação)
+  const halftimeWait = useRef(0);
+  const eventsRef = useRef<MatchEvent[]>([]);
+  // Muda quando o 2º tempo começa: o campo recomeça com a saída de bola
+  const [restartKey, setRestartKey] = useState(0);
   const shownRef = useRef<Set<number>>(new Set());
 
   useEffect(() => {
@@ -460,8 +499,12 @@ function App() {
   // Jogadores que o adversário já escolheu no draft multiplayer
   const blockedIds = new Set<string>(theirSquad ? Object.values(theirSquad) : []);
 
-  function squadIds(source: Partial<Record<Position, Player>>) {
+  function squadIds(source: Partial<Record<Position, Player>>, tactic?: Tactic, captain?: string) {
     const out: Record<string, string> = {};
+    // A tática vai junto do time (chave `_t`), assim o anfitrião lê os dois lados ao gerar a partida
+    if (tactic) out._t = tactic;
+    // O capitão também vai junto do time (chave `_c` = id do jogador)
+    if (captain) out._c = captain;
     positions.forEach((position) => {
       const player = source[position];
       if (player) out[position] = player.id;
@@ -471,16 +514,16 @@ function App() {
   function squadPlayers(squad: Record<string, string> | null | undefined) {
     return positions.flatMap((position) => {
       const found = players.find((player) => player.id === squad?.[position]);
-      return found ? [{ ...found, slot: position }] : [];
+      return found ? [{ ...found, slot: position, captain: !!squad?._c && squad._c === found.id }] : [];
     }) as Player[];
   }
   // Envia as escolhas do draft para a sala (e marca como pronto no fim)
-  function syncSquad(source: Partial<Record<Position, Player>>, ready = false) {
+  function syncSquad(source: Partial<Record<Position, Player>>, ready = false, tactic?: Tactic, captain?: string) {
     if (!room || !myRole) return;
     const patch: Partial<Room> =
       myRole === 'host'
-        ? { host_squad: squadIds(source), ...(ready ? { host_ready: true } : {}) }
-        : { guest_squad: squadIds(source), ...(ready ? { guest_ready: true } : {}) };
+        ? { host_squad: squadIds(source, tactic, captain), ...(ready ? { host_ready: true } : {}) }
+        : { guest_squad: squadIds(source, tactic, captain), ...(ready ? { guest_ready: true } : {}) };
     setRoom((current) => (current ? { ...current, ...patch } : current));
     void patchRoom(room.id, patch);
   }
@@ -538,12 +581,12 @@ function App() {
     if (result.error || !result.tournament) setTError(result.error ?? 'Erro ao entrar no torneio.');
     else setTournament(result.tournament);
   }
-  async function handleStartTournament() {
+  async function handleStartTournament(seed?: string[]) {
     const current = tournamentRef.current;
     if (!current) return;
     setTBusy(true);
     setTError('');
-    const result = await startTournament(current.id);
+    const result = await startTournament(current.id, seed);
     setTBusy(false);
     if (result.error || !result.tournament) setTError(result.error ?? 'Não foi possível começar o torneio.');
     else setTournament(result.tournament);
@@ -631,9 +674,6 @@ function App() {
     if (!team) return;
     setSelectedClub(team);
     const startedAt = target.plan.find((item) => item.startedAt)?.startedAt;
-    // Cada minuto da partida dura 900 ms. Sem hora de início (partida antiga), começa do zero.
-    const liveMinute = startedAt ? Math.max(0, Math.min(90, Math.floor((Date.now() - startedAt - LINEUP_REVEAL_MS) / 900))) : 0;
-    spectateFrom.current = liveMinute;
     planRef.current = target.plan
       .filter((item: PlanItem) => item.minute > 0)
       .map((item: PlanItem) => ({
@@ -643,11 +683,45 @@ function App() {
         shooter: item.shooter,
         keeper: item.keeper,
       }));
+    // Sem hora de início (partida antiga), começa do zero. O relógio conta os acréscimos e o intervalo.
+    const clock = startedAt ? liveClock(Date.now() - startedAt - LINEUP_REVEAL_MS) : { minute: 0, extra: 0, pause: false };
+    spectateFrom.current = clock.minute;
+    spectateClock.current = clock;
     setSpectating({ host: target.host_nick, guest: target.guest_nick ?? 'Jogador', roomId: target.id });
     beginMatch(squadPlayers(target.host_squad), squadPlayers(target.guest_squad), null);
   }
   // Ao entrar como espectador, reconstrói o que já aconteceu até o minuto atual
   const spectateFrom = useRef<number | null>(null);
+  const spectateClock = useRef<{ minute: number; extra: number; pause: boolean } | null>(null);
+  // Acréscimos de cada tempo: 1 minuto + 1 por gol do tempo (máx. 4 no 1º e 6 no 2º). Sai do plano, igual para todos.
+  function stoppageFor(half: 1 | 2) {
+    const goals = (planRef.current ?? []).filter(
+      (item) => item.type === 'gol' && (half === 1 ? item.minute <= 45 : item.minute > 45),
+    ).length;
+    return half === 1 ? Math.min(4, 1 + goals) : Math.min(6, 2 + goals);
+  }
+  // Gol nos minutos finais do 1º tempo: o apito espera 8 ticks (~7 s) a mais para a jogada terminar na animação.
+  // Sai do plano, então é igual para os dois lados e para quem assiste ao vivo.
+  function holdTicksFor() {
+    const late = (planRef.current ?? []).some((item) => item.type === 'gol' && item.minute >= 38 && item.minute <= 45);
+    return late ? 8 : 0;
+  }
+  // Onde a partida está agora, a partir de quanto tempo passou desde o apito inicial (usado por quem assiste ao vivo)
+  function liveClock(elapsed: number) {
+    let t = Math.max(0, elapsed);
+    const s1 = stoppageFor(1);
+    const s2 = stoppageFor(2);
+    if (t < 45 * MINUTE_MS) return { minute: Math.floor(t / MINUTE_MS), extra: 0, pause: false };
+    t -= 45 * MINUTE_MS;
+    const window1 = (s1 + holdTicksFor() + 1) * MINUTE_MS;
+    if (t < window1) return { minute: 45, extra: Math.min(s1, Math.floor(t / MINUTE_MS)), pause: false };
+    t -= window1;
+    if (t < HALFTIME_MS) return { minute: 45, extra: 0, pause: true };
+    t -= HALFTIME_MS;
+    if (t < 45 * MINUTE_MS) return { minute: 45 + Math.floor(t / MINUTE_MS), extra: 0, pause: false };
+    t -= 45 * MINUTE_MS;
+    return { minute: 90, extra: Math.min(s2, Math.floor(t / MINUTE_MS)), pause: false };
+  }
   useEffect(() => {
     if (screen !== 'match' || spectateFrom.current === null || !userTeam.length || !botTeam.length) return;
     const target = spectateFrom.current;
@@ -660,6 +734,13 @@ function App() {
         if (item.type === 'gol') handleGoal(eventSeq.current, item.side);
       });
     setMinute(target);
+    const clock = spectateClock.current;
+    spectateClock.current = null;
+    if (clock) {
+      setExtra(clock.extra);
+      setPause(clock.pause ? 'halftime' : null);
+      halftimeDone.current = clock.pause || clock.minute > 45;
+    }
   }, [screen, userTeam, botTeam]);
   // Sai do modo espectador quando sair da partida/resultado
   useEffect(() => {
@@ -680,7 +761,11 @@ function App() {
       keeper: item.keeper,
     }));
     const rivalTeam = teams.find((item) => item.id === (role === 'host' ? current.guest_team_id : current.host_team_id));
-    beginMatch(mine, theirs, { team: rivalTeam, name: (role === 'host' ? current.guest_nick : current.host_nick) ?? undefined });
+    beginMatch(mine, theirs, {
+      team: rivalTeam,
+      name: (role === 'host' ? current.guest_nick : current.host_nick) ?? undefined,
+      tactic: tacticOf(role === 'host' ? current.guest_squad : current.host_squad),
+    });
   }
 
   useEffect(() => {
@@ -777,6 +862,7 @@ function App() {
         setSelectedClub(team);
         setMode(room.mode);
         drawRef.current = {};
+        setRerolls(1);
         setDraft({});
         setReviewing(false);
         setDraftPosition('GK');
@@ -791,7 +877,10 @@ function App() {
       mpPlanRoom.current !== room.id
     ) {
       mpPlanRoom.current = room.id;
-      const plan = generatePlan(squadPlayers(room.host_squad), squadPlayers(room.guest_squad), SHOOTOUT_CHANCE);
+      const plan = generatePlan(squadPlayers(room.host_squad), squadPlayers(room.guest_squad), SHOOTOUT_CHANCE, {
+        host: tacticOf(room.host_squad),
+        guest: tacticOf(room.guest_squad),
+      });
       void patchRoom(room.id, { plan, status: 'playing' });
     }
     if (room.status === 'playing' && room.plan && mpMatchRoom.current !== room.id) {
@@ -936,12 +1025,13 @@ function App() {
   function chooseClub(team: Team) {
     setSelectedClub(team);
     drawRef.current = {};
+    setRerolls(1);
     setDraft({});
         setReviewing(false);
     setDraftPosition('GK');
     navigate('draft');
   }
-  function playersForPosition(position: Position) {
+  function candidatePool(position: Position) {
     const selectedIds = Object.values(draft)
       .filter(Boolean)
       .map((player) => (player as Player).id);
@@ -949,7 +1039,25 @@ function App() {
       (player) => getPlayerPositions(player).includes(position) && !selectedIds.includes(player.id),
     );
     const free = fits.filter((player) => !blockedIds.has(player.id));
-    const pool = free.length ? free : fits;
+    return free.length ? free : fits;
+  }
+  // Troca única: sorteia 3 cartas novas para a posição atual (evita repetir as anteriores se der)
+  function rerollDraft() {
+    if (rerolls <= 0) return;
+    const pool = candidatePool(draftPosition);
+    const old = drawRef.current[draftPosition] ?? [];
+    const fresh = pool.filter((player) => !old.includes(player.id));
+    const source = fresh.length >= Math.min(3, pool.length) ? fresh : pool;
+    const rest = [...source];
+    const ids: string[] = [];
+    while (ids.length < Math.min(3, source.length) && rest.length) {
+      ids.push(rest.splice(Math.floor(Math.random() * rest.length), 1)[0].id);
+    }
+    drawRef.current[draftPosition] = ids;
+    setRerolls(0);
+  }
+  function playersForPosition(position: Position) {
+    const pool = candidatePool(position);
     // Sorteio: 3 cartas aleatórias por posição. Podem vir ótimas ou fracas, é questão de sorte.
     const wanted = Math.min(3, pool.length);
     let ids = (drawRef.current[position] ?? []).filter((id) => pool.some((player) => player.id === id));
@@ -976,7 +1084,7 @@ function App() {
   // No multiplayer o jogador pode ajustar as posições antes de confirmar; no solo segue direto
   function finishOrReview(finalDraft: Partial<Record<Position, Player>>) {
     if (room) setReviewing(true);
-    else setReveal({ squad: finalDraft, next: () => finishDraft(finalDraft) });
+    else setTacticStep({ squad: finalDraft, next: (tactic, captain) => setReveal({ squad: finalDraft, next: () => finishDraft(finalDraft, tactic, captain) }) });
   }
   // Troca dois jogadores de posição (só se os dois têm aptidão na posição do outro)
   function swapDraft(a: Position, b: Position) {
@@ -991,7 +1099,7 @@ function App() {
   function confirmSquad() {
     const finalDraft = draft;
     setReviewing(false);
-    setReveal({ squad: finalDraft, next: () => finishDraft(finalDraft) });
+    setTacticStep({ squad: finalDraft, next: (tactic, captain) => setReveal({ squad: finalDraft, next: () => finishDraft(finalDraft, tactic, captain) }) });
   }
   // Modo Dado: coloca o jogador escolhido na posição indicada
   function pickDicePlayer(player: Player, position: Position) {
@@ -1000,16 +1108,16 @@ function App() {
     syncSquad(nextDraft);
     if (positions.every((item) => nextDraft[item])) finishOrReview(nextDraft);
   }
-  function finishDraft(finalDraft: Partial<Record<Position, Player>>) {
+  function finishDraft(finalDraft: Partial<Record<Position, Player>>, tactic: Tactic = 'equilibrada', captain?: string) {
     if (room) {
-      // Multiplayer: marca como pronto e espera o adversário
-      syncSquad(finalDraft, true);
+      // Multiplayer: marca como pronto (com a tática) e espera o adversário
+      syncSquad(finalDraft, true, tactic, captain);
       navigate('lobby', true);
       return;
     }
     const chosen = positions.flatMap((position) => {
       const picked = finalDraft[position];
-      return picked ? [{ ...picked, slot: position }] : [];
+      return picked ? [{ ...picked, slot: position, captain: picked.id === captain }] : [];
     }) as Player[];
     const chosenIds = new Set(chosen.map((player) => player.id));
     const botClub = teams.find((team) => team.id !== selectedClub?.id);
@@ -1035,9 +1143,31 @@ function App() {
         botPlayers.push({ ...choice, slot: position });
       }
     });
+    // O bot também escolhe um capitão: o melhor jogador dele
+    const botCaptain = [...botPlayers].sort((a, b) => b.overall - a.overall)[0];
+    botPlayers.forEach((player) => {
+      player.captain = player.id === botCaptain?.id;
+    });
+    // Banco de reservas (1 defensor, 1 meio-campista e 1 atacante para cada lado), sorteados entre quem sobrou
+    const benchGroups: Position[][] = [['LB', 'RB'], ['CM'], ['LF', 'RF', 'CF']];
+    const pickBench = (): Player[] =>
+      benchGroups.flatMap((group) => {
+        const options = players.filter(
+          (player) => !usedIds.has(player.id) && getPlayerPositions(player).some((position) => group.includes(position)),
+        );
+        if (!options.length) return [];
+        const picked = options[Math.floor(Math.random() * options.length)];
+        usedIds.add(picked.id);
+        return [picked];
+      });
+    const userBenchPlayers = pickBench();
+    const botBenchPlayers = pickBench();
     // Contra o bot também usa o plano da partida: time mais forte faz mais gols e não há empate.
     // O jogador (anfitrião do plano) é o lado "user".
-    const basePlan: PlanEntry[] = generatePlan(chosen, botPlayers)
+    // O bot escolhe uma tática ao acaso (mais equilibrada que as outras)
+    const botRoll = Math.random();
+    const botTactic: Tactic = botRoll < 0.3 ? 'ofensiva' : botRoll < 0.6 ? 'defensiva' : 'equilibrada';
+    const basePlan: PlanEntry[] = generatePlan(chosen, botPlayers, 0, { host: tactic, guest: botTactic })
       .filter((item) => item.minute > 0)
       .map((item) => ({
         minute: item.minute,
@@ -1048,17 +1178,38 @@ function App() {
       }));
     // De vez em quando a partida termina empatada e vai para os pênaltis
     planRef.current = forceShootout || Math.random() < SHOOTOUT_CHANCE ? forceDrawPlan(basePlan) : basePlan;
-    beginMatch(chosen, botPlayers, { team: botClub });
+    beginMatch(chosen, botPlayers, { team: botClub, tactic: botTactic }, {
+      userBench: userBenchPlayers,
+      botBench: botBenchPlayers,
+      tactics: { user: tactic, bot: botTactic },
+    });
   }
-  function beginMatch(chosen: Player[], botPlayers: Player[], rivalInfo?: { team?: Team; name?: string } | null) {
+  function beginMatch(
+    chosen: Player[],
+    botPlayers: Player[],
+    rivalInfo?: { team?: Team; name?: string; tactic?: Tactic } | null,
+    extras?: { userBench: Player[]; botBench: Player[]; tactics: { user: Tactic; bot: Tactic } },
+  ) {
+    setUserBench(extras?.userBench ?? []);
+    setBotBench(extras?.botBench ?? []);
+    setMatchTactics(extras?.tactics ?? { user: 'equilibrada', bot: 'equilibrada' });
+    setLeftUser([]);
+    setLeftBot([]);
+    setSubsLog({ user: [], bot: [] });
+    workRef.current = { effort: {}, slow: {} };
     setLineupReveal(rivalInfo ? { squad: botPlayers, ...rivalInfo } : null);
     setUserTeam(chosen);
     setBotTeam(botPlayers);
     setMinute(0);
+    setExtra(0);
+    setPause(null);
+    halftimeDone.current = false;
+    halftimeWait.current = 0;
     setScore({ user: 0, bot: 0 });
     setEvents([]);
     setStats(emptyStats);
     setGoalLog([]);
+    setHighlights([]);
     setShootout(null);
     setPenaltyPhase(false);
     setShownScore({ user: 0, bot: 0 });
@@ -1070,24 +1221,71 @@ function App() {
   }
 
   useEffect(() => {
-    if (screen !== 'match' || minute >= 90 || skipped || lineupReveal) return;
-    const timer = window.setInterval(() => advanceMatch(), 900);
+    if (screen !== 'match' || skipped || lineupReveal || pause) return;
+    if (minute >= 90 && extra >= stoppageFor(2)) return;
+    const timer = window.setInterval(() => advanceMatch(), MINUTE_MS);
     return () => window.clearInterval(timer);
-  }, [screen, minute, skipped, lineupReveal]);
+  }, [screen, minute, extra, pause, skipped, lineupReveal]);
+
+  // Intervalo: a animação dura HALFTIME_MS e o 2º tempo começa
+  useEffect(() => {
+    if (pause !== 'halftime') return;
+    const timer = window.setTimeout(() => {
+      setPause(null);
+      setRestartKey((key) => key + 1);
+    }, HALFTIME_MS);
+    return () => window.clearTimeout(timer);
+  }, [pause]);
 
   // Depois dos 90 minutos, espera os gols aparecerem na animação antes de mostrar o resultado
   const goesToShootout = score.user === score.bot;
   useEffect(() => {
     if (screen !== 'match' || minute < 90) return;
+    if (!skipped && extra < stoppageFor(2)) return; // ainda nos acréscimos
     if (goesToShootout && (penaltyPhase || shootout)) return; // pênaltis em andamento
     const allShown = shownScore.user === score.user && shownScore.bot === score.bot;
-    const wait = skipped ? 250 : allShown ? 2500 : 14000;
+    // Empate: mostra a transição "vai para os pênaltis" antes de a disputa começar
+    // Gol ainda sem entrar na animação: espera até 30 s (a jogada mais lenta leva uns 9 s, com fila de lances chega a ~20 s)
+    const wait = skipped ? 250 : allShown ? (goesToShootout ? PENALTY_PREP_MS : 2500) : 30000;
     const timer = window.setTimeout(() => {
+      // Passou do limite sem a bola entrar: confirma os gols que faltam para o placar ficar certo
+      eventsRef.current.forEach((event) => {
+        if (event.type === 'gol' && !shownRef.current.has(event.id)) handleGoal(event.id, event.team);
+      });
       if (goesToShootout) setPenaltyPhase(true);
       else navigate('results', true);
     }, wait);
     return () => window.clearTimeout(timer);
-  }, [screen, minute, skipped, shownScore, score, penaltyPhase, shootout]);
+  }, [screen, minute, extra, skipped, shownScore, score, penaltyPhase, shootout]);
+  eventsRef.current = events;
+  // Cansaço (só contra o bot): jogador exausto fica mais lento no campo
+  if (!room && !spectating && screen === 'match') {
+    const slowMap: Record<string, number> = {};
+    (['user', 'bot'] as const).forEach((side) => {
+      (side === 'user' ? userTeam : botTeam).forEach((player) => {
+        const key = `${side}-${slotOf(player)}`;
+        const stamina = staminaAt(
+          slotOf(player),
+          Math.min(minute, 90),
+          side === 'user' ? matchTactics.user : matchTactics.bot,
+          player.since ?? 0,
+          (player.carried ?? 0) + effortLoss(workRef.current.effort[key] ?? 0),
+        );
+        slowMap[key] = slowdown(stamina);
+      });
+    });
+    workRef.current.slow = slowMap;
+  }
+  const penaltyPrep =
+    screen === 'match' &&
+    minute >= 90 &&
+    extra >= stoppageFor(2) &&
+    goesToShootout &&
+    !penaltyPhase &&
+    !shootout &&
+    !skipped &&
+    shownScore.user === score.user &&
+    shownScore.bot === score.bot;
 
   // Fim da disputa de pênaltis jogada pelo usuário: guarda o resultado e mostra a tela final
   function finishShootout(result: Shootout) {
@@ -1097,6 +1295,47 @@ function App() {
   }
 
   function advanceMatch() {
+    // Fim do 1º tempo: corre o acréscimo (45+1, 45+2...) e depois vem o intervalo
+    if (minute === 45 && !halftimeDone.current) {
+      if (extra < stoppageFor(1)) {
+        setExtra(extra + 1);
+        return;
+      }
+      // Gol no fim do tempo: segura o apito por um tempo fixo para a jogada terminar
+      if (halftimeWait.current < holdTicksFor()) {
+        halftimeWait.current += 1;
+        return;
+      }
+      // Se a bola ainda não entrou, o gol é confirmado agora (o intervalo cobre o campo)
+      eventsRef.current.forEach((event) => {
+        if (event.type === 'gol' && !shownRef.current.has(event.id)) handleGoal(event.id, event.team);
+      });
+      halftimeDone.current = true;
+      setExtra(0);
+      // Contra o bot dá para fazer trocas antes de o 2º tempo começar
+      const canSub = !room && !spectating && userBench.length > 0;
+      if (canSub) {
+        // Guarda o esforço do 1º tempo em cada jogador (fôlego já gasto e ritmo por minuto) e zera o contador do campo
+        const effort = workRef.current.effort;
+        const capture = (team: Player[], side: 'user' | 'bot') =>
+          team.map((player) => {
+            const loss = effortLoss(effort[`${side}-${slotOf(player)}`] ?? 0);
+            return { ...player, carried: (player.carried ?? 0) + loss, work: loss / 45 };
+          });
+        setUserTeam(capture(userTeam, 'user'));
+        setBotTeam(capture(botTeam, 'bot'));
+        Object.keys(effort).forEach((key) => {
+          effort[key] = 0;
+        });
+      }
+      setPause(canSub ? 'subs' : 'halftime');
+      return;
+    }
+    // Fim do 2º tempo: só corre o acréscimo (90+1, 90+2...)
+    if (minute >= 90) {
+      if (extra < stoppageFor(2)) setExtra(extra + 1);
+      return;
+    }
     const next = minute + 1;
     setMinute(next);
     if (planRef.current) {
@@ -1183,9 +1422,24 @@ function App() {
       `${shooterName} dá uma cavadinha em cima de ${keeperName} e marca!`,
       `${shooterName} chuta cruzado, a bola passa por ${keeperName} e é gol!`,
     ];
-    const goalText = assist
-      ? `${choose(goalTexts, 1)} Passe de ${assist.name}.`
-      : `${choose(goalTexts, 1)} Jogada individual.`;
+    // Gols especiais (escanteio, voleio, bicicleta, chapéu, olímpico): cerca de 30% dos gols. O mesmo sorteio sai nos dois lados do multiplayer.
+    const specialGoalTexts = [
+      `Escanteio cobrado na área e ${shooterName} sobe mais alto e cabeceia para o gol de ${club}!`,
+      `Escanteio cobrado, bola na cabeça de ${shooterName} e é gol de ${club}!`,
+      `${shooterName} acerta um voleio espetacular e é um golaço de ${club}!`,
+      `${shooterName} dá uma bicicleta incrível e marca um gol de placa!`,
+      `${shooterName} encobre ${keeperName} com um chapéu e marca!`,
+      `Gol olímpico! ${shooterName} cobra o escanteio direto e a bola entra!`,
+    ];
+    const pickedGoal =
+      roll(8) < 0.3 ? choose(specialGoalTexts, 10) : choose(goalTexts, 1);
+    // Gol olímpico não tem assistência
+    if (/olímpico/i.test(pickedGoal)) assist = undefined;
+    const goalText = /olímpico/i.test(pickedGoal)
+      ? pickedGoal
+      : assist
+        ? `${pickedGoal} Passe de ${assist.name}.`
+        : `${pickedGoal} Jogada individual.`;
     const shotTexts = [
       `${shooterName} finaliza de primeira, mas a bola passa por cima do gol.`,
       `${shooterName} bate cruzado e a bola sai rente à trave.`,
@@ -1195,6 +1449,7 @@ function App() {
       `${shooterName} cabeceia, mas sem direção.`,
       `${shooterName} fica de frente para o gol e chuta para fora.`,
     ];
+
     const saveTexts = [
       `${keeperName} espalma o chute de ${shooterName} para escanteio!`,
       `${keeperName} voa no canto e tira a bola do ângulo!`,
@@ -1226,6 +1481,13 @@ function App() {
     setEvents((current) =>
       [{ id, minute: currentMinute, type, text, team: side, actor: attackPlayer?.name, assist: assist?.name }, ...current].slice(0, 18),
     );
+    if (type !== 'posse') {
+      setHighlights((current) =>
+        current.some((item) => item.id === id)
+          ? current
+          : [...current, { id, minute: currentMinute, type, text, team: side, actor: attackPlayer?.name, assist: assist?.name }],
+      );
+    }
     // Toda finalização, defesa ou gol é um chute do time que ataca.
     // No alvo = defesa do goleiro ou gol. "Finalização" simples é o chute que sai para fora.
     const isShot = type === 'finalização' || type === 'defesa' || type === 'gol';
@@ -1256,6 +1518,73 @@ function App() {
     }
   }
 
+  // Confirma as trocas do intervalo: o bot também troca (os mais cansados), o 2º tempo do plano é refeito
+  function confirmSubs(choices: { slot: Position; inId: string }[]) {
+    const lite = (player: Player) => ({
+      primary_position: player.primary_position,
+      overall: player.overall,
+      name: player.name,
+      alts: player.alternate_positions ?? [],
+    });
+    const swap = (team: Player[], bench: Player[], picks: { slot: Position; inId: string }[]) => {
+      const left: Player[] = [];
+      const lines: string[] = [];
+      const next = team.map((player) => {
+        const pick = picks.find((item) => item.slot === slotOf(player));
+        const reserve = pick ? bench.find((item) => item.id === pick.inId) : undefined;
+        if (!reserve) return player;
+        left.push(player);
+        lines.push(`${player.name} ➜ ${reserve.name}`);
+        return {
+          ...reserve,
+          slot: slotOf(player),
+          since: minute,
+          oop: !fitsSlot(lite(reserve), slotOf(player)),
+          carried: 0,
+          work: player.work ?? 0,
+          captain: false,
+        };
+      });
+      return { next, left, lines };
+    };
+    const botPicks = autoSubstitutions(botTeam as FieldLite[], botBench.map(lite), matchTactics.bot).flatMap((pick) => {
+      const out = botTeam.find((player) => player.name === pick.out);
+      const reserve = botBench.find((player) => player.name === pick.in);
+      return out && reserve ? [{ slot: slotOf(out), inId: reserve.id }] : [];
+    });
+    const mine = swap(userTeam, userBench, choices.slice(0, SUBS_MAX));
+    const rival = swap(botTeam, botBench, botPicks);
+    if (planRef.current) {
+      const items: PlanItem[] = planRef.current.map((entry) => ({
+        minute: entry.minute,
+        type: entry.type,
+        side: entry.side === 'user' ? 'host' : 'guest',
+        shooter: entry.shooter,
+        keeper: entry.keeper,
+      }));
+      const reshaped = reshapeSecondHalf(
+        items,
+        { lineup: mine.next as FieldLite[], tactic: matchTactics.user },
+        { lineup: rival.next as FieldLite[], tactic: matchTactics.bot },
+        { host: userTeam, guest: botTeam },
+      );
+      planRef.current = reshaped.map((item) => ({
+        minute: item.minute,
+        type: item.type,
+        side: item.side === 'host' ? 'user' : 'bot',
+        shooter: item.shooter,
+        keeper: item.keeper,
+      }));
+    }
+    setUserTeam(mine.next);
+    setBotTeam(rival.next);
+    setUserBench((current) => current.filter((player) => !choices.some((pick) => pick.inId === player.id)));
+    setLeftUser((current) => [...current, ...mine.left]);
+    setLeftBot((current) => [...current, ...rival.left]);
+    setSubsLog({ user: mine.lines, bot: rival.lines });
+    setPause('halftime');
+  }
+
   function skipMatch() {
     if (planRef.current) {
       planRef.current.forEach((item) => {
@@ -1267,6 +1596,9 @@ function App() {
       }
     }
     setSkipped(true);
+    halftimeDone.current = true;
+    setPause(null);
+    setExtra(stoppageFor(2));
     setMinute(90);
   }
   // Depois da partida, a revanche só vale enquanto a sala está jogando/encerrada
@@ -1435,10 +1767,22 @@ function App() {
         />
       )}
 
+      {tacticStep && (
+        <TacticPicker
+          squad={tacticStep.squad}
+          onPick={(tactic, captain) => {
+            const step = tacticStep;
+            setTacticStep(null);
+            step.next(tactic, captain);
+          }}
+        />
+      )}
+
       {lineupReveal && screen === 'match' && (lineupReveal.team ?? opponentTeam) && (
         <RivalReveal
           opponent={(lineupReveal.team ?? opponentTeam) as Team}
           rivalName={lineupReveal.name}
+          rivalTactic={lineupReveal.tactic}
           squad={lineupReveal.squad}
           onDone={() => setLineupReveal(null)}
         />
@@ -1469,6 +1813,8 @@ function App() {
           options={playersForPosition(draftPosition)}
           onPosition={setDraftPosition}
           onChoose={chooseDraftPlayer}
+          rerollsLeft={rerolls}
+          onReroll={rerollDraft}
           onBack={() => goBack('club')}
         />
       )}
@@ -1481,6 +1827,8 @@ function App() {
           selected={draft}
           blockedIds={blockedIds}
           onPick={pickDicePlayer}
+          rerollsLeft={rerolls}
+          onUseReroll={() => setRerolls(0)}
           onBack={() => goBack('club')}
         />
       )}
@@ -1498,6 +1846,10 @@ function App() {
           userTeam={userTeam}
           botTeam={botTeam}
           minute={minute}
+          extra={extra}
+          pause={pause}
+          restartKey={restartKey}
+          penaltyPrep={penaltyPrep}
           score={shownScore}
           events={events}
           shownGoalIds={shownGoalIds}
@@ -1507,6 +1859,12 @@ function App() {
           penaltyPhase={penaltyPhase}
           onShootoutFinish={finishShootout}
           canSkip={!room && !spectating}
+          bench={userBench}
+          workRef={workRef}
+          tactic={matchTactics.user}
+          staminaOn={!room && !spectating}
+          subsLog={subsLog}
+          onSubs={confirmSubs}
           multiplayer={!!room}
           net={shootoutNet}
           onAbort={abortShootout}
@@ -1520,11 +1878,12 @@ function App() {
         <ResultsScreen
           club={selectedClub}
           opponent={opponentTeam}
-          userTeam={userTeam}
-          botTeam={botTeam}
+          userTeam={[...userTeam, ...leftUser]}
+          botTeam={[...botTeam, ...leftBot]}
           score={score}
           stats={stats}
           goalLog={goalLog}
+          highlights={highlights}
           shootout={shootout}
           againLabel={inTournamentMatch ? 'Voltar ao torneio' : undefined}
           onAgain={() => {
@@ -1869,6 +2228,8 @@ function DraftScreen({
   options,
   onPosition,
   onChoose,
+  rerollsLeft,
+  onReroll,
   onBack,
 }: {
   club: Team;
@@ -1878,6 +2239,8 @@ function DraftScreen({
   options: Player[];
   onPosition: (position: Position) => void;
   onChoose: (player: Player) => void;
+  rerollsLeft: number;
+  onReroll: () => void;
   onBack: () => void;
 }) {
   const chosen = Object.values(selected).filter(Boolean) as Player[];
@@ -1918,6 +2281,17 @@ function DraftScreen({
               <h3>{positionNames[currentPosition]}</h3>
             </div>
             <span>{options.length} disponíveis</span>
+          </div>
+          <div style={{ margin: '-6px 0 12px' }}>
+            <button
+              type="button"
+              className="outline-button"
+              onClick={onReroll}
+              disabled={rerollsLeft <= 0 || options.length === 0}
+              title="Sorteia 3 cartas novas para esta posição. Só dá para usar uma vez no draft."
+            >
+              🔄 {rerollsLeft > 0 ? 'Trocar cartas · 1 troca restante' : 'Troca já usada'}
+            </button>
           </div>
           <div className="cards-grid">
             {options.map((player) => (
@@ -2634,7 +3008,7 @@ function TournamentScreen({
   onBack: () => void;
   onCreate: (mode: 'classic' | 'dice', size: 4 | 6 | 8) => void;
   onJoin: (code: string) => void;
-  onStart: () => void;
+  onStart: (seed?: string[]) => void;
   onLeave: () => void;
   onCreateMatch: (teamId: string) => void;
   onJoinMatch: (teamId: string) => void;
@@ -2646,6 +3020,39 @@ function TournamentScreen({
   const [code, setCode] = useState('');
   const [copied, setCopied] = useState(false);
   const [teamId, setTeamId] = useState('');
+  // Chaveamento: sorteado pelo banco ou montado pelo anfitrião (toque em um jogador e depois em outro para trocar)
+  const [seedMode, setSeedMode] = useState<'random' | 'manual'>('random');
+  const [order, setOrder] = useState<string[]>([]);
+  const [picked, setPicked] = useState<number | null>(null);
+  const playerIdsKey = (tournament?.players ?? []).map((player) => player.id).join(',');
+  useEffect(() => {
+    const ids = playerIdsKey ? playerIdsKey.split(',') : [];
+    setOrder((prev) => [...prev.filter((id) => ids.includes(id)), ...ids.filter((id) => !prev.includes(id))]);
+    setPicked(null);
+  }, [playerIdsKey]);
+  function swapSeed(index: number) {
+    if (picked === null) setPicked(index);
+    else if (picked === index) setPicked(null);
+    else {
+      setOrder((prev) => {
+        const next = [...prev];
+        [next[picked], next[index]] = [next[index], next[picked]];
+        return next;
+      });
+      setPicked(null);
+    }
+  }
+  function shuffleSeed() {
+    setOrder((prev) => {
+      const next = [...prev];
+      for (let i = next.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [next[i], next[j]] = [next[j], next[i]];
+      }
+      return next;
+    });
+    setPicked(null);
+  }
 
   async function copyCode() {
     if (!tournament) return;
@@ -2781,11 +3188,68 @@ function TournamentScreen({
               </div>
             ))}
           </div>
+          {isHost && canStart && (
+            <div style={{ margin: '0 0 16px', display: 'grid', gap: 8 }}>
+              <span className="lobby-label" style={{ margin: 0 }}>CHAVEAMENTO</span>
+              <div className="lobby-seg">
+                <button type="button" className={seedMode === 'random' ? 'on' : ''} onClick={() => setSeedMode('random')}>
+                  🎲 Aleatório
+                </button>
+                <button type="button" className={seedMode === 'manual' ? 'on' : ''} onClick={() => setSeedMode('manual')}>
+                  ✋ Eu monto
+                </button>
+              </div>
+              {seedMode === 'random' ? (
+                <p style={{ margin: 0, fontSize: 13, opacity: 0.7 }}>Os confrontos serão sorteados quando o torneio começar.</p>
+              ) : (
+                <>
+                  <p style={{ margin: 0, fontSize: 13, opacity: 0.7 }}>
+                    Toque em um jogador e depois em outro para trocar de lugar.
+                  </p>
+                  {seedGroups(tournament.size).map((group) => (
+                    <div key={group.label} style={{ padding: 10, borderRadius: 10, border: '1px solid rgba(255,255,255,.12)' }}>
+                      <small style={{ display: 'block', marginBottom: 6, fontWeight: 800, letterSpacing: 1, color: gold }}>
+                        {group.label.toUpperCase()}
+                      </small>
+                      <div style={{ display: 'grid', gap: 6 }}>
+                        {group.indexes.map((index) => {
+                          const player = tournament.players.find((item) => item.id === order[index]);
+                          const on = picked === index;
+                          return (
+                            <button
+                              key={index}
+                              type="button"
+                              onClick={() => swapSeed(index)}
+                              aria-pressed={on}
+                              style={{
+                                padding: '8px 12px',
+                                borderRadius: 8,
+                                textAlign: 'left',
+                                color: 'inherit',
+                                border: `1px solid ${on ? gold : 'rgba(255,255,255,.12)'}`,
+                                background: on ? 'rgba(245,184,0,.15)' : 'rgba(255,255,255,.05)',
+                              }}
+                            >
+                              {player?.nick ?? '—'}
+                              {player?.id === userId ? ' (você)' : ''}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                  <button type="button" className="outline-button" onClick={shuffleSeed}>
+                    🎲 Embaralhar
+                  </button>
+                </>
+              )}
+            </div>
+          )}
           {isHost ? (
             <button
               className="gold-button large lobby-main"
               disabled={busy || !canStart}
-              onClick={onStart}
+              onClick={() => onStart(seedMode === 'manual' ? order : undefined)}
             >
               {busy
                 ? 'Começando...'
@@ -2990,6 +3454,8 @@ function DiceDraftScreen({
   selected,
   blockedIds,
   onPick,
+  rerollsLeft,
+  onUseReroll,
   onBack,
 }: {
   club: Team;
@@ -2998,6 +3464,8 @@ function DiceDraftScreen({
   selected: Partial<Record<Position, Player>>;
   blockedIds?: Set<string>;
   onPick: (player: Player, position: Position) => void;
+  rerollsLeft: number;
+  onUseReroll: () => void;
   onBack: () => void;
 }) {
   const [rolling, setRolling] = useState(false);
@@ -3036,9 +3504,12 @@ function DiceDraftScreen({
         }))
       : [];
 
-  function rollDice() {
-    if (rolling || rolled || !rollable.length) return;
-    const target = rollable[Math.floor(Math.random() * rollable.length)];
+  // `again`: troca única, rola de novo mesmo com um clube já sorteado (e tenta sair um clube diferente)
+  function rollDice(again = false) {
+    if (rolling || (rolled && !again) || !rollable.length) return;
+    const others = again && rolled ? rollable.filter((team) => team.id !== rolled.id) : rollable;
+    const options = others.length ? others : rollable;
+    const target = options[Math.floor(Math.random() * options.length)];
     const index = teams.findIndex((team) => team.id === target.id);
     let finalFace = (index % 6) + 1;
     if (teams.length <= 6) {
@@ -3047,6 +3518,7 @@ function DiceDraftScreen({
     }
     setRolling(true);
     setPending(null);
+    if (again) setRolledId(null);
     let ticks = 0;
     window.clearInterval(timer.current);
     timer.current = window.setInterval(() => {
@@ -3150,8 +3622,21 @@ function DiceDraftScreen({
                   Sem cartas disponíveis, rolar de novo
                 </button>
               )}
+              {rolled && cards.some((player) => slotsFor(player).length > 0) && (
+                <button
+                  className="outline-button"
+                  style={{ marginTop: 8 }}
+                  disabled={rerollsLeft <= 0 || rolling}
+                  onClick={() => {
+                    onUseReroll();
+                    rollDice(true);
+                  }}
+                >
+                  🎲 {rerollsLeft > 0 ? 'Rolar de novo · 1 troca restante' : 'Troca já usada'}
+                </button>
+              )}
               {!rolled && (
-                <button className="gold-button" onClick={rollDice} disabled={rolling || !rollable.length}>
+                <button className="gold-button" onClick={() => rollDice()} disabled={rolling || !rollable.length}>
                   <span aria-hidden="true">🎲</span> {rolling ? 'Rolando...' : 'Rolar dado'}
                 </button>
               )}
@@ -3332,6 +3817,598 @@ function TeamReveal({ club, squad, onDone }: { club: Team; squad: Partial<Record
   );
 }
 
+// ---- Intervalo e transição para os pênaltis: usam o mesmo campo do MatchPitch (SVG 740 x 440, time do usuário à esquerda) ----
+const PF = { W: 740, H: 440, X0: 20, X1: 720, Y0: 10, Y1: 430, MX: 370, MY: 220 };
+// Formação de saída de bola do MatchPitch (fração do campo; o time do usuário ataca para a direita)
+const PF_KICK: Record<Position, [number, number]> = {
+  GK: [0.05, 0.5],
+  LB: [0.2, 0.25],
+  RB: [0.2, 0.75],
+  CM: [0.44, 0.5],
+  LF: [0.38, 0.2],
+  RF: [0.38, 0.8],
+  CF: [0.36, 0.5],
+};
+const pfPoint = (side: 'user' | 'bot', f: number, g: number) => ({
+  x: PF.X0 + (side === 'user' ? f : 1 - f) * (PF.X1 - PF.X0),
+  y: PF.Y0 + (side === 'user' ? g : 1 - g) * (PF.Y1 - PF.Y0),
+});
+function pfTextOn(hex: string) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return '#ffffff';
+  const n = parseInt(m[1], 16);
+  return 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255) > 160 ? '#111111' : '#ffffff';
+}
+// Gramado igual ao do MatchPitch
+function PitchField({ children }: { children?: React.ReactNode }) {
+  const line = 'rgba(255,255,255,.55)';
+  return (
+    <svg viewBox={`0 0 ${PF.W} ${PF.H}`} style={{ display: 'block', width: '100%', height: '100%' }} aria-hidden="true">
+      <rect x={0} y={0} width={PF.W} height={PF.H} fill="#0a2417" />
+      {Array.from({ length: 10 }).map((_, i) => (
+        <rect key={i} x={PF.X0 + i * 70} y={PF.Y0} width={70} height={PF.Y1 - PF.Y0} fill={i % 2 ? '#10432a' : '#0e3a24'} />
+      ))}
+      <g fill="none" stroke={line} strokeWidth={2}>
+        <rect x={PF.X0} y={PF.Y0} width={PF.X1 - PF.X0} height={PF.Y1 - PF.Y0} />
+        <line x1={PF.MX} y1={PF.Y0} x2={PF.MX} y2={PF.Y1} />
+        <circle cx={PF.MX} cy={PF.MY} r={48} />
+        <rect x={PF.X0} y={PF.MY - 90} width={92} height={180} />
+        <rect x={PF.X1 - 92} y={PF.MY - 90} width={92} height={180} />
+        <rect x={PF.X0} y={PF.MY - 42} width={36} height={84} />
+        <rect x={PF.X1 - 36} y={PF.MY - 42} width={36} height={84} />
+      </g>
+      <circle cx={PF.MX} cy={PF.MY} r={3} fill={line} />
+      <rect x={PF.X0 - 14} y={188} width={14} height={64} fill="rgba(255,255,255,.12)" stroke={line} strokeWidth={2} />
+      <rect x={PF.X1} y={188} width={14} height={64} fill="rgba(255,255,255,.12)" stroke={line} strokeWidth={2} />
+      {children}
+    </svg>
+  );
+}
+const pitchOverlayStyle = {
+  position: 'absolute',
+  inset: 0,
+  overflow: 'hidden',
+  borderRadius: 14,
+  border: '1px solid rgba(255,255,255,.12)',
+  background: '#0a2417',
+} as const;
+
+// Cor da barra de fôlego: verde (descansado), amarelo (cansando) e vermelho (exausto)
+const staminaColor = (value: number) => (value >= 65 ? '#22c55e' : value >= 45 ? '#F5B800' : '#ef4444');
+
+// Substituições no intervalo (só contra o bot): escolhe quem sai, quem entra e vê o ganho de cada troca.
+// Fica por cima do campo e o relógio da partida fica parado até confirmar.
+function SubstitutionPanel({
+  club,
+  userTeam,
+  bench,
+  tactic,
+  minute,
+  onConfirm,
+}: {
+  club: Team;
+  userTeam: Player[];
+  bench: Player[];
+  tactic: Tactic;
+  minute: number;
+  onConfirm: (choices: { slot: Position; inId: string }[]) => void;
+}) {
+  const [picks, setPicks] = useState<Partial<Record<Position, string>>>({});
+  const [selected, setSelected] = useState<Position | null>(null);
+  const used = Object.values(picks) as string[];
+  const made = used.length;
+  const lite = (player: Player) => ({
+    primary_position: player.primary_position,
+    overall: player.overall,
+    name: player.name,
+    alts: player.alternate_positions ?? [],
+  });
+  const starterAt = (slot: Position) => userTeam.find((player) => slotOf(player) === slot);
+  const gainOf = (slot: Position, reserve: Player) => {
+    const out = starterAt(slot);
+    return out ? Math.round(substitutionGain(out as FieldLite, lite(reserve), tactic) * 10) / 10 : 0;
+  };
+  function toggleStarter(slot: Position) {
+    if (picks[slot]) {
+      setPicks((current) => {
+        const next = { ...current };
+        delete next[slot];
+        return next;
+      });
+      setSelected(null);
+      return;
+    }
+    if (slot === 'GK' || starterAt(slot)?.captain) return;
+    setSelected((current) => (current === slot ? null : slot));
+  }
+  function chooseReserve(reserve: Player) {
+    if (!selected || used.includes(reserve.id)) return;
+    if (!picks[selected] && made >= SUBS_MAX) return;
+    setPicks((current) => ({ ...current, [selected]: reserve.id }));
+    setSelected(null);
+  }
+  const sign = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(1)}`;
+  const gainColor = (value: number) => (value > 0.4 ? '#22c55e' : value < -0.4 ? '#ef4444' : '#cbd5e1');
+  return (
+    <div
+      role="dialog"
+      aria-label="Substituições"
+      style={{
+        position: 'absolute',
+        inset: 0,
+        zIndex: 6,
+        overflow: 'auto',
+        padding: 14,
+        borderRadius: 14,
+        border: '1px solid rgba(255,255,255,.12)',
+        background: 'linear-gradient(180deg,#0a2417,#0b1710)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+        <div>
+          <span className="eyebrow">INTERVALO · {club.abbreviation}</span>
+          <h3 style={{ margin: '2px 0 0', fontFamily: "'Bebas Neue', sans-serif", fontSize: 26, letterSpacing: 2 }}>
+            SUBSTITUIÇÕES
+          </h3>
+        </div>
+        <b style={{ color: '#F5B800' }}>
+          {made}/{SUBS_MAX} trocas
+        </b>
+      </div>
+      <p style={{ margin: '4px 0 10px', fontSize: 13, opacity: 0.8 }}>
+        A barra mostra o fôlego aos {minute}', já descontado o esforço de cada um em campo (corridas, condução, desarmes). Quem está cansado rende menos e corre mais devagar no 2º tempo. Toque em quem sai e depois no reserva que entra.
+        Reserva fora de posição perde 5 pontos.
+      </p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 12 }}>
+        <section>
+          <span className="eyebrow">EM CAMPO</span>
+          {positions.map((slot) => {
+            const player = starterAt(slot);
+            if (!player) return null;
+            const stamina = staminaAt(slot, minute, tactic, player.since ?? 0, player.carried ?? 0);
+            const reserve = bench.find((item) => item.id === picks[slot]);
+            const active = selected === slot;
+            return (
+              <button
+                key={slot}
+                type="button"
+                onClick={() => toggleStarter(slot)}
+                disabled={slot === 'GK' || !!player.captain}
+                aria-pressed={active || !!reserve}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  margin: '6px 0 0',
+                  padding: '8px 10px',
+                  textAlign: 'left',
+                  color: 'inherit',
+                  cursor: slot === 'GK' || player.captain ? 'default' : 'pointer',
+                  borderRadius: 10,
+                  border: `1px solid ${active ? '#F5B800' : reserve ? '#22c55e' : 'rgba(255,255,255,.14)'}`,
+                  background: active ? 'rgba(245,184,0,.12)' : 'rgba(255,255,255,.04)',
+                  opacity: slot === 'GK' || player.captain ? 0.7 : 1,
+                }}
+              >
+                <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <b style={{ minWidth: 28, color: '#F5B800' }}>{slot}</b>
+                  <span style={{ flex: 1, textDecoration: reserve ? 'line-through' : undefined, opacity: reserve ? 0.6 : 1 }}>
+                    {player.name}
+                    {player.captain ? <b style={{ color: '#F5B800' }}> ©</b> : null}
+                  </span>
+                  <strong>{player.overall}</strong>
+                  <small style={{ minWidth: 34, textAlign: 'right', color: staminaColor(stamina) }}>{Math.round(stamina)}%</small>
+                </span>
+                <span style={{ display: 'block', height: 5, marginTop: 5, borderRadius: 3, background: 'rgba(255,255,255,.12)', overflow: 'hidden' }}>
+                  <span style={{ display: 'block', height: '100%', width: `${stamina}%`, background: staminaColor(stamina) }} />
+                </span>
+                {reserve && (
+                  <span style={{ display: 'flex', gap: 8, marginTop: 6, fontSize: 13 }}>
+                    <span style={{ color: '#22c55e' }}>➜ {reserve.name}</span>
+                    <strong>{reserve.overall}</strong>
+                    <small style={{ marginLeft: 'auto', color: gainColor(gainOf(slot, reserve)) }}>
+                      {sign(gainOf(slot, reserve))} no 2º tempo
+                    </small>
+                  </span>
+                )}
+                {slot === 'GK' && <small style={{ opacity: 0.6 }}>Goleiro não é substituído</small>}
+                {player.captain && <small style={{ opacity: 0.6 }}>Capitão fica em campo</small>}
+              </button>
+            );
+          })}
+        </section>
+        <section>
+          <span className="eyebrow">BANCO</span>
+          {bench.length === 0 && <p style={{ opacity: 0.7 }}>Sem reservas disponíveis.</p>}
+          {bench.map((reserve) => {
+            const taken = used.includes(reserve.id);
+            const gain = selected ? gainOf(selected, reserve) : null;
+            const fits = selected ? fitsSlot(lite(reserve), selected) : true;
+            const blocked = taken || !selected || (!picks[selected] && made >= SUBS_MAX);
+            return (
+              <button
+                key={reserve.id}
+                type="button"
+                onClick={() => chooseReserve(reserve)}
+                disabled={blocked}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  margin: '6px 0 0',
+                  padding: '8px 10px',
+                  textAlign: 'left',
+                  color: 'inherit',
+                  cursor: blocked ? 'default' : 'pointer',
+                  borderRadius: 10,
+                  border: `1px solid ${taken ? '#22c55e' : 'rgba(255,255,255,.14)'}`,
+                  background: 'rgba(255,255,255,.04)',
+                  opacity: taken ? 0.5 : blocked ? 0.75 : 1,
+                }}
+              >
+                <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <b style={{ minWidth: 28, color: '#F5B800' }}>{reserve.primary_position}</b>
+                  <span style={{ flex: 1 }}>{reserve.name}</span>
+                  <strong>{reserve.overall}</strong>
+                  <small style={{ minWidth: 34, textAlign: 'right', color: '#22c55e' }}>100%</small>
+                </span>
+                <small style={{ display: 'block', marginTop: 3, opacity: 0.75 }}>
+                  {[reserve.primary_position, ...(reserve.alternate_positions ?? [])].join(' · ')}
+                  {taken ? ' · já escolhido' : ''}
+                  {selected && !taken && !fits ? ' · fora de posição (−5)' : ''}
+                  {selected && !taken && gain !== null ? ` · ${sign(gain)} no 2º tempo` : ''}
+                </small>
+              </button>
+            );
+          })}
+        </section>
+      </div>
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 14, flexWrap: 'wrap' }}>
+        {made > 0 && (
+          <button type="button" className="outline-button" onClick={() => setPicks({})}>
+            Desfazer trocas
+          </button>
+        )}
+        <button
+          type="button"
+          className="gold-button"
+          onClick={() =>
+            onConfirm(
+              (Object.entries(picks) as [Position, string][]).map(([slot, inId]) => ({ slot, inId })),
+            )
+          }
+        >
+          {made ? `Confirmar ${made} ${made === 1 ? 'troca' : 'trocas'} e voltar para o jogo` : 'Seguir sem trocas'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Intervalo: os jogadores saem do campo pelo túnel, aparece o placar e eles voltam para o 2º tempo.
+// Cobre o campo da partida enquanto dura (HALFTIME_MS); o relógio do jogo fica parado.
+function HalftimeBreak({
+  club,
+  opponent,
+  userTeam,
+  botTeam,
+  score,
+  subsLog,
+}: {
+  club: Team;
+  opponent: Team;
+  userTeam: Player[];
+  botTeam: Player[];
+  score: { user: number; bot: number };
+  subsLog: { user: string[]; bot: string[] };
+}) {
+  const OUT = 1300; // quanto cada jogador leva para sair (e para voltar)
+  const BACK_AT = 4200; // quando os jogadores começam a voltar
+  const dot = (player: Player | undefined, position: Position, side: 'user' | 'bot', index: number) => {
+    const team = side === 'user' ? club : opponent;
+    const [f, g] = PF_KICK[position];
+    const { x, y } = pfPoint(side, f, g);
+    // Túnel: embaixo, no meio do campo
+    const dx = PF.MX + (index % 7) * 7 - 21 - x;
+    const dy = PF.H + 40 - y;
+    const delay = (side === 'user' ? 0 : 7) * 40 + index * 40;
+    return (
+      <g key={`${side}-${position}`} transform={`translate(${x.toFixed(1)} ${y.toFixed(1)})`}>
+        <g
+          className="ht-p"
+          style={
+            {
+              '--dx': `${dx.toFixed(0)}px`,
+              '--dy': `${dy.toFixed(0)}px`,
+              animation: `ht-out ${OUT}ms ease-in ${delay}ms forwards, ht-in ${OUT}ms ease-out ${BACK_AT + delay}ms forwards`,
+            } as React.CSSProperties
+          }
+        >
+          <ellipse cy={13} rx={11} ry={4} fill="rgba(0,0,0,.35)" />
+          <circle r={14} fill={team.primary_color} stroke={team.secondary_color} strokeWidth={3} />
+          <text textAnchor="middle" dy={4.5} fontSize={13} fontWeight={700} fill={pfTextOn(team.primary_color)}>
+            {(player?.name ?? position).slice(0, 1).toUpperCase()}
+          </text>
+        </g>
+      </g>
+    );
+  };
+  const banner = (cls: string, text: string, delay: number, length: number) => (
+    <div
+      className={cls}
+      style={{
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        top: '50%',
+        transform: 'translateY(-50%)',
+        textAlign: 'center',
+        opacity: 0,
+        animation: `ht-fade ${length}ms ease-in-out ${delay}ms forwards`,
+        pointerEvents: 'none',
+      }}
+    >
+      <b
+        style={{
+          display: 'inline-block',
+          padding: '8px 18px',
+          background: 'rgba(5,8,12,.78)',
+          borderRadius: 8,
+          fontFamily: "'Bebas Neue', sans-serif",
+          fontSize: 30,
+          letterSpacing: 3,
+          color: '#F5B800',
+        }}
+      >
+        {text}
+      </b>
+    </div>
+  );
+  return (
+    <div role="status" aria-label="Intervalo" style={pitchOverlayStyle}>
+      <style>{`
+        @keyframes ht-out { 0% { transform: translate(0, 0); opacity: 1 } 75% { opacity: 1 } 100% { transform: translate(var(--dx), var(--dy)); opacity: 0 } }
+        @keyframes ht-in { 0% { transform: translate(var(--dx), var(--dy)); opacity: 0 } 25% { opacity: 1 } 100% { transform: translate(0, 0); opacity: 1 } }
+        @keyframes ht-fade { 0% { opacity: 0 } 15% { opacity: 1 } 85% { opacity: 1 } 100% { opacity: 0 } }
+        @media (prefers-reduced-motion: reduce) {
+          .ht-p, .ht-a, .ht-c { display: none !important }
+          .ht-card { animation: none !important; opacity: 1 !important }
+        }
+      `}</style>
+      <PitchField>
+        {positions.map((position, index) => dot(userTeam[index], position, 'user', index))}
+        {positions.map((position, index) => dot(botTeam[index], position, 'bot', index))}
+      </PitchField>
+      {banner('ht-a', 'FIM DO 1º TEMPO', 200, 1900)}
+      <div
+        className="ht-card"
+        style={{
+          position: 'absolute',
+          left: '50%',
+          top: '50%',
+          transform: 'translate(-50%, -50%)',
+          width: 'min(300px, 86%)',
+          padding: '16px 18px',
+          textAlign: 'center',
+          background: 'rgba(5,8,12,.88)',
+          border: '1px solid #F5B800',
+          borderRadius: 10,
+          opacity: 0,
+          animation: 'ht-fade 2600ms ease-in-out 1900ms forwards',
+        }}
+      >
+        <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 2, color: '#F5B800' }}>INTERVALO</div>
+        <div style={{ margin: '6px 0', fontFamily: "'Bebas Neue', sans-serif", fontSize: 44, lineHeight: 1 }}>
+          {club.abbreviation} {score.user} — {score.bot} {opponent.abbreviation}
+        </div>
+        {(subsLog.user.length > 0 || subsLog.bot.length > 0) && (
+          <div style={{ margin: '4px 0 8px', fontSize: 12, lineHeight: 1.5, textAlign: 'left' }}>
+            {subsLog.user.map((line) => (
+              <div key={`u-${line}`}>
+                <b style={{ color: '#F5B800' }}>{club.abbreviation}</b> · {line}
+              </div>
+            ))}
+            {subsLog.bot.map((line) => (
+              <div key={`b-${line}`}>
+                <b style={{ color: '#F5B800' }}>{opponent.abbreviation}</b> · {line}
+              </div>
+            ))}
+          </div>
+        )}
+        <small style={{ opacity: 0.7 }}>Os times voltam já já para o 2º tempo</small>
+      </div>
+      {banner('ht-c', 'COMEÇA O 2º TEMPO', 4500, 1600)}
+    </div>
+  );
+}
+
+// Fim do tempo normal empatado: transição antes da disputa de pênaltis (dura PENALTY_PREP_MS)
+function PenaltyPrep({ club, opponent, score }: { club: Team; opponent: Team; score: { user: number; bot: number } }) {
+  return (
+    <div role="status" aria-label="Vai para os pênaltis" style={pitchOverlayStyle}>
+      <style>{`
+        @keyframes pp-in { from { opacity: 0; transform: translateY(14px) } to { opacity: 1; transform: translateY(0) } }
+        @keyframes pp-ball { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-18px) } }
+        @keyframes pp-bar { from { width: 0 } to { width: 100% } }
+        @media (prefers-reduced-motion: reduce) { .pp-ball, .pp-in { animation: none !important; opacity: 1 !important } }
+      `}</style>
+      <PitchField />
+      <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', padding: 16 }}>
+        <div
+          style={{
+            textAlign: 'center',
+            padding: '18px 22px',
+            background: 'rgba(5,8,12,.85)',
+            border: '1px solid #F5B800',
+            borderRadius: 10,
+            width: 'min(340px, 100%)',
+          }}
+        >
+          <div
+            className="pp-in"
+            style={{ fontSize: 11, fontWeight: 800, letterSpacing: 2, color: '#F5B800', animation: 'pp-in .4s ease-out both' }}
+          >
+            FIM DO TEMPO NORMAL
+          </div>
+          <div
+            className="pp-in"
+            style={{ margin: '6px 0', fontFamily: "'Bebas Neue', sans-serif", fontSize: 46, lineHeight: 1, animation: 'pp-in .4s ease-out .3s both' }}
+          >
+            {club.abbreviation} {score.user} — {score.bot} {opponent.abbreviation}
+          </div>
+          <div
+            className="pp-in"
+            style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 26, letterSpacing: 2, animation: 'pp-in .4s ease-out .9s both' }}
+          >
+            EMPATE! VAI PARA OS PÊNALTIS
+          </div>
+          <div
+            className="pp-ball"
+            style={{ fontSize: 30, margin: '8px 0', animation: 'pp-ball .7s ease-in-out infinite' }}
+            aria-hidden="true"
+          >
+            ⚽
+          </div>
+          <div style={{ height: 4, borderRadius: 4, background: 'rgba(255,255,255,.14)', overflow: 'hidden' }}>
+            <div style={{ height: '100%', background: '#F5B800', animation: `pp-bar ${PENALTY_PREP_MS}ms linear forwards` }} />
+          </div>
+          <small style={{ display: 'block', marginTop: 6, opacity: 0.7 }}>Preparando a disputa...</small>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Escolha da tática depois do draft (o rival só descobre a sua na animação da escalação)
+function TacticPicker({
+  squad,
+  onPick,
+}: {
+  squad: Partial<Record<Position, Player>>;
+  onPick: (tactic: Tactic, captain: string) => void;
+}) {
+  const [chosen, setChosen] = useState<Tactic>('equilibrada');
+  const members = positions.flatMap((position) => (squad[position] ? [{ position, player: squad[position] as Player }] : []));
+  // Por padrão o capitão é o jogador de maior overall
+  const [captain, setCaptain] = useState<string>(
+    [...members].sort((a, b) => b.player.overall - a.player.overall)[0]?.player.id ?? '',
+  );
+  const bonusFor = (player: Player) => captainTeamBonus(player.overall);
+  return (
+    <div
+      role="dialog"
+      aria-label="Escolha a tática"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 80,
+        overflowY: 'auto',
+        display: 'grid',
+        placeItems: 'center',
+        padding: 16,
+        background: 'rgba(5,8,12,.96)',
+      }}
+    >
+      <div style={{ width: 'min(460px, 100%)', textAlign: 'center' }}>
+        <div className="eyebrow">ANTES DA PARTIDA</div>
+        <h2 style={{ margin: '6px 0 4px' }}>ESCOLHA A TÁTICA</h2>
+        <p style={{ margin: '0 0 16px', fontSize: 13, opacity: 0.7 }}>O rival não vê a sua escolha até a bola rolar.</p>
+        <div style={{ display: 'grid', gap: 10, textAlign: 'left' }}>
+          {TACTICS.map((tactic) => {
+            const info = TACTIC_INFO[tactic];
+            const on = chosen === tactic;
+            return (
+              <button
+                key={tactic}
+                type="button"
+                onClick={() => setChosen(tactic)}
+                aria-pressed={on}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 14,
+                  padding: '14px 16px',
+                  borderRadius: 8,
+                  border: `1px solid ${on ? '#F5B800' : '#343d47'}`,
+                  background: on ? '#19180f' : '#10161d',
+                  color: '#f4f4f0',
+                  textAlign: 'left',
+                }}
+              >
+                <span style={{ fontSize: 28 }} aria-hidden="true">{info.icon}</span>
+                <span style={{ flex: 1 }}>
+                  <b style={{ display: 'block', fontSize: 15, color: on ? '#F5B800' : undefined }}>{info.label}</b>
+                  <small style={{ opacity: 0.75, fontSize: 12 }}>{info.text}</small>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ marginTop: 22, textAlign: 'left' }}>
+          <div className="eyebrow" style={{ textAlign: 'center' }}>BRAÇADEIRA</div>
+          <h2 style={{ margin: '6px 0 4px', textAlign: 'center' }}>ESCOLHA O CAPITÃO</h2>
+          <div
+            style={{
+              margin: '0 0 12px',
+              padding: '10px 12px',
+              borderRadius: 8,
+              border: '1px solid #343d47',
+              background: '#10161d',
+              fontSize: 12,
+              lineHeight: 1.55,
+              opacity: 0.9,
+            }}
+          >
+            <b style={{ color: '#F5B800' }}>Como funciona:</b> o capitão rende <b>+{CAPTAIN_SELF_BONUS} de overall</b> e lidera o time,
+            dando um bônus a todos os companheiros: <b>+0,5</b> se ele tem menos de 80 de overall, <b>+1</b> se tem 80 ou mais e <b>+1,5</b> se
+            tem 90 ou mais. O bônus vale no cálculo da partida (chances de gol e duelos), não muda o número da carta. O capitão fica em campo
+            o jogo todo e não pode ser substituído no intervalo. O bot também escolhe o melhor jogador dele como capitão.
+          </div>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {members.map(({ position, player }) => {
+              const on = captain === player.id;
+              return (
+                <button
+                  key={player.id}
+                  type="button"
+                  onClick={() => setCaptain(player.id)}
+                  aria-pressed={on}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '10px 12px',
+                    borderRadius: 8,
+                    border: `1px solid ${on ? '#F5B800' : '#343d47'}`,
+                    background: on ? '#19180f' : '#10161d',
+                    color: '#f4f4f0',
+                    textAlign: 'left',
+                  }}
+                >
+                  <b style={{ minWidth: 30, color: '#F5B800' }}>{position}</b>
+                  <span style={{ flex: 1 }}>
+                    {player.name}
+                    {on && <b style={{ color: '#F5B800' }}> ©</b>}
+                  </span>
+                  <strong>{player.overall}</strong>
+                  <small style={{ minWidth: 92, textAlign: 'right', opacity: 0.8 }}>
+                    +{CAPTAIN_SELF_BONUS} ele · +{String(bonusFor(player)).replace(".", ",")} time
+                  </small>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <button
+          className="gold-button large lobby-main"
+          style={{ marginTop: 16 }}
+          onClick={() => onPick(chosen, captain)}
+        >
+          Confirmar tática e capitão
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // Animação antes da partida: o rival entra em campo, jogador por jogador, na formação (goleiro primeiro), e depois aparece o overall do time
 const REVEAL_SPOTS: Record<Position, [number, number]> = {
   GK: [50, 15],
@@ -3346,11 +4423,13 @@ const REVEAL_SPOTS: Record<Position, [number, number]> = {
 function RivalReveal({
   opponent,
   rivalName,
+  rivalTactic,
   squad,
   onDone,
 }: {
   opponent: Team;
   rivalName?: string;
+  rivalTactic?: Tactic;
   squad: Player[];
   onDone: () => void;
 }) {
@@ -3422,7 +4501,12 @@ function RivalReveal({
       `}</style>
       <div style={{ width: 'min(400px, 100%)', textAlign: 'center' }}>
         <div className="eyebrow">{rivalName ? `SEU RIVAL · ${rivalName.toUpperCase()}` : 'SEU RIVAL'}</div>
-        <h2 style={{ margin: '4px 0 8px' }}>{opponent.name.toUpperCase()}</h2>
+        <h2 style={{ margin: '4px 0 4px' }}>{opponent.name.toUpperCase()}</h2>
+        {rivalTactic && (
+          <div style={{ margin: '0 0 8px', fontSize: 12, fontWeight: 800, letterSpacing: 1.5, color: '#F5B800' }}>
+            {TACTIC_INFO[rivalTactic].icon} TÁTICA {TACTIC_INFO[rivalTactic].label.toUpperCase()}
+          </div>
+        )}
         {/* Usa o mesmo campo do app (classes .pitch / .pitch-lines), então as cores acompanham o resto do jogo */}
         <div
           className="pitch"
@@ -3740,7 +4824,62 @@ const chatCss = `
 .mp-chat-form input { flex: 1; min-width: 0; padding: 9px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.15); background: rgba(0,0,0,.25); color: inherit; font-size: 14px; }
 .mp-chat-form button { display: grid; place-items: center; width: 40px; border: 0; border-radius: 10px; background: #F5B800; color: #0B1016; cursor: pointer; }
 .mp-chat-form button:disabled { opacity: .45; cursor: default; }
+.mp-chat-quick { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px 0; }
+.mp-chat-quick button { padding: 6px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.06); color: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.mp-chat-quick button:hover:not(:disabled) { border-color: #F5B800; color: #F5B800; }
+.mp-chat-quick button:disabled { opacity: .4; cursor: default; }
+.mp-chat-quick.emoji button { font-size: 20px; padding: 4px 9px; line-height: 1.2; }
+@keyframes chat-toast { 0% { opacity: 0; transform: translate(-50%, -10px) scale(.9) } 10% { opacity: 1; transform: translate(-50%, 0) scale(1) } 85% { opacity: 1 } 100% { opacity: 0; transform: translate(-50%, -6px) } }
+@media (prefers-reduced-motion: reduce) { .mp-toast { animation-name: none !important; opacity: 1 !important } }
 `;
+
+// Mensagens rápidas e reações: um toque envia, sem digitar
+const QUICK_TEXTS = ['Boa!', 'Sorte sua', 'Que lance!', 'Foi quase!', 'Bora!', 'Vacilou!', 'GG', 'Revanche?'];
+const QUICK_EMOJIS = ['👏', '😂', '🔥', '😡', '😱', '😭', '😎', '🤝'];
+
+// Aviso flutuante com a última mensagem do rival, para ler sem rolar a tela até o chat
+function ChatToast({ messages, myId }: { messages: ChatMessage[]; myId: string | null }) {
+  const [shown, setShown] = useState<ChatMessage | null>(null);
+  const seen = useRef<string | null>(messages.length ? messages[messages.length - 1].id : null);
+  const last = messages.length ? messages[messages.length - 1] : null;
+  useEffect(() => {
+    if (!last || last.id === seen.current) return;
+    seen.current = last.id;
+    if (last.senderId === myId) return;
+    setShown(last);
+    const timer = window.setTimeout(() => setShown((current) => (current?.id === last.id ? null : current)), 3600);
+    return () => window.clearTimeout(timer);
+  }, [last?.id]);
+  if (!shown) return null;
+  const onlyEmoji = !/[A-Za-zÀ-ÿ0-9]/.test(shown.text) && shown.text.length <= 4;
+  return (
+    <div
+      key={shown.id}
+      className="mp-toast"
+      role="status"
+      style={{
+        position: 'fixed',
+        top: 78,
+        left: '50%',
+        zIndex: 70,
+        maxWidth: 'min(86vw, 360px)',
+        padding: onlyEmoji ? '6px 16px' : '8px 14px',
+        borderRadius: 14,
+        background: 'rgba(5,8,12,.92)',
+        border: '1px solid #F5B800',
+        color: '#f4f4f0',
+        textAlign: 'center',
+        pointerEvents: 'none',
+        animation: 'chat-toast 3600ms ease-in-out forwards',
+      }}
+    >
+      <small style={{ display: 'block', fontSize: 10, fontWeight: 800, letterSpacing: 1, color: '#F5B800' }}>
+        {shown.nick.toUpperCase()}
+      </small>
+      <span style={{ fontSize: onlyEmoji ? 34 : 15, fontWeight: 700, wordBreak: 'break-word' }}>{shown.text}</span>
+    </div>
+  );
+}
 
 // Chat do multiplayer: aparece na sala (draft) e durante a partida
 function ChatBox({
@@ -3765,6 +4904,15 @@ function ChatBox({
     if (!clean) return;
     if (onSend(clean)) setText('');
   }
+  // Mensagem rápida: envia na hora. Um pequeno intervalo evita spam de toques.
+  const [cooling, setCooling] = useState(false);
+  function quick(value: string) {
+    if (cooling) return;
+    if (onSend(value)) {
+      setCooling(true);
+      window.setTimeout(() => setCooling(false), 1200);
+    }
+  }
 
   return (
     <section className="mp-chat">
@@ -3783,6 +4931,20 @@ function ChatBox({
         ) : (
           <div className="mp-chat-empty">Nenhuma mensagem ainda. Mande um oi pro rival!</div>
         )}
+      </div>
+      <div className="mp-chat-quick emoji" aria-label="Reações">
+        {QUICK_EMOJIS.map((emoji) => (
+          <button key={emoji} type="button" disabled={cooling} onClick={() => quick(emoji)} aria-label={`Enviar ${emoji}`}>
+            {emoji}
+          </button>
+        ))}
+      </div>
+      <div className="mp-chat-quick" aria-label="Mensagens rápidas">
+        {QUICK_TEXTS.map((message) => (
+          <button key={message} type="button" disabled={cooling} onClick={() => quick(message)}>
+            {message}
+          </button>
+        ))}
       </div>
       <div className="mp-chat-form">
         <input
@@ -3808,6 +4970,10 @@ function MatchScreen({
   userTeam,
   botTeam,
   minute,
+  extra,
+  pause,
+  restartKey,
+  penaltyPrep,
   score,
   events,
   shownGoalIds,
@@ -3817,6 +4983,12 @@ function MatchScreen({
   penaltyPhase,
   onShootoutFinish,
   canSkip,
+  bench,
+  workRef,
+  tactic,
+  staminaOn,
+  subsLog,
+  onSubs,
   multiplayer,
   net,
   onAbort,
@@ -3829,6 +5001,10 @@ function MatchScreen({
   userTeam: Player[];
   botTeam: Player[];
   minute: number;
+  extra: number;
+  pause: 'halftime' | 'subs' | null;
+  restartKey: number;
+  penaltyPrep: boolean;
   score: { user: number; bot: number };
   events: MatchEvent[];
   shownGoalIds: number[];
@@ -3838,6 +5014,12 @@ function MatchScreen({
   penaltyPhase: boolean;
   onShootoutFinish: (result: Shootout) => void;
   canSkip: boolean;
+  bench: Player[];
+  workRef: { current: { effort: Record<string, number>; slow: Record<string, number> } };
+  tactic: Tactic;
+  staminaOn: boolean;
+  subsLog: { user: string[]; bot: string[] };
+  onSubs: (choices: { slot: Position; inId: string }[]) => void;
   multiplayer: boolean;
   net?: { roomId: string; role: 'host' | 'guest' | 'spectator' };
   onAbort?: () => void;
@@ -3851,7 +5033,8 @@ function MatchScreen({
     <main className="match-page">
       <div className="match-header">
         <div className="match-status">
-          <span className="live-dot" /> AO VIVO · {minute}'
+          <span className="live-dot" />{' '}
+          {pause === 'halftime' ? 'INTERVALO' : pause === 'subs' ? 'INTERVALO · TROCAS' : `AO VIVO · ${minute}${extra > 0 ? `+${extra}` : ''}'`}
         </div>
         {canSkip && (
           <button className="skip-button" onClick={onSkip}>
@@ -3886,16 +5069,28 @@ function MatchScreen({
           onAbort={onAbort}
         />
       ) : (
-        <MatchPitch
-          club={club}
-          opponent={opponent}
-          userTeam={userTeam}
-          botTeam={botTeam}
-          events={events}
-          onGoal={onGoal}
-        />
+        <div style={{ position: 'relative', minHeight: pause === 'subs' ? 620 : undefined }}>
+          <MatchPitch
+            club={club}
+            opponent={opponent}
+            userTeam={userTeam}
+            botTeam={botTeam}
+            events={events}
+            onGoal={onGoal}
+            restartKey={restartKey}
+            workRef={staminaOn ? workRef : undefined}
+          />
+          {pause === 'halftime' && (
+            <HalftimeBreak club={club} opponent={opponent} userTeam={userTeam} botTeam={botTeam} score={score} subsLog={subsLog} />
+          )}
+          {pause === 'subs' && (
+            <SubstitutionPanel club={club} userTeam={userTeam} bench={bench} tactic={tactic} minute={minute} onConfirm={onSubs} />
+          )}
+          {penaltyPrep && <PenaltyPrep club={club} opponent={opponent} score={score} />}
+        </div>
       )}
 
+      {multiplayer && <ChatToast messages={chatMessages} myId={userId} />}
       {multiplayer && <ChatBox messages={chatMessages} myId={userId} onSend={onSendChat} />}
 
       <div className="match-columns">
@@ -3937,13 +5132,44 @@ function MatchScreen({
           <div className="side-players">
             <span className="eyebrow">FORMAÇÕES</span>
             <h3>Seu elenco</h3>
-            {userTeam.map((player) => (
-              <div key={player.id}>
-                <span>{slotOf(player)}</span>
-                <b>{player.name}</b>
-                <strong>{player.overall}</strong>
-              </div>
-            ))}
+            {userTeam.map((player) => {
+              const stamina = staminaOn
+                ? staminaAt(
+                    slotOf(player),
+                    Math.min(minute, 90),
+                    tactic,
+                    player.since ?? 0,
+                    (player.carried ?? 0) + effortLoss(workRef.current.effort[`user-${slotOf(player)}`] ?? 0),
+                  )
+                : 100;
+              return (
+                <div key={player.id}>
+                  <span>{slotOf(player)}</span>
+                  <b>
+                    {player.name}
+                    {player.captain ? <small style={{ color: '#F5B800' }}> ©</small> : null}
+                    {player.since ? <small style={{ opacity: 0.6 }}> ↑{player.since}'</small> : null}
+                    {staminaOn && (
+                      <span
+                        title={`Fôlego ${Math.round(stamina)}%`}
+                        style={{ display: 'block', height: 4, marginTop: 3, borderRadius: 3, background: 'rgba(255,255,255,.12)', overflow: 'hidden' }}
+                      >
+                        <span
+                          style={{
+                            display: 'block',
+                            height: '100%',
+                            width: `${stamina}%`,
+                            background: staminaColor(stamina),
+                            transition: 'width .6s linear',
+                          }}
+                        />
+                      </span>
+                    )}
+                  </b>
+                  <strong>{player.overall}</strong>
+                </div>
+              );
+            })}
           </div>
         </aside>
       </div>
@@ -3991,6 +5217,7 @@ function ResultsScreen({
   score,
   stats,
   goalLog,
+  highlights,
   shootout,
   onAgain,
   againLabel,
@@ -4004,6 +5231,7 @@ function ResultsScreen({
   score: { user: number; bot: number };
   stats: MatchStats;
   goalLog: GoalRecord[];
+  highlights: MatchEvent[];
   shootout: Shootout | null;
   onAgain: () => void;
   againLabel?: string;
@@ -4150,6 +5378,7 @@ function ResultsScreen({
           <RatingList players={botTeam} ratings={ratings.bot} />
         </section>
       </div>
+      <MatchHighlights club={club} opponent={opponent} highlights={highlights} />
       {(rematch.left || (rematch.enabled && rematchCount > 0)) && (
         <p style={{ textAlign: 'center', margin: '0 0 10px', fontSize: 14, fontWeight: 700, color: rematch.left ? '#ffb3b3' : '#F5B800' }}>
           {rematch.left
@@ -4219,6 +5448,73 @@ function ResultBar({
         <b style={{ width: `${(bot / total) * 100}%` }} />
       </div>
     </div>
+  );
+}
+
+// Melhores momentos: todos os gols, mais os lances de defesa e finalização mais bonitos (até 4), em ordem de minuto
+function pickHighlights(events: MatchEvent[]): { event: MatchEvent; tag: string; score: number }[] {
+  const tagOf = (event: MatchEvent) => {
+    if (event.type === 'gol') {
+      if (/olímpico/i.test(event.text)) return 'GOL OLÍMPICO';
+      if (/bicicleta/i.test(event.text)) return 'GOLAÇO DE BICICLETA';
+      if (/voleio/i.test(event.text)) return 'GOLAÇO DE VOLEIO';
+      if (/chapéu|cavadinha/i.test(event.text)) return 'GOL DE CLASSE';
+      if (/escanteio|cabece/i.test(event.text)) return 'GOL DE CABEÇA';
+      return 'GOL';
+    }
+    if (/trave/i.test(event.text)) return 'NA TRAVE';
+    if (event.type === 'defesa') return /defesaça|voa no canto|ângulo/i.test(event.text) ? 'DEFESAÇA' : 'DEFESA';
+    return 'QUASE';
+  };
+  const worth = (event: MatchEvent) => {
+    if (event.type === 'gol') return 100;
+    if (/trave/i.test(event.text)) return 4;
+    if (/defesaça|voa no canto|ângulo/i.test(event.text)) return 4;
+    if (event.type === 'defesa') return 2;
+    return 1;
+  };
+  const goals = events.filter((event) => event.type === 'gol');
+  const extras = events
+    .filter((event) => event.type !== 'gol')
+    .map((event) => ({ event, score: worth(event) + (event.minute > 80 ? 0.5 : 0) }))
+    .sort((a, b) => b.score - a.score || a.event.minute - b.event.minute)
+    .slice(0, 4)
+    .map((item) => item.event);
+  return [...goals, ...extras]
+    .sort((a, b) => a.minute - b.minute || a.id - b.id)
+    .map((event) => ({ event, tag: tagOf(event), score: worth(event) }));
+}
+
+function MatchHighlights({ club, opponent, highlights }: { club: Team; opponent: Team; highlights: MatchEvent[] }) {
+  const items = useMemo(() => pickHighlights(highlights), [highlights]);
+  if (!items.length) return null;
+  return (
+    <section className="result-panel" style={{ margin: '0 auto 18px', maxWidth: 1100 }}>
+      <div className="section-title">
+        <div>
+          <span className="eyebrow">RESUMO DA PARTIDA</span>
+          <h2>MELHORES MOMENTOS</h2>
+        </div>
+        <Zap color="#f5b800" />
+      </div>
+      {items.map(({ event, tag }) => (
+        <div
+          key={event.id}
+          className={`event-row ${event.type === 'gol' ? 'goal-event' : ''}`}
+          style={{ alignItems: 'center' }}
+        >
+          <strong>{event.minute}'</strong>
+          <span className={`event-icon ${event.type}`}>
+            <EventIcon type={event.type} />
+          </span>
+          <p>
+            <small style={{ opacity: 0.7 }}>{event.team === 'user' ? club.abbreviation : opponent.abbreviation} · </small>
+            {event.text}
+          </p>
+          <b style={{ whiteSpace: 'nowrap', fontSize: 11 }}>{tag}</b>
+        </div>
+      ))}
+    </section>
   );
 }
 
