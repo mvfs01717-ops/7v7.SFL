@@ -48,6 +48,26 @@ export type Room = {
   shootout_host?: NetShootout | null;
   shootout_guest?: NetShootout | null;
 };
+// Tática escolhida antes da partida. Fica guardada junto do time na sala (chave `_t` de host_squad/guest_squad),
+// então não precisa de coluna nova no banco.
+export type Tactic = 'ofensiva' | 'equilibrada' | 'defensiva';
+export const TACTICS: Tactic[] = ['ofensiva', 'equilibrada', 'defensiva'];
+export const TACTIC_INFO: Record<Tactic, { label: string; icon: string; text: string }> = {
+  ofensiva: { label: 'Ofensiva', icon: '⚔️', text: 'Cria mais chances de gol, mas deixa o rival criar mais também.' },
+  equilibrada: { label: 'Equilibrada', icon: '⚖️', text: 'Sem riscos: o jogo segue o equilíbrio normal dos times.' },
+  defensiva: { label: 'Defensiva', icon: '🛡️', text: 'Cria menos chances, mas também segura mais o rival.' },
+};
+export function tacticOf(squad: Squad | null | undefined): Tactic {
+  const value = squad?._t;
+  return value === 'ofensiva' || value === 'defensiva' ? value : 'equilibrada';
+}
+// Quantos chutes a tática muda: `own` nos chutes do próprio time, `conceded` nos chutes que o rival ganha contra ela
+const TACTIC_SHOTS: Record<Tactic, { own: number; conceded: number }> = {
+  ofensiva: { own: 2, conceded: 2 },
+  equilibrada: { own: 0, conceded: 0 },
+  defensiva: { own: -2.5, conceded: -2 },
+};
+
 // `slot` é a posição em que o jogador foi escalado no draft (pode ser diferente da posição de origem)
 type Lite = { primary_position: string; overall: number; name?: string; slot?: string };
 const posOf = (player: Lite) => player.slot ?? player.primary_position;
@@ -261,7 +281,14 @@ type Shot = { side: 'host' | 'guest'; shooter?: Lite; keeper?: Lite; outcome: 'g
 // Atacante muito melhor que o goleiro faz mais gols; goleiro muito melhor defende mais.
 // A partida nunca termina empatada, e tem entre 3 e 7 gols no total.
 // `drawChance` (0 a 1): chance de a partida terminar empatada e ir para os pênaltis. Com 0 nunca empata.
-export function generatePlan(hostSquad: Lite[], guestSquad: Lite[], drawChance = 0): PlanItem[] {
+export function generatePlan(
+  hostSquad: Lite[],
+  guestSquad: Lite[],
+  drawChance = 0,
+  tactics: { host?: Tactic; guest?: Tactic } = {},
+): PlanItem[] {
+  const hostTactic = tactics.host ?? 'equilibrada';
+  const guestTactic = tactics.guest ?? 'equilibrada';
   const edgeHost = attackRating(hostSquad) - defenseRating(guestSquad);
   const edgeGuest = attackRating(guestSquad) - defenseRating(hostSquad);
   const hostChance = clampNum(0.5 + (edgeHost - edgeGuest) * (GOAL_PER_EDGE / 6), 0.2, 0.8);
@@ -279,11 +306,20 @@ export function generatePlan(hostSquad: Lite[], guestSquad: Lite[], drawChance =
     const pGoal = clampNum(0.36 + (skill - keeperSkill) * DUEL_PER_POINT, 0.1, 0.75);
     return { side, shooter, keeper, outcome: Math.random() < pGoal ? 'gol' : 'defesa' };
   };
-  const shotCount = (edge: number) =>
-    Math.max(4, Math.round(clampNum(9 + edge * SHOTS_PER_EDGE, 5, 14) + (Math.random() * 3 - 1.5)));
+  // A tática mexe na quantidade de chutes: a própria (cria mais/menos) e a do rival (cede mais/menos)
+  const shotCount = (edge: number, own: Tactic, rival: Tactic) =>
+    Math.max(
+      3,
+      Math.round(
+        clampNum(9 + edge * SHOTS_PER_EDGE, 5, 14) +
+          TACTIC_SHOTS[own].own +
+          TACTIC_SHOTS[rival].conceded +
+          (Math.random() * 3 - 1.5),
+      ),
+    );
   const shots: Shot[] = [];
-  for (let i = shotCount(edgeHost); i > 0; i -= 1) shots.push(takeShot('host'));
-  for (let i = shotCount(edgeGuest); i > 0; i -= 1) shots.push(takeShot('guest'));
+  for (let i = shotCount(edgeHost, hostTactic, guestTactic); i > 0; i -= 1) shots.push(takeShot('host'));
+  for (let i = shotCount(edgeGuest, guestTactic, hostTactic); i > 0; i -= 1) shots.push(takeShot('guest'));
 
   const goalsOf = (side: Shot['side']) => shots.filter((shot) => shot.side === side && shot.outcome === 'gol').length;
   // Transforma um chute do lado em gol (prefere uma defesa; se não houver chute, cria um)
