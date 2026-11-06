@@ -48,37 +48,8 @@ export type Room = {
   shootout_host?: NetShootout | null;
   shootout_guest?: NetShootout | null;
 };
-// Tática escolhida antes da partida. Fica guardada junto do time na sala (chave `_t` de host_squad/guest_squad),
-// então não precisa de coluna nova no banco.
-export type Tactic = 'ofensiva' | 'equilibrada' | 'defensiva';
-export const TACTICS: Tactic[] = ['ofensiva', 'equilibrada', 'defensiva'];
-export const TACTIC_INFO: Record<Tactic, { label: string; icon: string; text: string }> = {
-  ofensiva: { label: 'Ofensiva', icon: '⚔️', text: 'Cria mais chances de gol, mas deixa o rival criar mais também.' },
-  equilibrada: { label: 'Equilibrada', icon: '⚖️', text: 'Sem riscos: o jogo segue o equilíbrio normal dos times.' },
-  defensiva: { label: 'Defensiva', icon: '🛡️', text: 'Cria menos chances, mas também segura mais o rival.' },
-};
-export function tacticOf(squad: Squad | null | undefined): Tactic {
-  const value = squad?._t;
-  return value === 'ofensiva' || value === 'defensiva' ? value : 'equilibrada';
-}
-// Quantos chutes a tática muda: `own` nos chutes do próprio time, `conceded` nos chutes que o rival ganha contra ela
-const TACTIC_SHOTS: Record<Tactic, { own: number; conceded: number }> = {
-  ofensiva: { own: 2, conceded: 2 },
-  equilibrada: { own: 0, conceded: 0 },
-  defensiva: { own: -2.5, conceded: -2 },
-};
-
 // `slot` é a posição em que o jogador foi escalado no draft (pode ser diferente da posição de origem)
-type Lite = { primary_position: string; overall: number; name?: string; slot?: string; captain?: boolean };
-// Capitão: ele rende +2 de overall e passa liderança aos companheiros (+0,5; +1 se ele tem 80 ou mais; +1,5 se tem 90 ou mais)
-export const CAPTAIN_SELF_BONUS = 2;
-export const captainTeamBonus = (overall: number) => (overall >= 90 ? 1.5 : overall >= 80 ? 1 : 0.5);
-function withCaptain<T extends Lite>(squad: T[]): T[] {
-  const captain = squad.find((player) => player.captain);
-  if (!captain) return squad;
-  const team = captainTeamBonus(captain.overall);
-  return squad.map((player) => ({ ...player, overall: player.overall + (player.captain ? CAPTAIN_SELF_BONUS : team) }));
-}
+type Lite = { primary_position: string; overall: number; name?: string; slot?: string };
 const posOf = (player: Lite) => player.slot ?? player.primary_position;
 
 // Sem letras parecidas (0/O, 1/I) para o código ser fácil de ditar
@@ -252,32 +223,19 @@ function shuffled<T>(list: T[]): T[] {
   return out;
 }
 
-// Escolhe `count` minutos entre os `slots`, com um intervalo mínimo entre eles (e em relação aos já escolhidos)
-function pickSpaced(count: number, slots: number[], existing: number[] = []): number[] {
-  if (count <= 0) return [];
+// Escolhe os minutos dos gols, com um intervalo mínimo entre eles para a animação dar conta
+function pickGoalMinutes(count: number, slots: number[]): number[] {
   for (const gap of [8, 6, 4]) {
     for (let attempt = 0; attempt < 80; attempt += 1) {
       const chosen: number[] = [];
       for (const minute of shuffled(slots)) {
-        if ([...existing, ...chosen].every((other) => Math.abs(other - minute) >= gap)) chosen.push(minute);
-        if (chosen.length === count) return chosen;
+        if (chosen.every((other) => Math.abs(other - minute) >= gap)) chosen.push(minute);
+        if (chosen.length === count) return chosen.sort((a, b) => a - b);
       }
     }
   }
   const step = slots.length / count;
   return Array.from({ length: count }, (_, i) => slots[Math.floor(i * step)]);
-}
-
-// Os gols se espalham pelos dois tempos: sempre pelo menos 1 no 1º tempo (minutos 1 a 45) e 1 no 2º (46 a 90),
-// em geral perto de metade para cada lado
-function pickGoalMinutes(count: number, slots: number[]): number[] {
-  const first = slots.filter((minute) => minute <= 45);
-  const second = slots.filter((minute) => minute > 45);
-  if (count < 2 || !first.length || !second.length) return pickSpaced(count, slots).sort((a, b) => a - b);
-  const inFirst = clampNum(Math.round(count * (0.3 + Math.random() * 0.25)), 1, count - 1);
-  const early = pickSpaced(inFirst, first);
-  const late = pickSpaced(count - inFirst, second, early);
-  return [...early, ...late].sort((a, b) => a - b);
 }
 
 const MIN_GOALS = 3;
@@ -303,17 +261,7 @@ type Shot = { side: 'host' | 'guest'; shooter?: Lite; keeper?: Lite; outcome: 'g
 // Atacante muito melhor que o goleiro faz mais gols; goleiro muito melhor defende mais.
 // A partida nunca termina empatada, e tem entre 3 e 7 gols no total.
 // `drawChance` (0 a 1): chance de a partida terminar empatada e ir para os pênaltis. Com 0 nunca empata.
-export function generatePlan(
-  hostSquadRaw: Lite[],
-  guestSquadRaw: Lite[],
-  drawChance = 0,
-  tactics: { host?: Tactic; guest?: Tactic } = {},
-): PlanItem[] {
-  // O bônus do capitão entra no overall dos dois times antes de qualquer cálculo
-  const hostSquad = withCaptain(hostSquadRaw);
-  const guestSquad = withCaptain(guestSquadRaw);
-  const hostTactic = tactics.host ?? 'equilibrada';
-  const guestTactic = tactics.guest ?? 'equilibrada';
+export function generatePlan(hostSquad: Lite[], guestSquad: Lite[], drawChance = 0): PlanItem[] {
   const edgeHost = attackRating(hostSquad) - defenseRating(guestSquad);
   const edgeGuest = attackRating(guestSquad) - defenseRating(hostSquad);
   const hostChance = clampNum(0.5 + (edgeHost - edgeGuest) * (GOAL_PER_EDGE / 6), 0.2, 0.8);
@@ -331,20 +279,11 @@ export function generatePlan(
     const pGoal = clampNum(0.36 + (skill - keeperSkill) * DUEL_PER_POINT, 0.1, 0.75);
     return { side, shooter, keeper, outcome: Math.random() < pGoal ? 'gol' : 'defesa' };
   };
-  // A tática mexe na quantidade de chutes: a própria (cria mais/menos) e a do rival (cede mais/menos)
-  const shotCount = (edge: number, own: Tactic, rival: Tactic) =>
-    Math.max(
-      3,
-      Math.round(
-        clampNum(9 + edge * SHOTS_PER_EDGE, 5, 14) +
-          TACTIC_SHOTS[own].own +
-          TACTIC_SHOTS[rival].conceded +
-          (Math.random() * 3 - 1.5),
-      ),
-    );
+  const shotCount = (edge: number) =>
+    Math.max(4, Math.round(clampNum(9 + edge * SHOTS_PER_EDGE, 5, 14) + (Math.random() * 3 - 1.5)));
   const shots: Shot[] = [];
-  for (let i = shotCount(edgeHost, hostTactic, guestTactic); i > 0; i -= 1) shots.push(takeShot('host'));
-  for (let i = shotCount(edgeGuest, guestTactic, hostTactic); i > 0; i -= 1) shots.push(takeShot('guest'));
+  for (let i = shotCount(edgeHost); i > 0; i -= 1) shots.push(takeShot('host'));
+  for (let i = shotCount(edgeGuest); i > 0; i -= 1) shots.push(takeShot('guest'));
 
   const goalsOf = (side: Shot['side']) => shots.filter((shot) => shot.side === side && shot.outcome === 'gol').length;
   // Transforma um chute do lado em gol (prefere uma defesa; se não houver chute, cria um)
@@ -425,163 +364,6 @@ export function generatePlan(
     plan.push({ minute, type: 'posse', side: Math.random() < hostChance ? 'host' : 'guest' });
   });
   return plan.sort((a, b) => a.minute - b.minute);
-}
-
-// ---------- Cansaço e substituições (partida contra o bot) ----------
-// O fôlego de cada jogador (100 = descansado) cai de dois jeitos:
-//  1) com o tempo: um pouco por minuto, conforme a posição e a tática;
-//  2) com o que ele faz em campo: o MatchPitch soma o esforço (corrida, sprints, condução da bola, desarmes)
-//     e cada EFFORT_PER_POINT de esforço tira 1 ponto de fôlego.
-// Abaixo de 75 de fôlego o overall efetivo cai (e o jogador corre mais devagar no campo).
-// No intervalo dá para trocar até SUBS_MAX jogadores por reservas (descansados, mas fora de posição perdem pontos).
-export const SUBS_MAX = 2;
-const DRAIN_PER_MINUTE: Record<string, number> = { GK: 0.05, CF: 0.22, LF: 0.26, RF: 0.26, CM: 0.32, LB: 0.24, RB: 0.24 };
-const TACTIC_DRAIN: Record<Tactic, number> = { ofensiva: 1.2, equilibrada: 1, defensiva: 0.88 };
-const TIRED_FROM = 75;
-const FATIGUE_PER_POINT = 0.18;
-export const OUT_OF_POSITION_PENALTY = 5;
-// Unidades de esforço do campo (px corridos, com peso) que valem 1 ponto de fôlego
-export const EFFORT_PER_POINT = 230;
-export const effortLoss = (effort: number) => effort / EFFORT_PER_POINT;
-// Quanto o jogador cansado fica mais lento no campo (0 a 0,2)
-export const slowdown = (stamina: number) => clampNum((70 - stamina) / 200, 0, 0.2);
-
-// Fôlego (0 a 100) de quem está em campo na `position`, no minuto `minute`, tendo entrado no minuto `since`.
-// `effortPoints`: pontos de fôlego já gastos pelo esforço em campo.
-export function staminaAt(position: string, minute: number, tactic: Tactic = 'equilibrada', since = 0, effortPoints = 0): number {
-  const played = Math.max(0, minute - since);
-  return clampNum(100 - (DRAIN_PER_MINUTE[position] ?? 0.26) * TACTIC_DRAIN[tactic] * played - effortPoints, 5, 100);
-}
-// Overall que o jogador realmente rende com esse fôlego (e fora de posição, se for o caso)
-export function effectiveOverall(overall: number, stamina: number, outOfPosition = false): number {
-  const tired = Math.max(0, TIRED_FROM - stamina) * FATIGUE_PER_POINT;
-  return overall - tired - (outOfPosition ? OUT_OF_POSITION_PENALTY : 0);
-}
-
-// Jogador em campo: `since` = minuto em que entrou (0 = titular), `oop` = está fora de posição,
-// `carried` = pontos de fôlego já gastos por esforço até o intervalo e `work` = pontos gastos por minuto no ritmo dele
-export type FieldLite = Lite & { since?: number; oop?: boolean; carried?: number; work?: number };
-const SECOND_HALF_SAMPLES = [52, 67, 82];
-// Overall médio rendido no 2º tempo (amostra nos minutos 52, 67 e 82)
-function secondHalfOverall(player: FieldLite, tactic: Tactic): number {
-  const slot = posOf(player);
-  const samples = SECOND_HALF_SAMPLES.map((m) =>
-    effectiveOverall(
-      player.overall,
-      staminaAt(slot, m, tactic, player.since ?? 0, (player.carried ?? 0) + (player.work ?? 0) * (m - 45)),
-      !!player.oop,
-    ),
-  );
-  return samples.reduce((sum, value) => sum + value, 0) / samples.length;
-}
-const rendered = (lineup: FieldLite[], tactic: Tactic): FieldLite[] =>
-  lineup.map((player) => ({ ...player, overall: secondHalfOverall(player, tactic) }));
-
-// O reserva joga de verdade na posição (principal ou alternativa)? Senão rende menos.
-export const fitsSlot = (reserve: Lite & { alts?: string[] }, slot: string) =>
-  reserve.primary_position === slot || !!reserve.alts?.includes(slot);
-
-// Quanto vale trocar `out` por `reserve` no 2º tempo (em pontos de overall rendido).
-// O reserva herda o ritmo de esforço da posição (`out.work`), mas chega descansado.
-export function substitutionGain(out: FieldLite, reserve: Lite & { alts?: string[] }, tactic: Tactic): number {
-  const slot = posOf(out);
-  const oop = !fitsSlot(reserve, slot);
-  const arriving =
-    SECOND_HALF_SAMPLES.map((m) =>
-      effectiveOverall(reserve.overall, staminaAt(slot, m, tactic, 45, (out.work ?? 0) * (m - 45)), oop),
-    ).reduce((sum, value) => sum + value, 0) / SECOND_HALF_SAMPLES.length;
-  return arriving - secondHalfOverall(out, tactic);
-}
-
-// Reorganiza o 2º tempo do plano depois das trocas. Os gols do 1º tempo não mudam.
-//  - Quem finaliza/defende passa a ser quem está em campo (os cansados aparecem menos e rendem menos).
-//  - Se um time chega ao 2º tempo mais inteiro que o outro, parte dos lances do rival vira defesa e parte
-//    dos seus vira gol. A partida continua com o mesmo tipo de desfecho (vitória/empate), entre 3 e 7 gols,
-//    e com pelo menos 1 gol no 2º tempo.
-export function reshapeSecondHalf(
-  plan: PlanItem[],
-  host: { lineup: FieldLite[]; tactic: Tactic },
-  guest: { lineup: FieldLite[]; tactic: Tactic },
-  baseline: { host: Lite[]; guest: Lite[] },
-): PlanItem[] {
-  const hostNow = withCaptain(rendered(host.lineup, host.tactic));
-  const guestNow = withCaptain(rendered(guest.lineup, guest.tactic));
-  baseline = { host: withCaptain(baseline.host), guest: withCaptain(baseline.guest) };
-  const edge = (a: Lite[], b: Lite[]) => attackRating(a) - defenseRating(b);
-  const diffNow = edge(hostNow, guestNow) - edge(guestNow, hostNow);
-  const diffBase = edge(baseline.host, baseline.guest) - edge(baseline.guest, baseline.host);
-  // Positivo: o anfitrião está melhor do que o plano original supunha
-  const shift = diffNow - diffBase;
-  const flip = clampNum(Math.abs(shift) * 0.05, 0, 0.45);
-  const better: 'host' | 'guest' = shift >= 0 ? 'host' : 'guest';
-
-  const goalsOf = (items: PlanItem[], side: 'host' | 'guest', from = 0) =>
-    items.filter((item) => item.type === 'gol' && item.side === side && item.minute > from).length;
-  const statusOf = (items: PlanItem[]) => Math.sign(goalsOf(items, 'host') - goalsOf(items, 'guest'));
-
-  const original = plan.map((item) => ({ ...item }));
-  let result = original;
-  for (let attempt = 0; attempt < 12 && flip > 0.02; attempt += 1) {
-    const trial = original.map((item) => ({ ...item }));
-    trial.forEach((item) => {
-      if (item.minute <= 45) return;
-      if (item.type === 'gol' && item.side !== better && Math.random() < flip) item.type = 'defesa';
-      else if ((item.type === 'defesa' || item.type === 'finalização') && item.side === better && Math.random() < flip / 2) {
-        item.type = 'gol';
-      }
-    });
-    const total = goalsOf(trial, 'host') + goalsOf(trial, 'guest');
-    const changed = trial.some((item, i) => item.type !== original[i].type);
-    if (!changed) continue;
-    if (statusOf(trial) !== statusOf(original)) continue;
-    if (total < MIN_GOALS || total > MAX_GOALS) continue;
-    if (goalsOf(trial, 'host', 45) + goalsOf(trial, 'guest', 45) < 1) continue;
-    result = trial;
-    break;
-  }
-
-  // Nomes de quem finaliza/defende no 2º tempo (por fôlego e overall rendido)
-  const guestKeeper = keeperOf(guestNow)?.name;
-  const hostKeeper = keeperOf(hostNow)?.name;
-  return result
-    .map((item) => {
-      if (item.minute <= 45 || item.type === 'posse') return item;
-      const mine = item.side === 'host' ? hostNow : guestNow;
-      const shooter = pickShooter(mine);
-      return {
-        ...item,
-        shooter: shooter?.name ?? item.shooter,
-        keeper: (item.side === 'host' ? guestKeeper : hostKeeper) ?? item.keeper,
-      };
-    })
-    .sort((a, b) => a.minute - b.minute);
-}
-
-// Trocas automáticas do bot: o reserva só entra se render claramente mais que o cansado
-export function autoSubstitutions(
-  lineup: FieldLite[],
-  bench: (Lite & { alts?: string[] })[],
-  tactic: Tactic,
-): { out: string; in: string }[] {
-  const picks: { out: string; in: string }[] = [];
-  const usedBench = new Set<string>();
-  const usedOut = new Set<string>();
-  for (let n = 0; n < SUBS_MAX; n += 1) {
-    let best: { gain: number; out: FieldLite; reserve: Lite } | null = null;
-    for (const out of lineup) {
-      if (posOf(out) === 'GK' || out.captain || usedOut.has(out.name ?? '')) continue;
-      for (const reserve of bench) {
-        if (usedBench.has(reserve.name ?? '')) continue;
-        const gain = substitutionGain(out, reserve, tactic);
-        if (gain > 2 && (!best || gain > best.gain)) best = { gain, out, reserve };
-      }
-    }
-    if (!best) break;
-    usedBench.add(best.reserve.name ?? '');
-    usedOut.add(best.out.name ?? '');
-    picks.push({ out: best.out.name ?? '', in: best.reserve.name ?? '' });
-  }
-  return picks;
 }
 
 // Salva o resultado da partida no ranking. Os dois lados tentam; só o primeiro grava (room_id é único).
