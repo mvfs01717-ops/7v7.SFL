@@ -21,11 +21,6 @@ type Props = {
   events: PitchEvent[];
   // Chamado no instante em que a bola entra no gol (para o placar subir só nessa hora)
   onGoal?: (id: number, side: Side) => void;
-  // Muda quando começa o 2º tempo: limpa as jogadas em andamento e recomeça com a saída de bola
-  restartKey?: number;
-  // Cansaço: o campo SOMA o esforço de cada jogador em `effort` (corrida, condução com a bola, sprints e desarmes)
-  // e LÊ de `slow` (0 a ~0,25) o quanto cada um está mais lento por estar cansado. As chaves são `user-CM`, `bot-LF`...
-  workRef?: { current: { effort: Record<string, number>; slow: Record<string, number> } };
 };
 
 const POSITIONS = ['GK', 'LB', 'RB', 'CM', 'LF', 'RF', 'CF'] as const;
@@ -61,8 +56,6 @@ type Step = {
   caption?: string;
   // Altura da bola no meio do trajeto (passe/chute por cima), em pixels
   arc?: number;
-  // Efeito: quanto a bola se desvia de lado no meio do trajeto, em pixels (com sinal). A bola faz uma curva até o destino.
-  curve?: number;
   // Velocidade do condutor (só em passos de condução)
   speed?: number;
   // Movimentos combinados que começam junto com o passo (corrida do atacante, mergulho do goleiro...)
@@ -84,8 +77,6 @@ type Engine = {
   overrides: Record<string, Override>;
   kickoff: { side: Side; until: number; maxUntil: number } | null;
   lastKey: string;
-  // Intervalo mínimo entre dois botes de desarme
-  tackleAt: number;
 };
 
 // Campo em coordenadas de um SVG 740 x 440
@@ -209,27 +200,7 @@ function choosePass(h: Slot, all: Slot[]): Slot | undefined {
   return best;
 }
 
-// Desenho da bola: pentágono preto no centro, costuras e gomos pretos nas bordas (gira conforme a bola anda)
-const BALL_R = 7.5;
-const pentagon = (cx: number, cy: number, r: number, rot: number) =>
-  Array.from({ length: 5 }, (_, i) => {
-    const a = ((rot + i * 72) * Math.PI) / 180;
-    return `${(cx + r * Math.cos(a)).toFixed(2)},${(cy + r * Math.sin(a)).toFixed(2)}`;
-  }).join(' ');
-const BALL_CENTER = pentagon(0, 0, 2.5, -90);
-const BALL_SEAMS = Array.from({ length: 5 }, (_, i) => {
-  const a = ((-90 + i * 72) * Math.PI) / 180;
-  return { x1: 2.5 * Math.cos(a), y1: 2.5 * Math.sin(a), x2: 4.7 * Math.cos(a), y2: 4.7 * Math.sin(a) };
-});
-const BALL_EDGES = Array.from({ length: 5 }, (_, i) => {
-  const a = -90 + 36 + i * 72;
-  const rad = (a * Math.PI) / 180;
-  return pentagon(8.6 * Math.cos(rad), 8.6 * Math.sin(rad), 2.9, a + 180);
-});
-
-export default function MatchPitch({ club, opponent, userTeam, botTeam, events, onGoal, restartKey, workRef }: Props) {
-  const workRefLocal = useRef(workRef);
-  workRefLocal.current = workRef;
+export default function MatchPitch({ club, opponent, userTeam, botTeam, events, onGoal }: Props) {
   const onGoalRef = useRef(onGoal);
   onGoalRef.current = onGoal;
   const slots = useMemo<Slot[]>(() => {
@@ -275,15 +246,12 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
     overrides: {},
     kickoff: null,
     lastKey: '',
-    tackleAt: 0,
   });
   const nodes = useRef<Record<string, SVGGElement | null>>({});
   const ballNode = useRef<SVGGElement | null>(null);
   const ringNode = useRef<SVGGElement | null>(null);
   const nameNode = useRef<SVGTextElement | null>(null);
   const liftNode = useRef<SVGGElement | null>(null);
-  const spinNode = useRef<SVGGElement | null>(null);
-  const spin = useRef({ angle: 0, x: MID_X, y: MID_Y });
   const trailNodes = useRef<(SVGCircleElement | null)[]>([]);
   const trailPts = useRef<Point[]>([]);
   const netNodes = useRef<Record<Side, SVGRectElement | null>>({ user: null, bot: null });
@@ -301,7 +269,7 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
   }
 
   // Comemoração: o autor do gol sai correndo para o canto (na maioria das vezes) e o time vai atrás dele
-  function startCelebration(side: Side, actorKey: string, label = 'GOL!') {
+  function startCelebration(side: Side, actorKey: string) {
     const st = engine.current;
     const a = find(actorKey);
     const dir = dirOf(side);
@@ -312,7 +280,7 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
     st.holder = null;
     st.overrides = {};
     const who = a?.name ?? '';
-    setGoalText(`${label} ${who}`.trim());
+    setGoalText(`GOL! ${who}`.trim());
     window.setTimeout(() => setGoalText(''), 2000);
   }
 
@@ -443,9 +411,6 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
     // Lance de posse não interrompe uma jogada que já está acontecendo
     if (ev.type === 'posse' && scriptedBusy) return;
     st.queue = st.queue.filter((s) => s.scripted);
-    // Um gol passa na frente: lances sem gol que ainda esperavam na fila (defesa, chute para fora) são descartados,
-    // senão o gol demora para aparecer e o tempo pode acabar antes da bola entrar
-    if (critical) st.queue = st.queue.filter((s) => s.critical);
     if (st.active && st.active.step.ambient) st.active = null;
     if (st.queue.filter((s) => !s.critical).length > 8) st.queue = st.queue.filter((s) => s.critical);
 
@@ -459,13 +424,6 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
 
     const text = ev.text.toLowerCase();
     const all = slotsRef.current;
-    // Bola parada: escanteio cobrado e gol olímpico (a narração diz qual)
-    type SetPiece = 'escanteio' | 'olimpico';
-    const special: SetPiece | null = text.includes('olímpico')
-      ? 'olimpico'
-      : text.includes('escanteio cobrado')
-        ? 'escanteio'
-        : null;
     const mine = all.filter((s) => s.side === S && s.pos !== 'GK');
 
     // Quem finaliza: o nome que veio com o lance ou, na falta dele, o primeiro nome que aparece no texto
@@ -492,10 +450,10 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
     type Play = 'central' | 'ponta' | 'lancamento' | 'tabela' | 'solo' | 'contra' | 'longe';
     let play: Play;
     if (backlog > 4 && !critical) play = 'longe'; // jogada curta para não acumular fila
-    else if (text.includes('cabece') || text.includes('voleio') || text.includes('bicicleta')) play = 'ponta';
+    else if (text.includes('cabece')) play = 'ponta';
     else if (text.includes('fora da área') || text.includes('de longe') || text.includes('arrisca')) play = 'longe';
     else if (text.includes('contra-ataque')) play = 'contra';
-    else if (text.includes('cavadinha') || text.includes('chapéu')) play = 'solo';
+    else if (text.includes('cavadinha')) play = 'solo';
     else {
       const table: [Play, number][] = [
         ['central', 3],
@@ -540,10 +498,8 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
             : pick(backs.length ? backs : mine)
           : find(`${S}-CM`);
     const starterKey = starter?.key ?? `${S}-CM`;
-    if (!special) {
-      if (holderSide !== S) q.push(mk({ kind: 'move', to: { slot: starterKey }, dur: 520 }));
-      else if (starterKey !== st.holder && starterKey !== `${S}-CM`) q.push(mk({ kind: 'pass', to: { slot: starterKey }, dur: 480 }));
-    }
+    if (holderSide !== S) q.push(mk({ kind: 'move', to: { slot: starterKey }, dur: 520 }));
+    else if (starterKey !== st.holder && starterKey !== `${S}-CM`) q.push(mk({ kind: 'pass', to: { slot: starterKey }, dur: 480 }));
 
     // Condução até um ponto; às vezes o atacante ainda dribla um marcador antes de finalizar
     const carryTo = (at: Point, dur: number, speed: number | undefined, dribble: boolean) => {
@@ -576,9 +532,7 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
     };
     const canDribble = ev.type !== 'defesa';
 
-    if (special) {
-      // A bola parada é montada mais abaixo, junto do desfecho
-    } else if (play === 'central') {
+    if (play === 'central') {
       const via = passer ?? find(`${S}-CM`);
       if (via && via.key !== actorKey && via.key !== starterKey && (passer || Math.random() < 0.55)) {
         q.push(mk({ kind: 'pass', to: { slot: via.key }, dur: 520 }));
@@ -628,15 +582,14 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
     const gkKey = `${O}-GK`;
     const gk = find(gkKey);
     const gkX = gk ? gk.x : goalX - dir * 24;
-    const header = play === 'ponta' || special === 'escanteio';
-    const abbrOf = S === 'user' ? club.abbreviation : opponent.abbreviation;
+    const header = play === 'ponta';
     const tiroDeMeta = (): void => {
       st.queue.unshift({ kind: 'move', to: { slot: gkKey }, dur: 800, caption: 'Tiro de meta', scripted: true });
     };
     const defenderKey = () => `${O}-${pick<Pos>(['LB', 'RB', 'CM'])}`;
 
     // Escanteio: o goleiro espalma para fora, o time cobra e a bola entra na área
-    const cornerSteps = (quick = false): Step[] => {
+    const cornerSteps = (): Step[] => {
       const cy = Math.random() < 0.5 ? FY0 + 6 : FY1 - 6;
       const corner: Point = { x: goalX - dir * 5, y: cy };
       const taker = mine.find((s) => s.key !== actorKey && (s.pos === 'LF' || s.pos === 'RF')) ?? mine.find((s) => s.key !== actorKey) ?? actorSlot;
@@ -654,140 +607,27 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
       });
       const abbr = S === 'user' ? club.abbreviation : opponent.abbreviation;
       return [
-        // A bola sai pela linha de fundo (fora do campo) antes de ser colocada no canto
-        { kind: 'shot', to: { x: goalX + dir * 22, y: cy < MID_Y ? cy + 18 : cy - 18 }, dur: 420, caption: 'Defendeu e a bola sai pela linha de fundo: escanteio!', scripted: true, after: () => { st.poss = S; } },
-        { kind: 'shot', to: corner, dur: quick ? 300 : 450, caption: `Escanteio para ${abbr}`, scripted: true, setup },
-        { kind: 'wait', to: corner, dur: quick ? 600 : 1500, caption: `Escanteio para ${abbr}`, scripted: true, setup },
+        { kind: 'shot', to: corner, dur: 420, caption: 'Defendeu para escanteio!', scripted: true, after: () => { st.poss = S; } },
+        { kind: 'wait', to: corner, dur: 1700, caption: `Escanteio para ${abbr}`, scripted: true, setup },
         { kind: 'pass', to: { slot: target.key }, dur: 760, arc: 18, caption: `${taker.name} cobra o escanteio`, scripted: true },
       ];
     };
 
-    // Montagem da bola parada: bola na marca, barreira ou cobrador posicionado, time na área
-    const boxSpot = (d: number, dy: number): Point => ({ x: goalX - dir * d, y: MID_Y + dy });
-    let cornerY = MID_Y; // de que canto sai o escanteio (usado na curva do gol olímpico)
-    if (special === 'escanteio' || special === 'olimpico') {
-      const cy = Math.random() < 0.5 ? FY0 + 6 : FY1 - 6;
-      cornerY = cy;
-      const corner: Point = { x: goalX - dir * 5, y: cy };
-      const direct = special === 'olimpico';
-      const taker = direct
-        ? actorSlot
-        : (passer && passer.key !== actorKey ? passer : undefined) ??
-          mine.find((s) => s.key !== actorKey && (s.pos === 'LF' || s.pos === 'RF')) ??
-          mine.find((s) => s.key !== actorKey) ??
-          actorSlot;
-      const setup: Setup[] = [{ key: taker.key, x: corner.x - dir * 8, y: cy < MID_Y ? cy + 6 : cy - 6, speed: 2 }];
-      mine.forEach((s) => {
-        if (s.key === taker.key) return;
-        const p = s.key === actorKey ? boxSpot(rand(55, 80), rand(-16, 16)) : boxSpot(rand(95, 135), rand(-48, 48));
-        setup.push({ key: s.key, x: p.x, y: p.y, speed: 1.5 });
-      });
-      all.filter((s) => s.side === O && s.pos !== 'GK').forEach((s) => {
-        const p = boxSpot(rand(40, 90), rand(-42, 42));
-        setup.push({ key: s.key, x: p.x, y: p.y, speed: 1.5 });
-      });
-      // Antes do escanteio a bola precisa sair: o time chega pela ponta, cruza e a zaga desvia pela linha de fundo
-      const maker =
-        wings.find((w) => w.key !== taker.key) ?? mine.find((s) => s.key !== actorKey && s.key !== taker.key) ?? actorSlot;
-      const clearer = find(`${O}-${pick<Pos>(['LB', 'RB'])}`);
-      if (holderSide !== S) q.push(mk({ kind: 'move', to: { slot: `${S}-CM` }, dur: 520 }));
-      q.push(mk({ kind: 'pass', to: { slot: maker.key }, dur: 560 }));
-      q.push(
-        mk({
-          kind: 'carry',
-          to: { x: goalX - dir * rand(60, 85), y: cy < MID_Y ? FY0 + 42 : FY1 - 42 },
-          dur: 3000,
-          arrive: true,
-          caption: `${maker.name} avança pela ponta`,
-        }),
-      );
-      q.push(
-        mk({
-          kind: 'shot',
-          to: { x: goalX + dir * 22, y: cy < MID_Y ? cy + 18 : cy - 18 },
-          dur: 460,
-          arc: 10,
-          caption: `${maker.name} cruza e ${clearer?.name ?? 'a zaga'} desvia pela linha de fundo: escanteio!`,
-        }),
-      );
-      q.push(mk({ kind: 'shot', to: corner, dur: 450, caption: `Escanteio para ${abbrOf}`, setup, after: () => { st.poss = S; } }));
-      q.push(waitStep(1500, setup, direct ? `${taker.name} vai cobrar o escanteio direto` : `${taker.name} se prepara para o escanteio`));
-      if (!direct) {
-        q.push(mk({ kind: 'pass', to: { slot: actorKey }, dur: 760, arc: 18, caption: `${taker.name} cobra o escanteio` }));
-      }
-    }
-
     if (ev.type === 'gol') {
-      const style =
-        special === 'olimpico'
-          ? 'olimpico'
-          : text.includes('voleio') || text.includes('bicicleta')
-            ? 'voleio'
-            : text.includes('cavadinha') || text.includes('chapéu')
-              ? 'cavadinha'
-              : play === 'longe'
-                ? 'longe'
-                : Math.random() < 0.55
-                  ? 'canto'
-                  : 'meio';
-      const gy =
-        style === 'canto' || style === 'olimpico'
-          ? Math.random() < 0.5
-            ? GOAL_TOP + 9
-            : GOAL_BOTTOM - 9
-          : MID_Y + rand(-20, 20);
-      // Rebote: o goleiro defende, a bola sobra na área e o atacante empurra para a rede
-      if (text.includes('rebote') && !special) {
-        const spot: Point = { x: goalX - dir * 20, y: MID_Y + rand(-28, 28) };
-        q.push(
-          mk({
-            kind: 'shot',
-            to: spot,
-            dur: 380,
-            caption: `${gk?.name ?? 'O goleiro'} defende, mas a bola sobra na área!`,
-            setup: gk ? [{ key: gkKey, x: gkX, y: MID_Y + rand(-30, 30), speed: 2.2 }] : undefined,
-          }),
-        );
-        q.push(waitStep(300, [run(actorKey, { x: spot.x - dir * 12, y: spot.y }, 1.8)]));
-      }
-      const label =
-        special === 'olimpico'
-          ? 'GOL OLÍMPICO!'
-          : text.includes('bicicleta')
-            ? 'GOL DE PLACA!'
-            : text.includes('voleio')
-              ? 'VOLEIO ESPETACULAR!'
-              : text.includes('chapéu')
-                ? 'QUE CHAPÉU!'
-                : header
-                  ? 'GOL DE CABEÇA!'
-                  : 'GOL!';
+      const style = text.includes('cavadinha') ? 'cavadinha' : play === 'longe' ? 'longe' : Math.random() < 0.55 ? 'canto' : 'meio';
+      const gy = style === 'canto' ? (Math.random() < 0.5 ? GOAL_TOP + 9 : GOAL_BOTTOM - 9) : MID_Y + rand(-20, 20);
       // O goleiro pula para o lado errado ou chega atrasado
       const diveY = gy >= MID_Y ? MID_Y - rand(10, 24) : MID_Y + rand(10, 24);
       q.push(
         mk({
           kind: 'shot',
           to: { x: goalX + dir * 12, y: gy },
-          dur:
-            style === 'olimpico'
-              ? 900
-              : style === 'longe'
-                ? 520
-                : style === 'cavadinha'
-                  ? 600
-                  : style === 'voleio'
-                    ? 300
-                    : header
-                      ? 320
-                      : 360,
-          arc:
-            style === 'olimpico' ? 22 : style === 'cavadinha' ? 14 : style === 'longe' ? 8 : style === 'voleio' ? 6 : 0,
-          // Gol olímpico: a bola sai do canto, faz a curva para dentro do campo e morre no gol
-          curve: style === 'olimpico' ? 85 * dir * Math.sign(gy - cornerY) : undefined,
+          dur: style === 'longe' ? 520 : style === 'cavadinha' ? 600 : header ? 320 : 360,
+          arc: style === 'cavadinha' ? 14 : style === 'longe' ? 8 : 0,
           caption: ev.text,
           setup: gk ? [{ key: gkKey, x: gkX, y: diveY, speed: 2.2 }] : undefined,
           after: () => {
-            startCelebration(S, actorKey, label);
+            startCelebration(S, actorKey);
             flashNet(S);
             onGoalRef.current?.(ev.id ?? -1, S);
           },
@@ -799,8 +639,7 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
         : text.includes('domina') || text.includes('segura')
           ? 'hold'
           : pick<'corner' | 'hold' | 'rebound'>(['hold', 'hold', 'rebound', 'corner']);
-      // A narração diz escanteio: ele sempre acontece (mais rápido quando a fila de lances está cheia)
-      const useCorner = outcome === 'corner';
+      const useCorner = outcome === 'corner' && backlog <= 3;
       q.push(
         mk({
           kind: 'shot',
@@ -810,7 +649,7 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
           caption: ev.text,
           setup: gk ? [{ key: gkKey, x: gkX, y: MID_Y + rand(-38, 38), speed: 2.2 }] : undefined,
           after: () => {
-            if (useCorner) st.queue.unshift(...cornerSteps(backlog > 3));
+            if (useCorner) st.queue.unshift(...cornerSteps());
             else if (outcome !== 'hold') {
               st.queue.unshift({
                 kind: 'move',
@@ -863,27 +702,6 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
     }
     st.queue.push(...q);
   }
-
-  // Começo do 2º tempo: descarta o que sobrou do 1º e recomeça com a bola no centro (saída do outro time)
-  const lastRestart = useRef(restartKey);
-  useEffect(() => {
-    if (restartKey === undefined || restartKey === lastRestart.current) return;
-    lastRestart.current = restartKey;
-    const st = engine.current;
-    const now = performance.now();
-    st.queue = [];
-    st.active = null;
-    st.celebrate = null;
-    st.overrides = {};
-    st.holder = null;
-    st.ballX = MID_X;
-    st.ballY = MID_Y;
-    st.poss = 'bot';
-    st.kickoff = { side: 'bot', until: now + 900, maxUntil: now + 5000 };
-    setGoalText('');
-    setCaption('Começa o 2º tempo');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [restartKey]);
 
   const latest = events[0];
   const latestKey = latest ? `${latest.minute}|${latest.type}|${latest.team}|${latest.text}` : '';
@@ -1009,15 +827,6 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
         }
         st.ballX = from.x + (tx - from.x) * e;
         st.ballY = from.y + (ty - from.y) * e;
-        if (step.curve) {
-          // Curva: desvia a bola para o lado, perpendicular ao trajeto, e volta ao destino (efeito)
-          const cdx = tx - from.x;
-          const cdy = ty - from.y;
-          const clen = Math.hypot(cdx, cdy) || 1;
-          const off = step.curve * Math.sin(Math.PI * e);
-          st.ballX += (-cdy / clen) * off;
-          st.ballY += (cdx / clen) * off;
-        }
         lift = (step.arc ?? 0) * Math.sin(Math.PI * p);
         if (p >= 1) {
           st.active = null;
@@ -1043,94 +852,19 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
         followHolder();
       }
 
-      // Desarme: o marcador colado dá o bote (corre até o jogador) e o resultado depende do overall dos dois.
-      // Só em jogadas de rotina: lances do plano (gols, defesas) não são interrompidos.
+      // Desarme: quem está com a bola e é pressionado pode perdê-la (só em jogadas de rotina)
       const scriptedPending = st.queue.some((s) => s.scripted) || !!(st.active && st.active.step.scripted);
-      if (
-        !celebrating &&
-        !kickoffOn &&
-        !scriptedPending &&
-        st.holder &&
-        now >= st.tackleAt &&
-        (!st.active || st.active.step.kind === 'carry') &&
-        !(st.active && st.active.step.dribble)
-      ) {
+      if (!celebrating && !scriptedPending && st.holder && (!st.active || st.active.step.kind === 'carry') && !(st.active && st.active.step.dribble)) {
         const h = get(st.holder);
         if (h && h.pos !== 'GK') {
           const near = nearestOpp(all, h.side, h);
-          const dfn = near.slot;
-          if (dfn && near.d < 30 && Math.random() < (0.9 * dt) / 1000) {
-            // Quem tem overall maior leva vantagem; o marcador perto do gol do adversário chega mais atrasado
-            const win = Math.random() < clamp(0.5 + (dfn.ovr - h.ovr) / 90, 0.25, 0.75);
-            const dirH = dirOf(h.side);
-            const slide = Math.random() < 0.25;
-            st.tackleAt = now + 1000;
-            // Desarme cansa: quem dá o bote gasta mais, quem perde a bola também
-            const ledger = workRefLocal.current?.current.effort;
-            if (ledger) {
-              ledger[dfn.key] = (ledger[dfn.key] ?? 0) + (slide ? 60 : 35);
-              ledger[h.key] = (ledger[h.key] ?? 0) + 15;
-            }
-            st.queue = [];
+          if (near.slot && near.d < 21 && Math.random() < (0.4 * dt) / 1000) {
+            st.active = null;
+            st.holder = near.slot.key;
+            st.poss = near.slot.side;
             st.overrides = {};
-            st.active = {
-              step: {
-                kind: 'wait',
-                to: { x: h.x, y: h.y },
-                dur: slide ? 330 : 260,
-                ambient: true,
-                setup: [{ key: dfn.key, x: h.x, y: h.y, speed: slide ? 3 : 2.3 }],
-                after: () => {
-                  const t = performance.now();
-                  st.overrides = {};
-                  if (win) {
-                    // A bola é do marcador: quem perdeu fica desequilibrado, quem ganhou sai jogando
-                    st.holder = dfn.key;
-                    st.poss = dfn.side;
-                    st.overrides[h.key] = { x: h.x, y: h.y, until: t + 800, speed: 0.15 };
-                    st.overrides[dfn.key] = {
-                      x: clamp(dfn.x - dirH * 55, FX0 + 20, FX1 - 20),
-                      y: clamp(dfn.y + rand(-30, 30), FY0 + 20, FY1 - 20),
-                      until: t + 650,
-                      speed: 1.2,
-                    };
-                    st.ambientAt = t + 500;
-                    setCaption(
-                      pick([
-                        `${dfn.name} desarma ${h.name}`,
-                        `${dfn.name} chega firme e rouba a bola de ${h.name}`,
-                        `${dfn.name} dá o bote certo em ${h.name}`,
-                        slide ? `Carrinho de ${dfn.name}! A bola é dele` : `${dfn.name} antecipa e leva a bola`,
-                        `${dfn.name} faz o desarme e sai jogando`,
-                      ]),
-                    );
-                  } else {
-                    // O jogador escapa e o marcador fica para trás
-                    st.overrides[dfn.key] = { x: dfn.x, y: dfn.y, until: t + 900, speed: 0.18 };
-                    st.overrides[h.key] = {
-                      x: clamp(h.x + dirH * 70, FX0 + 20, FX1 - 20),
-                      y: clamp(h.y + rand(-26, 26), FY0 + 20, FY1 - 20),
-                      until: t + 650,
-                      speed: 1.35,
-                    };
-                    st.ambientAt = t + 350;
-                    setCaption(
-                      pick([
-                        `${h.name} escapa do bote de ${dfn.name}`,
-                        `${h.name} passa por ${dfn.name} no corpo`,
-                        `${dfn.name} chega atrasado em ${h.name}`,
-                        slide ? `${dfn.name} vai no carrinho, mas ${h.name} pula e segue` : `${h.name} protege a bola de ${dfn.name}`,
-                      ]),
-                    );
-                  }
-                },
-              },
-              from: { x: st.ballX, y: st.ballY },
-              start: now,
-              dest: null,
-            };
-            // O marcador começa o bote já (o passo 'wait' só começa os movimentos combinados ao iniciar pela fila)
-            st.overrides[dfn.key] = { x: h.x, y: h.y, until: now + 500, speed: slide ? 3 : 2.3 };
+            st.ambientAt = now + 450;
+            setCaption(`${near.slot.name} desarma ${h.name}`);
           }
         }
       }
@@ -1359,9 +1093,7 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
           }
         }
 
-        // Cansado corre menos (App calcula `slow` pelo fôlego)
-        const tired = workRefLocal.current?.current.slow[s.key] ?? 0;
-        const maxV = s.maxSpeed * speedMul * (1 - tired);
+        const maxV = s.maxSpeed * speedMul;
         const dx = tx - s.x;
         const dy = ty - s.y;
         const dd = Math.hypot(dx, dy);
@@ -1373,13 +1105,6 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
         s.vy += (wvy - s.vy) * a;
         s.x += (s.vx * dt) / 1000;
         s.y += (s.vy * dt) / 1000;
-        // Esforço: distância corrida (sprint conta o dobro, conduzir a bola conta 1,5x). Não conta saída de bola nem comemoração.
-        const ledger = workRefLocal.current?.current.effort;
-        if (ledger && !st.kickoff && !celebrating) {
-          const speed = Math.hypot(s.vx, s.vy);
-          const weight = (speed > s.maxSpeed * 0.75 ? 2 : 1) * (st.holder === s.key ? 1.5 : 1);
-          ledger[s.key] = (ledger[s.key] ?? 0) + ((speed * dt) / 1000) * weight;
-        }
       });
 
       // Evita que as bolinhas fiquem uma em cima da outra
@@ -1407,13 +1132,6 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
 
       // Bola, anel dourado e nome de quem está com a bola
       ballNode.current?.setAttribute('transform', `translate(${st.ballX.toFixed(1)} ${st.ballY.toFixed(1)})`);
-      // A bola gira conforme rola: o ângulo avança com a distância percorrida (~8° por pixel) para o lado em que ela anda
-      const sp = spin.current;
-      const travelled = Math.hypot(st.ballX - sp.x, st.ballY - sp.y);
-      if (travelled < 60) sp.angle += (st.ballX - sp.x >= 0 ? 1 : -1) * travelled * 8;
-      sp.x = st.ballX;
-      sp.y = st.ballY;
-      spinNode.current?.setAttribute('transform', `rotate(${(sp.angle % 360).toFixed(1)})`);
       liftNode.current?.setAttribute('transform', `translate(0 ${(-lift).toFixed(1)}) scale(${(1 + lift / 50).toFixed(2)})`);
       // Rastro da bola quando ela anda rápido (chutes e passes)
       const pts = trailPts.current;
@@ -1504,25 +1222,9 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
           <circle key={`trail-${i}`} ref={(el: SVGCircleElement | null) => { trailNodes.current[i] = el; }} r={5.5 - i * 0.6} fill="#ffffff" opacity={0} />
         ))}
         <g ref={ballNode} transform={`translate(${MID_X} ${MID_Y})`}>
-          <ellipse cy={6} rx={6.5} ry={2.6} fill="rgba(0,0,0,.4)" />
+          <ellipse cy={5} rx={6} ry={2.5} fill="rgba(0,0,0,.4)" />
           <g ref={liftNode}>
-            <defs>
-              <clipPath id="ball-clip">
-                <circle r={BALL_R} />
-              </clipPath>
-            </defs>
-            <circle r={BALL_R} fill="#ffffff" />
-            <g ref={spinNode} clipPath="url(#ball-clip)">
-              <polygon points={BALL_CENTER} fill="#15181c" />
-              {BALL_SEAMS.map((l, i) => (
-                <line key={i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke="#15181c" strokeWidth={0.9} />
-              ))}
-              {BALL_EDGES.map((points, i) => (
-                <polygon key={i} points={points} fill="#15181c" />
-              ))}
-            </g>
-            <circle r={BALL_R} fill="none" stroke="#15181c" strokeWidth={1.2} />
-            
+            <circle r={6.5} fill="#ffffff" stroke="#111111" strokeWidth={1.5} />
           </g>
         </g>
         <text
