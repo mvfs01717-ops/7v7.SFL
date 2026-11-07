@@ -865,6 +865,7 @@ function App() {
     const benchPlayers = BENCH_SLOTS.flatMap((slot) => (benchDraft[slot.id] ? [benchDraft[slot.id] as Player] : []));
     finishOrReview(draft, benchPlayers);
   }
+
   // No multiplayer o jogador pode ajustar as posições antes de confirmar; no solo segue direto
   function finishOrReview(finalDraft: Partial<Record<Position, Player>>, draftedBench?: Player[]) {
     if (room) {
