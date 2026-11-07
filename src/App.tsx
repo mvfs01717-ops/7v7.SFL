@@ -885,11 +885,24 @@ function App() {
     else setBenchStep({ candidates, next: goTactic });
   }
   // Troca dois jogadores de posição. Fora da posição de origem o jogador rende menos (−5 de overall)
-  function swapDraft(a: Position, b: Position) {
-    const first = draft[a];
-    const second = draft[b];
-    if (!first || !second || a === b) return;
-    const nextDraft = { ...draft, [a]: second, [b]: first };
+  // Também troca titular ↔ reserva (o reserva vira titular na posição e o titular vai para o banco)
+  function swapDraft(a: DraftSlot, b: DraftSlot) {
+    if (a === b) return;
+    const isBench = (slot: DraftSlot): slot is BenchSlot => BENCH_SLOTS.some((item) => item.id === slot);
+    const get = (slot: DraftSlot) => (isBench(slot) ? benchDraftRef.current[slot] : draft[slot as Position]);
+    const first = get(a);
+    const second = get(b);
+    if (!first || !second) return;
+    const nextDraft = { ...draft };
+    const nextBench = { ...benchDraftRef.current };
+    const put = (slot: DraftSlot, player: Player) => {
+      if (isBench(slot)) nextBench[slot] = player;
+      else nextDraft[slot as Position] = player;
+    };
+    put(a, second);
+    put(b, first);
+    benchDraftRef.current = nextBench;
+    setBenchDraft(nextBench);
     setDraft(nextDraft);
     syncSquad(nextDraft);
   }
