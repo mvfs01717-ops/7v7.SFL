@@ -1685,7 +1685,6 @@ function App() {
           onJoin={handleJoinRoom}
           onResume={resumeMpDraft}
           onWatch={watchRoom}
-          onTournament={openTournament}
           onCancel={() => {
             leaveRoom();
             setMpError('');
