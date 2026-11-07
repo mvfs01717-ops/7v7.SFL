@@ -75,15 +75,33 @@ const TACTIC_SHOTS: Record<Tactic, { own: number; conceded: number }> = {
 };
 
 // `slot` é a posição em que o jogador foi escalado no draft (pode ser diferente da posição de origem)
-type Lite = { primary_position: string; overall: number; name?: string; slot?: string; captain?: boolean };
+type Lite = {
+  primary_position: string;
+  overall: number;
+  name?: string;
+  slot?: string;
+  captain?: boolean;
+  alts?: string[];
+  alternate_positions?: string[];
+  since?: number;
+};
+// Titular escalado numa posição que não é a principal nem uma alternativa dele: rende menos
+export const startsOutOfPosition = (player: Lite) =>
+  !!player.slot &&
+  !player.since &&
+  player.primary_position !== player.slot &&
+  !(player.alts ?? player.alternate_positions ?? []).includes(player.slot);
 // Capitão: ele rende +2 de overall e passa liderança aos companheiros (+0,5; +1 se ele tem 80 ou mais; +1,5 se tem 90 ou mais)
 export const CAPTAIN_SELF_BONUS = 2;
 export const captainTeamBonus = (overall: number) => (overall >= 90 ? 1.5 : overall >= 80 ? 1 : 0.5);
 function withCaptain<T extends Lite>(squad: T[]): T[] {
   const captain = squad.find((player) => player.captain);
-  if (!captain) return squad;
-  const team = captainTeamBonus(captain.overall);
-  return squad.map((player) => ({ ...player, overall: player.overall + (player.captain ? CAPTAIN_SELF_BONUS : team) }));
+  const team = captain ? captainTeamBonus(captain.overall) : 0;
+  return squad.map((player) => {
+    const bonus = captain ? (player.captain ? CAPTAIN_SELF_BONUS : team) : 0;
+    const penalty = startsOutOfPosition(player) ? OUT_OF_POSITION_PENALTY : 0;
+    return bonus || penalty ? { ...player, overall: player.overall + bonus - penalty } : player;
+  });
 }
 const posOf = (player: Lite) => player.slot ?? player.primary_position;
 
