@@ -7,6 +7,35 @@ import { SUBS_WINDOW_SEC, effortLoss, staminaAt, type ChatMessage, type Tactic }
 import { TeamMark } from '@/components/game/Card';
 import { ChatBox, ChatToast } from '@/components/game/Chat';
 import { HalftimeBreak, PenaltyPrep, SubstitutionPanel, staminaColor } from '@/components/game/Halftime';
+import { stadiumCss } from '@/lib/game/stadiumCss';
+
+const matchCss = `
+.mt .match-header { background: linear-gradient(160deg, rgba(255,255,255,.1), rgba(255,255,255,.02)); border: 1px solid rgba(245,184,0,.3); border-radius: 6px 26px 6px 26px;
+  backdrop-filter: blur(12px); box-shadow: 0 20px 50px rgba(0,0,0,.5); padding: 14px 22px 12px; margin-bottom: 14px; overflow: hidden; }
+.mt .match-header::before { content: ''; position: absolute; left: 0; right: 26px; top: 0; height: 2px; background: linear-gradient(90deg, #F5B800, transparent); }
+.mt .match-status { display: inline-flex; align-items: center; gap: 6px; padding: 5px 14px; border-radius: 999px; font-size: 11px; letter-spacing: 2.5px; color: #fff; background: rgba(239,68,68,.9); box-shadow: 0 0 18px rgba(239,68,68,.5); }
+.mt .live-dot { background: #fff; box-shadow: 0 0 0 0 rgba(255,255,255,.8); margin: 0; animation: mtPing 1.4s infinite; }
+@keyframes mtPing { 70% { box-shadow: 0 0 0 7px rgba(255,255,255,0); } 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); } }
+.mt .scoreboard { gap: 18px; margin: 12px 0 6px; }
+.mt .scoreboard strong { font-family: inherit; font-style: italic; font-weight: 900; font-size: 64px; line-height: 1; min-width: 44px; text-align: center; text-shadow: 0 0 24px rgba(245,184,0,.35); }
+.mt .scoreboard > span { color: #F5B800; font-size: 28px; font-weight: 900; }
+.mt .scoreboard .team-mark span { font-weight: 800; letter-spacing: .5px; }
+.mt .match-meta { letter-spacing: 3px; font-size: 10px; opacity: .65; }
+.mt .skip-button { border-radius: 999px; border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.08); color: #fff; padding: 8px 14px; font-weight: 800; letter-spacing: .5px; }
+.mt .skip-button:hover { border-color: #F5B800; color: #F5B800; }
+.mt .match-feed, .mt .match-side { border-radius: 6px 22px 6px 22px; border: 1px solid rgba(245,184,0,.2); position: relative;
+  background: linear-gradient(160deg, rgba(255,255,255,.08), rgba(255,255,255,.02)); backdrop-filter: blur(10px); box-shadow: 0 20px 50px rgba(0,0,0,.45); }
+.mt .match-feed::before { content: ''; position: absolute; left: 0; right: 22px; top: 0; height: 2px; background: linear-gradient(90deg, #F5B800, transparent); }
+.mt .section-title h2 { font-style: italic; }
+.mt .match-columns { align-items: start; }
+.mt .feed-live { white-space: nowrap; flex: none; color: #fff; background: rgba(239,68,68,.9); padding: 4px 10px; border-radius: 999px; font-size: 10px; font-weight: 800; letter-spacing: 1.5px; }
+.mt .event-row.goal-event { background: linear-gradient(90deg, rgba(245,184,0,.18), transparent); box-shadow: inset 3px 0 0 #F5B800; }
+.mt .event-row p { font-size: 13px; color: #e1e5ea; }
+.mt .mini-stat .stat-bar { height: 8px; border-radius: 8px; overflow: hidden; }
+.mt .mini-stat .stat-bar i { background: linear-gradient(90deg, #b98500, #ffd24a); box-shadow: 0 0 10px rgba(245,184,0,.5); }
+.mt .stamina-panel { border-radius: 6px 22px 6px 22px !important; border-color: rgba(245,184,0,.25) !important; background: linear-gradient(160deg, rgba(255,255,255,.08), rgba(255,255,255,.02)) !important; backdrop-filter: blur(10px); }
+@media (max-width: 560px) { .mt .scoreboard strong { font-size: 48px; } .mt .scoreboard { gap: 8px; } }
+`;
 
 export function MatchScreen({
   club,
@@ -87,7 +116,9 @@ export function MatchScreen({
   const staminaList = userTeam.map((player) => ({ player, value: staminaOf(player) }));
   const staminaAvg = staminaList.length ? staminaList.reduce((sum, item) => sum + item.value, 0) / staminaList.length : 100;
   return (
-    <main className="match-page">
+    <main className="match-page mt stadium-bg">
+      <style>{stadiumCss}</style>
+      <style>{matchCss}</style>
       <div className="match-header">
         <div className="match-status">
           <span className="live-dot" />{' '}
