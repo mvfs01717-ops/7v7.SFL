@@ -39,9 +39,9 @@ function App() {
   // Multiplayer: depois de escolher os 7, revisa e ajusta as posições antes de confirmar
   const [reviewing, setReviewing] = useState(false);
   // Animação com o overall de ataque e defesa do time, mostrada quando o time fica pronto
-  const [reveal, setReveal] = useState<{ squad: Partial<Record<Position, Player>>; next: () => void } | null>(null);
+  const [reveal, setReveal] = useState<{ squad: Partial<Record<Position, Player>>; bench: Player[]; tactic: Tactic; next: () => void } | null>(null);
   // Animação da escalação do rival, mostrada antes de a partida começar
-  const [lineupReveal, setLineupReveal] = useState<{ squad: Player[]; team?: Team; name?: string; tactic?: Tactic } | null>(null);
+  const [lineupReveal, setLineupReveal] = useState<{ squad: Player[]; bench?: Player[]; team?: Team; name?: string; tactic?: Tactic } | null>(null);
   // Escolha da tática depois do draft: `next` continua o fluxo com a tática escolhida
   // Escolha do banco de reservas (só contra o bot): candidatos sorteados entre quem sobrou, e a escolha feita
   const [benchStep, setBenchStep] = useState<{ candidates: Player[]; next: () => void } | null>(null);
@@ -239,6 +239,11 @@ function App() {
       if (reserve) out[slot.id] = reserve.id;
     });
     return out;
+  }
+  // Reservas da escalação: os do draft (ou os escolhidos no modo dado)
+  function currentBench(): Player[] {
+    if (benchRef.current?.length) return benchRef.current;
+    return BENCH_SLOTS.flatMap((slot) => (benchDraftRef.current[slot.id] ? [benchDraftRef.current[slot.id] as Player] : []));
   }
   function benchOfSquad(squad: Record<string, string> | null | undefined) {
     return BENCH_KEYS.flatMap((key) => {
@@ -838,7 +843,7 @@ function App() {
   function confirmDraft() {
     if (!positions.every((position) => draft[position])) return;
     if (room) {
-      finishOrReview(draft);
+      confirmSquad();
       return;
     }
     const benchPlayers = BENCH_SLOTS.flatMap((slot) => (benchDraft[slot.id] ? [benchDraft[slot.id] as Player] : []));
@@ -853,7 +858,7 @@ function App() {
     const goTactic = () =>
       setTacticStep({
         squad: finalDraft,
-        next: (tactic, captain) => setReveal({ squad: finalDraft, next: () => finishDraft(finalDraft, tactic, captain) }),
+        next: (tactic, captain) => setReveal({ squad: finalDraft, bench: currentBench(), tactic, next: () => finishDraft(finalDraft, tactic, captain) }),
       });
     // Banco já montado no draft: segue direto para a tática
     if (draftedBench && draftedBench.length >= BENCH_SLOTS.length) {
@@ -879,12 +884,11 @@ function App() {
     if (candidates.length < 3) goTactic();
     else setBenchStep({ candidates, next: goTactic });
   }
-  // Troca dois jogadores de posição (só se os dois têm aptidão na posição do outro)
+  // Troca dois jogadores de posição. Fora da posição de origem o jogador rende menos (−5 de overall)
   function swapDraft(a: Position, b: Position) {
     const first = draft[a];
     const second = draft[b];
     if (!first || !second || a === b) return;
-    if (!getPlayerPositions(first).includes(b) || !getPlayerPositions(second).includes(a)) return;
     const nextDraft = { ...draft, [a]: second, [b]: first };
     setDraft(nextDraft);
     syncSquad(nextDraft);
@@ -892,7 +896,10 @@ function App() {
   function confirmSquad() {
     const finalDraft = draft;
     setReviewing(false);
-    setTacticStep({ squad: finalDraft, next: (tactic, captain) => setReveal({ squad: finalDraft, next: () => finishDraft(finalDraft, tactic, captain) }) });
+    setTacticStep({
+      squad: finalDraft,
+      next: (tactic, captain) => setReveal({ squad: finalDraft, bench: currentBench(), tactic, next: () => finishDraft(finalDraft, tactic, captain) }),
+    });
   }
   // Modo Dado: coloca o jogador escolhido na posição indicada
   function pickDicePlayer(player: Player, position: Position) {
@@ -992,7 +999,7 @@ function App() {
     setLeftBot([]);
     setSubsLog({ user: [], bot: [] });
     workRef.current = { effort: {}, slow: {} };
-    setLineupReveal(rivalInfo ? { squad: botPlayers, ...rivalInfo } : null);
+    setLineupReveal(rivalInfo ? { squad: botPlayers, bench: extras?.botBench, ...rivalInfo } : null);
     setUserTeam(chosen);
     setBotTeam(botPlayers);
     setMinute(0);
@@ -1735,6 +1742,7 @@ function App() {
           rivalName={lineupReveal.name}
           rivalTactic={lineupReveal.tactic}
           squad={lineupReveal.squad}
+          bench={lineupReveal.bench}
           onDone={() => setLineupReveal(null)}
         />
       )}
@@ -1743,6 +1751,8 @@ function App() {
         <TeamReveal
           club={selectedClub}
           squad={reveal.squad}
+          bench={reveal.bench}
+          tactic={reveal.tactic}
           onDone={() => {
             const next = reveal.next;
             setReveal(null);
@@ -1766,6 +1776,7 @@ function App() {
           onChoose={chooseDraftPlayer}
           rerollsLeft={rerolls}
           onReroll={rerollDraft}
+          onSwap={swapDraft}
           onConfirm={confirmDraft}
           onBack={() => goBack('club')}
         />
