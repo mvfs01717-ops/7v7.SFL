@@ -3,6 +3,38 @@ import { ArrowLeft, ArrowRight, CircleUserRound, Database, Menu, Play, RefreshCw
 import { positionNames, type Player, type Team } from '@/lib/game/types';
 import { Badge, Card, LogoMark } from '@/components/game/Card';
 
+const headerCss = `
+.topbar.hd { height: 68px; gap: 28px; position: sticky; top: 0; z-index: 30; border-bottom: 0;
+  background: linear-gradient(180deg, rgba(3,5,9,.96), rgba(5,8,14,.72)); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+.topbar.hd::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(245,184,0,.7) 20%, rgba(245,184,0,.15) 55%, transparent); }
+.hd .brand { gap: 10px; }
+.hd .brand > span:last-child { line-height: 1; }
+.hd .brand b { font-size: 26px; letter-spacing: 3px; }
+.hd .brand small { display: block; margin-top: 3px; font-size: 8px; letter-spacing: 3px; color: #F5B800; font-weight: 800; }
+.hd nav { display: flex; gap: 6px; margin-left: auto; }
+.hd nav button { position: relative; padding: 10px 16px; font-size: 12px; font-weight: 800; letter-spacing: 1.8px; text-transform: uppercase; color: #aab1ba; border-radius: 6px; }
+.hd nav button::after { content: ''; position: absolute; left: 16px; right: 16px; bottom: 3px; height: 2px; background: #F5B800; border-radius: 2px;
+  transform: scaleX(0); transform-origin: left; transition: transform .25s cubic-bezier(.2,.8,.2,1); box-shadow: 0 0 10px rgba(245,184,0,.8); }
+.hd nav button:hover, .hd nav button.on { color: #fff; }
+.hd nav button:hover::after, .hd nav button.on::after { transform: scaleX(1); }
+.hd .profile-button { gap: 10px; padding: 5px 14px 5px 5px; border-radius: 999px; border: 1px solid rgba(245,184,0,.45);
+  background: linear-gradient(100deg, rgba(245,184,0,.18), rgba(255,255,255,.03)); color: #fff; font-size: 13px; font-weight: 800; letter-spacing: .5px; cursor: pointer; }
+.hd .profile-button:hover { border-color: #F5B800; box-shadow: 0 0 18px rgba(245,184,0,.3); color: #fff; }
+.hd .pv { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-weight: 900; font-size: 14px; color: #1a1200; text-transform: uppercase;
+  background: radial-gradient(circle at 30% 25%, #ffe27a, #c48a00); }
+.hd .pn { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hd .mobile-menu { width: 40px; height: 40px; border-radius: 12px; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.05); color: #fff; place-items: center; }
+.hd .m-menu { position: absolute; top: calc(100% + 8px); right: 12px; z-index: 50; min-width: 220px; display: grid; gap: 4px; padding: 8px; border-radius: 16px;
+  background: rgba(10,15,24,.96); backdrop-filter: blur(14px); border: 1px solid rgba(245,184,0,.3); box-shadow: 0 18px 40px rgba(0,0,0,.65); animation: hmFade .2s ease both; }
+.hd .m-menu button { display: flex; align-items: center; gap: 12px; padding: 13px 14px; border: 0; border-radius: 10px; background: transparent; color: #fff; font-weight: 800; letter-spacing: 1px; font-size: 13px; text-transform: uppercase; text-align: left; cursor: pointer; }
+.hd .m-menu button.on, .hd .m-menu button:hover { background: rgba(245,184,0,.14); color: #F5B800; }
+@media (min-width: 851px) { .hd .m-menu { display: none; } .hd .mobile-menu { display: none; } }
+@media (max-width: 850px) { .hd nav { display: none; } .hd .mobile-menu { display: grid; margin-left: 0; } .hd .profile-button { margin-left: auto; } }
+@media (max-width: 560px) { .topbar.hd { height: 58px; gap: 10px; padding: 0 12px; } .hd .brand b { font-size: 22px; } .hd .brand small { display: none; }
+  .hd .profile-button { padding: 4px 10px 4px 4px; font-size: 12px; } .hd .pv { width: 28px; height: 28px; } .hd .pn { max-width: 80px; } }
+`;
+
 export function Header({
   nickname,
   isAdmin,
@@ -10,7 +42,10 @@ export function Header({
   onHome,
   onLeaderboard,
   onSquad,
+  onProfile,
   onLogin,
+  loggedIn,
+  active,
 }: {
   nickname: string;
   isAdmin: boolean;
@@ -18,36 +53,42 @@ export function Header({
   onHome: () => void;
   onLeaderboard: () => void;
   onSquad: () => void;
+  onProfile: () => void;
   onLogin: () => void;
+  loggedIn: boolean;
+  active: string;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const go = (action: () => void) => {
     setMenuOpen(false);
     action();
   };
+  const links: { key: string; label: string; icon: JSX.Element; run: () => void }[] = [
+    { key: 'home', label: 'Início', icon: <Play size={16} />, run: onHome },
+    { key: 'squad', label: 'Elenco', icon: <Database size={16} />, run: onSquad },
+    { key: 'leaderboard', label: 'Classificação', icon: <Trophy size={16} />, run: onLeaderboard },
+    { key: 'profile', label: 'Perfil', icon: <CircleUserRound size={16} />, run: onProfile },
+  ];
   return (
-    <header className="topbar" style={{ position: 'relative' }}>
-      <style>{`
-        .m-menu { position: absolute; top: 100%; right: 8px; z-index: 50; min-width: 200px; display: grid; gap: 4px; }
-        .m-menu { padding: 8px; border-radius: 14px; background: #0d131a; border: 1px solid rgba(255,255,255,.14); }
-        .m-menu { box-shadow: 0 14px 30px rgba(0,0,0,.6); }
-        .m-menu button { padding: 12px 14px; border: 0; border-radius: 10px; background: transparent; }
-        .m-menu button { color: #fff; font-weight: 700; text-align: left; font-size: 15px; cursor: pointer; }
-        .m-menu button:hover { background: rgba(245,184,0,.12); }
-        @media (min-width: 721px) { .m-menu { display: none; } }
-      `}</style>
+    <header className="topbar hd">
+      <style>{headerCss}</style>
       <button className="brand" onClick={onHome}>
-        <LogoMark size={52} variant="full" />
+        <LogoMark size={46} variant="full" />
         <span>
           <b>BRASIL</b>
+          <small>ULTIMATE 7V7</small>
         </span>
       </button>
-      <nav>
-        <button onClick={onSquad}>Cartas</button>
-        <button onClick={onLeaderboard}>Leaderboard</button>
+      <nav aria-label="Navegação">
+        {links.map((l) => (
+          <button key={l.key} className={active === l.key ? 'on' : ''} onClick={l.run}>
+            {l.label}
+          </button>
+        ))}
       </nav>
-      <button className="profile-button" onClick={onLogin}>
-        <CircleUserRound size={17} /> {nickname}
+      <button className="profile-button" onClick={loggedIn ? onProfile : onLogin}>
+        <span className="pv">{(nickname || '?').slice(0, 1)}</span>
+        <span className="pn">{loggedIn ? nickname : 'Entrar'}</span>
       </button>
       <button
         className="mobile-menu"
@@ -59,9 +100,16 @@ export function Header({
       </button>
       {menuOpen && (
         <div className="m-menu">
-          <button onClick={() => go(onHome)}>Início</button>
-          <button onClick={() => go(onSquad)}>Cartas</button>
-          <button onClick={() => go(onLeaderboard)}>Leaderboard</button>
+          {links.map((l) => (
+            <button key={l.key} className={active === l.key ? 'on' : ''} onClick={() => go(l.run)}>
+              {l.icon} {l.label}
+            </button>
+          ))}
+          {isAdmin && (
+            <button onClick={() => go(onAdmin)}>
+              <Shield size={16} /> Admin
+            </button>
+          )}
         </div>
       )}
     </header>
@@ -132,15 +180,15 @@ const homeCss = `
 .hm-hint { margin-top: 14px; font-size: 13px; opacity: .75; }
 .hm-hint button { background: none; border: 0; color: #F5B800; font-weight: 800; cursor: pointer; padding: 0; text-decoration: underline; }
 
-.hm-hero { position: relative; z-index: 1; display: grid; place-items: center; min-height: 340px; padding-bottom: 28px; }
+.hm-hero { position: relative; z-index: 1; display: grid; place-items: center; min-height: 340px; padding: 0 44px 28px 0; }
 .hm-halo { position: absolute; width: 78%; aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle, rgba(245,184,0,.5), transparent 68%); filter: blur(8px); animation: hmHalo 4s ease-in-out infinite alternate; }
 @keyframes hmHalo { from { transform: scale(.9); opacity: .6; } to { transform: scale(1.08); opacity: 1; } }
 .hm-tilt { position: relative; width: min(100%, 250px); transform-style: preserve-3d; transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); transition: transform .15s ease-out; }
 .hm-float { animation: hmFloat 5s ease-in-out infinite; transform-style: preserve-3d; }
 @keyframes hmFloat { 50% { transform: translateY(-12px); } }
 .hm-float > * { filter: drop-shadow(0 28px 22px rgba(0,0,0,.65)) drop-shadow(0 0 22px rgba(245,184,0,.35)); }
-.hm-capn { }
-.hm-cap { position: absolute; left: 0; right: 0; bottom: -30px; text-align: center; font-size: 11px; font-weight: 900; letter-spacing: 2px; color: #F5B800; text-shadow: 0 2px 8px #000; }
+.hm-capn { display: none; }
+.hm-cap { position: absolute; left: -40px; right: -40px; bottom: -30px; text-align: center; font-size: 11px; font-weight: 900; letter-spacing: 2px; color: #F5B800; text-shadow: 0 2px 8px #000; }
 
 .hm-spark { position: absolute; bottom: -10px; border-radius: 50%; background: #ffd24a; box-shadow: 0 0 8px 2px rgba(255,200,40,.8); opacity: 0; animation: hmSpark linear infinite; }
 @keyframes hmSpark { 0% { transform: translate(0,0); opacity: 0; } 12% { opacity: .9; } 100% { transform: translate(40px,-95vh); opacity: 0; } }
@@ -154,11 +202,11 @@ const homeCss = `
 .hm-fan { position: relative; width: 100%; aspect-ratio: .74; margin: 0 auto; transform-style: preserve-3d; }
 .hm-fc { position: absolute; inset: 0; transition: transform .8s cubic-bezier(.2,.8,.2,1), opacity .8s, filter .8s; }
 .hm-fc.c { z-index: 3; transform: translateZ(40px) scale(1.12); }
-.hm-fc.l { z-index: 1; transform: translateX(-56%) translateZ(-60px) rotate(-9deg) scale(.76); opacity: .7; filter: brightness(.55) saturate(.8); }
-.hm-fc.r { z-index: 1; transform: translateX(56%) translateZ(-60px) rotate(9deg) scale(.76); opacity: .7; filter: brightness(.55) saturate(.8); }
+.hm-fc.l { z-index: 1; transform: translateX(-50%) translateZ(-60px) rotate(-9deg) scale(.76); opacity: .7; filter: brightness(.55) saturate(.8); }
+.hm-fc.r { z-index: 1; transform: translateX(50%) translateZ(-60px) rotate(9deg) scale(.76); opacity: .7; filter: brightness(.55) saturate(.8); }
 .hm-fc.x { z-index: 0; transform: translateZ(-120px) scale(.5); opacity: 0; }
 .hm-fc:not(.c) .hm-float { animation: none; }
-.hm-tilt { width: min(100%, 200px); }
+.hm-tilt { width: min(100%, 190px); }
 .hm-cap { bottom: -34px; font-size: 13px; }
 .hm-cap b { font-size: 24px; margin-right: 6px; color: #fff; vertical-align: -2px; }
 .hm-cap { animation: hmFade .5s ease both; white-space: nowrap; }
@@ -174,11 +222,11 @@ const homeCss = `
   .hm-hero { min-height: 0; order: -1; padding: 6px 0 30px; }
   .hm-tilt { width: 120px; margin: 0 auto; }
   .hm-mark { font-size: 200px; right: -8%; }
-  .hm-hero { padding-bottom: 44px; }
+  .hm-hero { padding: 6px 0 44px; }
   .hm-cap b { font-size: 20px; }
   .hm-halo { width: 150%; }
   .hm-capn { display: none; }
-  .hm-cap { bottom: -36px; font-size: 11px; letter-spacing: 1.5px; }
+  .hm-cap { left: -30px; right: -30px; bottom: -36px; font-size: 11px; letter-spacing: 1.5px; }
   .hm-eyebrow { font-size: 10px; letter-spacing: 2.5px; }
   .hm-title { font-size: 46px; margin: 6px 0 8px; }
   .hm-text { font-size: 13.5px; line-height: 1.45; margin: 0 auto 16px; max-width: 300px; }
@@ -253,7 +301,7 @@ export function Home({
   }[] = [
     { key: 'play', label: 'Jogar', sub: 'Draft contra o bot', icon: <Play size={22} />, run: onPlay, cta: 'Jogar agora',
       title: <>MONTE.<br /><em>CONQUISTE.</em></>, text: 'Escolha suas cartas, monte o time ideal e viva a intensidade do 7 contra 7.' },
-    { key: 'multi', label: 'Multiplayer', sub: loggedIn ? 'Enfrente outros jogadores' : 'Entre para jogar online', icon: <Swords size={22} />,
+    { key: 'multi', label: 'Multiplayer', sub: loggedIn ? 'Jogue online' : 'Precisa de conta', icon: <Swords size={22} />,
       run: loggedIn ? onMultiplayer : onLogin, cta: loggedIn ? 'Entrar em partidas' : 'Entrar na conta',
       badge: liveRooms > 0 ? `${liveRooms} AO VIVO` : loggedIn ? undefined : '🔒', dot: liveRooms > 0,
       title: <>FRENTE A<br /><em>FRENTE.</em></>, text: 'Crie uma sala, convide um amigo ou assista às partidas que estão rolando agora.' },
