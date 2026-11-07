@@ -73,6 +73,19 @@ export function MatchScreen({
 }) {
   // O lance do gol só aparece no feed depois que a bola entrou na animação
   const feed = events.filter((event) => event.type !== 'gol' || shownGoalIds.includes(event.id));
+  // Fôlego atual de cada jogador (só quando o fôlego está ligado)
+  const staminaOf = (player: Player) =>
+    staminaOn
+      ? staminaAt(
+          slotOf(player),
+          Math.min(minute, 90),
+          tactic,
+          player.since ?? 0,
+          (player.carried ?? 0) + effortLoss(workRef.current.effort[`user-${slotOf(player)}`] ?? 0),
+        )
+      : 100;
+  const staminaList = userTeam.map((player) => ({ player, value: staminaOf(player) }));
+  const staminaAvg = staminaList.length ? staminaList.reduce((sum, item) => sum + item.value, 0) / staminaList.length : 100;
   return (
     <main className="match-page">
       <div className="match-header">
@@ -142,6 +155,48 @@ export function MatchScreen({
         </div>
       )}
 
+      {staminaOn && !penaltyPhase && (
+        <section className="stamina-panel" aria-label="Fôlego do time">
+          <style>{`
+            .stamina-panel { margin: 12px 0 4px; padding: 12px 12px 14px; border-radius: 14px; background: rgba(15,22,30,.92); border: 1px solid rgba(255,255,255,.12); }
+            .stamina-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+            .stamina-head strong { font-size: 13px; letter-spacing: .14em; }
+            .stamina-head b { font-size: 22px; font-variant-numeric: tabular-nums; }
+            .stamina-grid { display: grid; gap: 8px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+            @media (min-width: 700px) { .stamina-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); } }
+            .stamina-tile { padding: 8px 8px 9px; border-radius: 10px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); min-width: 0; }
+            .stamina-tile.tired { border-color: #F5B80088; }
+            .stamina-tile.empty { border-color: #ef4444; animation: stamina-pulse 1.1s ease-in-out infinite; }
+            @keyframes stamina-pulse { 50% { box-shadow: 0 0 0 3px rgba(239,68,68,.35); } }
+            .stamina-tile small { display: block; font-size: 10px; font-weight: 800; letter-spacing: .08em; opacity: .75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .stamina-tile b { display: block; font-size: 22px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+            .stamina-bar { height: 8px; border-radius: 5px; background: rgba(255,255,255,.12); overflow: hidden; margin-top: 4px; }
+            .stamina-bar i { display: block; height: 100%; border-radius: 5px; transition: width .6s linear, background .6s; }
+            @media (prefers-reduced-motion: reduce) { .stamina-tile.empty { animation: none; } }
+          `}</style>
+          <div className="stamina-head">
+            <strong>⚡ FÔLEGO DO TIME</strong>
+            <b style={{ color: staminaColor(staminaAvg) }}>{Math.round(staminaAvg)}%</b>
+          </div>
+          <div className="stamina-grid">
+            {staminaList.map(({ player, value }) => (
+              <div key={player.id} className={`stamina-tile ${value < 45 ? 'empty' : value < 65 ? 'tired' : ''}`} title={`${player.name}: fôlego ${Math.round(value)}%`}>
+                <small>
+                  {slotOf(player)} · {player.name.split(' ').slice(-1)[0]}
+                  {player.captain ? ' ©' : ''}
+                </small>
+                <b style={{ color: staminaColor(value) }}>{Math.round(value)}%</b>
+                <div className="stamina-bar">
+                  <i style={{ width: `${value}%`, background: staminaColor(value) }} />
+                </div>
+                {value < 45 && <small style={{ color: '#fca5a5', marginTop: 3 }}>EXAUSTO</small>}
+                {value >= 45 && value < 65 && <small style={{ color: '#F5B800', marginTop: 3 }}>CANSANDO</small>}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {multiplayer && <ChatToast messages={chatMessages} myId={userId} />}
       {multiplayer && <ChatBox messages={chatMessages} myId={userId} onSend={onSendChat} />}
 
@@ -185,15 +240,7 @@ export function MatchScreen({
             <span className="eyebrow">FORMAÇÕES</span>
             <h3>Seu elenco</h3>
             {userTeam.map((player) => {
-              const stamina = staminaOn
-                ? staminaAt(
-                    slotOf(player),
-                    Math.min(minute, 90),
-                    tactic,
-                    player.since ?? 0,
-                    (player.carried ?? 0) + effortLoss(workRef.current.effort[`user-${slotOf(player)}`] ?? 0),
-                  )
-                : 100;
+              const stamina = staminaOf(player);
               return (
                 <div key={player.id}>
                   <span>{slotOf(player)}</span>
@@ -204,7 +251,7 @@ export function MatchScreen({
                     {staminaOn && (
                       <span
                         title={`Fôlego ${Math.round(stamina)}%`}
-                        style={{ display: 'block', height: 4, marginTop: 3, borderRadius: 3, background: 'rgba(255,255,255,.12)', overflow: 'hidden' }}
+                        style={{ display: 'block', height: 7, marginTop: 4, borderRadius: 4, background: 'rgba(255,255,255,.12)', overflow: 'hidden' }}
                       >
                         <span
                           style={{
@@ -218,7 +265,10 @@ export function MatchScreen({
                       </span>
                     )}
                   </b>
-                  <strong>{player.overall}</strong>
+                  <strong>
+                    {player.overall}
+                    {staminaOn && <small style={{ display: 'block', fontSize: 11, color: staminaColor(stamina) }}>{Math.round(stamina)}%</small>}
+                  </strong>
                 </div>
               );
             })}
