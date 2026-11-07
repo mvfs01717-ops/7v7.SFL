@@ -250,7 +250,7 @@ export function PositionEditor({
   const canSwap = (a: Position, b: Position) => {
     const first = selected[a];
     const second = selected[b];
-    return !!first && !!second && a !== b && getPlayerPositions(first).includes(b) && getPlayerPositions(second).includes(a);
+    return !!first && !!second && a !== b;
   };
   const anyMove = positions.some((a) => positions.some((b) => canSwap(a, b)));
 
@@ -288,8 +288,8 @@ export function PositionEditor({
       <div className="draft-layout">
         <section className="draft-picker">
           <p style={{ margin: '0 0 12px', opacity: 0.8, fontSize: 14 }}>
-            Toque em um jogador e depois em outro para trocar de posição. Só dá para trocar quando os dois têm aptidão
-            na posição um do outro (principal ou secundária).
+            Toque em um jogador e depois em outro para trocar de posição. Fora da posição de origem (principal ou
+            secundária) o jogador perde 5 de overall.
           </p>
           <div style={{ display: 'grid', gap: 8 }}>
             {positions.map((position) => {
