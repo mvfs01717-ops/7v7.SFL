@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { BENCH_SLOTS, positionNames, type BenchSlot, type DraftSlot, type Player, type Position, type Team } from '@/lib/game/types';
 import { Card, LogoMark, cardCss } from '@/components/game/Card';
+import { stadiumCss } from '@/lib/game/stadiumCss';
 
 // ---------- Draft estilo campo: o campo aparece com as cartas escondidas e cada posição revela 3 cartas ----------
 export const FIELD_SPOTS: Record<Position, { x: number; y: number }> = {
@@ -150,6 +151,9 @@ export const draftCss = `
   25% { opacity: 1; }
   100% { opacity: 1; transform: translateY(0) rotateY(0) scale(1); }
 }
+.dr-setup { max-width: 720px; margin: 22px auto 0; padding: 18px; animation: dr-up .5s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes dr-up { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+.dr-page .draft-head h2 { font-style: italic; }
 @keyframes dr-choose { 0% { transform: scale(1); } 45% { transform: scale(1.14); filter: drop-shadow(0 0 22px rgba(255,214,90,1)); } 100% { transform: scale(1.08); filter: drop-shadow(0 0 16px rgba(255,214,90,.9)); } }
 @keyframes dr-out { to { opacity: 0; transform: translateY(24px) scale(.85); } }
 @media (prefers-reduced-motion: reduce) {
@@ -300,6 +304,7 @@ export function DraftScreen({
     }
   }
   const startersFilled = positionList.filter((position) => selected[position]).length;
+
   const benchFilled = BENCH_SLOTS.filter((slot) => bench[slot.id]).length;
   const total = positionList.length + (withBench ? BENCH_SLOTS.length : 0);
   const filled = startersFilled + (withBench ? benchFilled : 0);
@@ -365,7 +370,8 @@ export function DraftScreen({
     );
   };
   return (
-    <main className={`draft-page dr-page ${open ? 'dr-open' : ''}`}>
+    <main className={`draft-page dr-page stadium-bg ${open ? 'dr-open' : ''}`}>
+      <style>{stadiumCss}</style>
       <style>{cardCss}</style>
       <style>{draftCss}</style>
       <div className="dr-stage">
@@ -411,7 +417,7 @@ export function DraftScreen({
           </div>
         )}
         <div className="dr-confirm">
-          <button type="button" className={`gold-button large ${ready ? 'ready' : ''}`} disabled={!ready} onClick={onConfirm}>
+          <button type="button" className={`gold-button large cta-slant ${ready ? 'ready' : ''}`} disabled={!ready} onClick={onConfirm}>
             {ready ? 'Confirmar escalação' : `Faltam ${total - filled} para completar`}
           </button>
         </div>
