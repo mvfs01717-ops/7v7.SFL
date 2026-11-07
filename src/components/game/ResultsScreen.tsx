@@ -3,8 +3,66 @@ import { BarChart3, Crown, RefreshCw, Zap } from 'lucide-react';
 import { type Shootout } from '@/components/PenaltyShootout';
 import { slotOf } from '@/lib/game/helpers';
 import { type GoalRecord, type MatchEvent, type MatchStats, type Player, type Team } from '@/lib/game/types';
-import { TeamMark } from '@/components/game/Card';
+import { Card, TeamMark } from '@/components/game/Card';
 import { EventIcon } from '@/components/game/MatchScreen';
+
+const resultsCss = `
+.rs { position: relative; isolation: isolate; --acc: #F5B800; }
+.rs.rs-win { --acc: #4ade80; } .rs.rs-loss { --acc: #f87171; }
+.rs::before { content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none; background:
+  conic-gradient(from 198deg at 14% -8%, transparent 0 7%, rgba(255,246,200,.15) 9% 13%, transparent 15%),
+  conic-gradient(from 162deg at 86% -8%, transparent 0 7%, rgba(255,246,200,.15) 9% 13%, transparent 15%),
+  radial-gradient(80% 50% at 50% 0%, color-mix(in srgb, var(--acc) 22%, transparent), transparent 70%),
+  linear-gradient(0deg, rgba(15,77,43,.45), transparent 26%),
+  radial-gradient(120% 70% at 50% 0, #1b2a44 0, #0a1020 55%, #05070d 100%); }
+.rs .result-banner { padding: 26px 0 4px; }
+.rs .result-banner .eyebrow { justify-content: center; letter-spacing: 4px; color: var(--acc); }
+.rs .result-banner h1 { font-style: italic; font-size: clamp(60px, 13vw, 118px); line-height: .9; margin: 10px 0 8px; color: var(--acc);
+  text-shadow: 0 0 40px color-mix(in srgb, var(--acc) 55%, transparent), 0 6px 0 rgba(0,0,0,.35); animation: rsSlam .8s cubic-bezier(.2,1.4,.3,1) both; }
+@keyframes rsSlam { 0% { opacity: 0; transform: scale(1.8); filter: blur(12px); } 100% { opacity: 1; transform: none; filter: none; } }
+.rs .result-banner p { font-size: 14px; color: #b9c2cc; }
+.rs .result-score { gap: 18px; border: 0; padding: 12px 22px; margin: 6px auto 22px; width: fit-content; max-width: 100%; border-radius: 6px 24px 6px 24px;
+  background: linear-gradient(160deg, rgba(255,255,255,.1), rgba(255,255,255,.02)); border: 1px solid rgba(245,184,0,.3); backdrop-filter: blur(10px); box-shadow: 0 18px 44px rgba(0,0,0,.5); animation: rsRise .7s .2s both; }
+.rs .result-score > strong { font-size: 76px; line-height: 1; font-style: italic; }
+@keyframes rsRise { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
+.rs-conf { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
+.rs-conf i { position: absolute; top: -12px; width: 8px; height: 14px; border-radius: 2px; opacity: 0; animation: rsFall linear infinite; }
+@keyframes rsFall { 0% { transform: translateY(0) rotate(0); opacity: 0; } 8% { opacity: 1; } 100% { transform: translateY(105vh) rotate(720deg); opacity: .9; } }
+.rs-mvp { display: flex; align-items: center; gap: 22px; width: min(640px, 100%); margin: 0 auto 24px; padding: 18px 24px; border-radius: 6px 24px 6px 24px;
+  border: 1px solid rgba(245,184,0,.45); background: linear-gradient(110deg, rgba(245,184,0,.22), rgba(255,255,255,.03)); box-shadow: 0 0 40px rgba(245,184,0,.15); animation: rsRise .7s .35s both; }
+.rs-mvp-card { width: 104px; flex: none; filter: drop-shadow(0 14px 14px rgba(0,0,0,.6)); }
+.rs-mvp h3 { margin: 4px 0 2px; font-size: 28px; font-style: italic; text-transform: uppercase; line-height: 1; }
+.rs-mvp small { opacity: .7; }
+.rs-mvp-r { margin-left: auto; text-align: center; font-size: 54px; font-weight: 900; font-style: italic; line-height: 1; color: #4ade80; text-shadow: 0 0 24px rgba(74,222,128,.5); }
+.rs-mvp-r small { display: block; font-size: 10px; letter-spacing: 2px; font-style: normal; color: #aab; }
+.rs .results-grid { gap: 18px; align-items: start; }
+.rs .result-panel { border-radius: 6px 22px 6px 22px; border: 1px solid rgba(245,184,0,.2); position: relative;
+  background: linear-gradient(160deg, rgba(255,255,255,.08), rgba(255,255,255,.02)); backdrop-filter: blur(10px); box-shadow: 0 20px 50px rgba(0,0,0,.45); animation: rsRise .7s .45s both; }
+.rs .result-panel::before { content: ''; position: absolute; left: 0; right: 22px; top: 0; height: 2px; background: linear-gradient(90deg, #F5B800, transparent); }
+.rs .section-title h2 { font-style: italic; letter-spacing: 1px; }
+.rs .result-bar { padding: 11px 0; }
+.rs .result-bar > div:first-child { font-size: 12px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; }
+.rs .result-bar b { font-size: 15px; }
+.rs .result-bar > div:last-child { height: 9px; border-radius: 9px; overflow: hidden; background: #5c2a29; }
+.rs .result-bar > div:last-child i { background: linear-gradient(90deg, #b98500, #ffd24a); box-shadow: 0 0 12px rgba(245,184,0,.6); }
+.rs .rating-list > div { grid-template-columns: 44px 1fr 46px; padding: 8px 6px; font-size: 13px; border-radius: 8px; border-bottom: 1px solid rgba(255,255,255,.06); }
+.rs .rating-list > div b { font-weight: 700; }
+.rs .rating-team { font-size: 11px; letter-spacing: 2px; color: #F5B800; font-weight: 800; }
+.rs .rating-list strong { justify-self: end; min-width: 42px; padding: 3px 0; text-align: center; border-radius: 8px; font-size: 14px; color: #0b1016; background: #94a3b8; }
+.rs .rating-list strong.rt-hi { background: #4ade80; } .rs .rating-list strong.rt-mid { background: #F5B800; } .rs .rating-list strong.rt-lo { background: #f87171; }
+.rs .rating-list > div.best-player { background: linear-gradient(90deg, rgba(74,222,128,.18), transparent); box-shadow: inset 3px 0 0 #4ade80; }
+.rs .event-row.goal-event { background: linear-gradient(90deg, rgba(245,184,0,.14), transparent); }
+.rs .result-actions { margin-top: 26px; gap: 14px; }
+.rs .result-actions .gold-button { clip-path: polygon(12px 0, 100% 0, calc(100% - 12px) 100%, 0 100%); border: 0; padding: 18px 38px; font-size: 14px; letter-spacing: 3px; text-transform: uppercase;
+  background: linear-gradient(180deg, #ffe27a, #F5B800 60%, #d99a00); box-shadow: 0 0 30px rgba(245,184,0,.35); }
+.rs .result-actions .outline-button { border-radius: 4px; padding: 17px 28px; letter-spacing: 2px; text-transform: uppercase; }
+@media (max-width: 560px) {
+  .rs .result-score > strong { font-size: 54px; } .rs .result-score { padding: 10px 14px; gap: 10px; }
+  .rs-mvp { gap: 12px; padding: 14px; } .rs-mvp-card { width: 78px; } .rs-mvp h3 { font-size: 20px; } .rs-mvp-r { font-size: 38px; }
+  .rs .result-actions .gold-button, .rs .result-actions .outline-button { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) { .rs *, .rs-conf i { animation: none !important; } }
+`;
 
 export function ResultsScreen({
   club,
@@ -45,8 +103,31 @@ export function ResultsScreen({
     }),
     [],
   );
+  const isDraw = score.user === score.bot && !shootout;
+  const mvp = useMemo(() => {
+    let best: { player: Player; rating: number; info: PlayerRating } | null = null;
+    [
+      ...userTeam.map((player) => ({ player, info: ratings.user[player.id] })),
+      ...botTeam.map((player) => ({ player, info: ratings.bot[player.id] })),
+    ].forEach((entry) => {
+      if (entry.info && (!best || entry.info.rating > best.rating)) best = { ...entry, rating: entry.info.rating };
+    });
+    return best as { player: Player; rating: number; info: PlayerRating } | null;
+  }, [ratings, userTeam, botTeam]);
+  const confetti = useMemo(
+    () => Array.from({ length: 26 }, (_, i) => ({ l: (i * 37) % 100, d: (i * 0.41) % 5, t: 4 + ((i * 7) % 4), c: ['#F5B800', '#4ade80', '#fff', '#ffe27a'][i % 4] })),
+    [],
+  );
   return (
-    <main className="results-page">
+    <main className={`results-page rs ${userWon ? 'rs-win' : isDraw ? '' : 'rs-loss'}`}>
+      <style>{resultsCss}</style>
+      {userWon && (
+        <div className="rs-conf" aria-hidden="true">
+          {confetti.map((c, i) => (
+            <i key={i} style={{ left: `${c.l}%`, background: c.c, animationDelay: `-${c.d}s`, animationDuration: `${c.t}s` }} />
+          ))}
+        </div>
+      )}
       <div className={`result-banner ${userWon ? 'win' : 'loss'}`}>
         <span className="eyebrow">FIM DE JOGO</span>
         <h1>{userWon ? 'VITÓRIA!' : score.user === score.bot && !shootout ? 'EMPATE' : 'DERROTA'}</h1>
@@ -67,6 +148,24 @@ export function ResultsScreen({
         <strong>{score.bot}</strong>
         <TeamMark team={opponent} />
       </div>
+      {mvp && (
+        <div className="rs-mvp">
+          <div className="rs-mvp-card">
+            <Card player={mvp.player} fluid />
+          </div>
+          <div>
+            <span className="eyebrow">MELHOR EM CAMPO</span>
+            <h3>{mvp.player.name}</h3>
+            <small>
+              {mvp.info.goals} {mvp.info.goals === 1 ? 'gol' : 'gols'} · {mvp.info.assists} assist.
+            </small>
+          </div>
+          <div className="rs-mvp-r">
+            {mvp.rating.toFixed(1)}
+            <small>NOTA</small>
+          </div>
+        </div>
+      )}
       {shootout && (
         <div
           style={{
@@ -382,7 +481,7 @@ export function RatingList({
               {info.goals > 0 && <small> ⚽{info.goals > 1 ? ` x${info.goals}` : ''}</small>}
               {info.assists > 0 && <small> 🅰️{info.assists > 1 ? ` x${info.assists}` : ''}</small>}
             </b>
-            <strong>{info.rating.toFixed(1)}</strong>
+            <strong className={info.rating >= 8 ? 'rt-hi' : info.rating >= 6.5 ? 'rt-mid' : info.rating < 6 ? 'rt-lo' : ''}>{info.rating.toFixed(1)}</strong>
           </div>
         );
       })}
