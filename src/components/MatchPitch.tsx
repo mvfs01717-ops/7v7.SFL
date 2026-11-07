@@ -1034,7 +1034,9 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
           st.kickoff.until = 0;
         }
       }
-      if (st.kickoff && now >= st.kickoff.until) {
+      // `until` só vira 0 quando todo mundo já chegou no seu lugar (bloco acima): só então a bola rola.
+      // Antes, esta checagem também disparava com `until` no passado e soltava a bola com o time ainda voltando.
+      if (st.kickoff && st.kickoff.until === 0) {
         st.holder = `${st.kickoff.side}-CF`;
         st.poss = st.kickoff.side;
         st.kickoff = null;
@@ -1549,17 +1551,34 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
       style={{
         position: 'relative',
         overflow: 'hidden',
-        borderRadius: 14,
-        border: '1px solid rgba(255,255,255,.12)',
+        borderRadius: 22,
+        border: '1px solid rgba(245,184,0,.35)',
         background: '#0a2417',
         margin: '0 0 16px',
+        boxShadow: '0 24px 60px rgba(0,0,0,.6), 0 0 0 4px rgba(255,255,255,.04), 0 0 40px rgba(34,197,94,.12)',
       }}
     >
       <svg viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', width: '100%', height: 'auto' }} role="img" aria-label="Campo da partida">
-        <rect x={0} y={0} width={W} height={H} fill="#0a2417" />
+        <defs>
+          <radialGradient id="pitch-vig" cx="50%" cy="50%" r="75%">
+            <stop offset="55%" stopColor="#000" stopOpacity={0} />
+            <stop offset="100%" stopColor="#000" stopOpacity={0.5} />
+          </radialGradient>
+          <linearGradient id="pitch-light" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#ffffff" stopOpacity={0.1} />
+            <stop offset="45%" stopColor="#ffffff" stopOpacity={0} />
+            <stop offset="100%" stopColor="#000" stopOpacity={0.18} />
+          </linearGradient>
+          <radialGradient id="kit-gloss" cx="35%" cy="28%" r="70%">
+            <stop offset="0%" stopColor="#fff" stopOpacity={0.5} />
+            <stop offset="55%" stopColor="#fff" stopOpacity={0} />
+          </radialGradient>
+        </defs>
+        <rect x={0} y={0} width={W} height={H} fill="#07190f" />
         {Array.from({ length: 10 }).map((_, i) => (
-          <rect key={i} x={FX0 + i * 70} y={FY0} width={70} height={FY1 - FY0} fill={i % 2 ? '#10432a' : '#0e3a24'} />
+          <rect key={i} x={FX0 + i * 70} y={FY0} width={70} height={FY1 - FY0} fill={i % 2 ? '#14562f' : '#0f4425'} />
         ))}
+        <rect x={FX0} y={FY0} width={FX1 - FX0} height={FY1 - FY0} fill="url(#pitch-light)" />
         <g fill="none" stroke={lineColor} strokeWidth={2}>
           <rect x={FX0} y={FY0} width={FX1 - FX0} height={FY1 - FY0} />
           <line x1={MID_X} y1={FY0} x2={MID_X} y2={FY1} />
@@ -1570,6 +1589,9 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
           <rect x={FX1 - 36} y={MID_Y - 42} width={36} height={84} />
         </g>
         <circle cx={MID_X} cy={MID_Y} r={3} fill={lineColor} />
+        <circle cx={FX0 + 66} cy={MID_Y} r={2.2} fill={lineColor} />
+        <circle cx={FX1 - 66} cy={MID_Y} r={2.2} fill={lineColor} />
+        <rect x={0} y={0} width={W} height={H} fill="url(#pitch-vig)" style={{ pointerEvents: 'none' }} />
         <rect ref={(el: SVGRectElement | null) => { netNodes.current.bot = el; }} x={FX0 - 14} y={GOAL_TOP} width={14} height={GOAL_BOTTOM - GOAL_TOP} fill="rgba(255,255,255,.12)" stroke={lineColor} strokeWidth={2} />
         <rect ref={(el: SVGRectElement | null) => { netNodes.current.user = el; }} x={FX1} y={GOAL_TOP} width={14} height={GOAL_BOTTOM - GOAL_TOP} fill="rgba(255,255,255,.12)" stroke={lineColor} strokeWidth={2} />
 
@@ -1579,6 +1601,7 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
             <g key={s.key} ref={(el: SVGGElement | null) => { nodes.current[s.key] = el; }} transform={`translate(${s.x.toFixed(1)} ${s.y.toFixed(1)})`}>
               <ellipse cy={13} rx={11} ry={4} fill="rgba(0,0,0,.35)" />
               <circle r={14} fill={team.primary_color} stroke={team.secondary_color} strokeWidth={3} />
+              <circle r={12.5} fill="url(#kit-gloss)" style={{ pointerEvents: 'none' }} />
               <text textAnchor="middle" dy={4.5} fontSize={13} fontWeight={700} fill={textOn(team.primary_color)} style={{ pointerEvents: 'none' }}>
                 {s.name.slice(0, 1).toUpperCase()}
               </text>
@@ -1639,8 +1662,10 @@ export default function MatchPitch({ club, opponent, userTeam, botTeam, events, 
           right: 10,
           bottom: 10,
           padding: '6px 10px',
-          borderRadius: 8,
-          background: 'rgba(0,0,0,.62)',
+          borderRadius: 10,
+          background: 'linear-gradient(90deg, rgba(0,0,0,.75), rgba(0,0,0,.5))',
+          borderLeft: '3px solid #F5B800',
+          backdropFilter: 'blur(6px)',
           color: '#fff',
           fontSize: 12,
           lineHeight: 1.3,
