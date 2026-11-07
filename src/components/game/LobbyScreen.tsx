@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, RefreshCw, Swords, Trophy } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Swords } from 'lucide-react';
 import { type Team } from '@/lib/game/types';
 import { listLiveRooms, lookupRoom, type ChatMessage, type Room } from '@/lib/multiplayer';
 import { ChatBox } from '@/components/game/Chat';
@@ -40,6 +40,34 @@ export const lobbyCss = `
 .lobby-join input:focus { border-color: #F5B800; }
 @keyframes lb-spin { to { transform: rotate(360deg); } }
 .lobby-error { padding: 10px 14px; border-radius: 10px; border: 1px solid #ff6b6b; background: rgba(255,107,107,.1); color: #ffb3b3; font-size: 14px; text-align: center; }
+
+.lobby-page { position: relative; isolation: isolate; }
+.lobby-page::before { content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none; background:
+  conic-gradient(from 198deg at 14% -8%, transparent 0 7%, rgba(255,246,200,.17) 9% 13%, transparent 15%),
+  conic-gradient(from 162deg at 86% -8%, transparent 0 7%, rgba(255,246,200,.17) 9% 13%, transparent 15%),
+  linear-gradient(0deg, rgba(15,77,43,.5), transparent 28%),
+  radial-gradient(120% 70% at 50% 0, #1b2a44 0, #0a1020 55%, #05070d 100%); }
+.lobby-page .flow-heading h2 { font-style: italic; font-size: clamp(42px, 7vw, 68px); }
+.lobby-page .flow-heading .eyebrow { justify-content: center; letter-spacing: 3px; }
+.lobby-card { position: relative; border-radius: 6px 22px 6px 22px; border-color: rgba(245,184,0,.22);
+  background: linear-gradient(160deg, rgba(255,255,255,.09), rgba(255,255,255,.02)); backdrop-filter: blur(10px); box-shadow: 0 20px 50px rgba(0,0,0,.45); }
+.lobby-card::before { content: ''; position: absolute; left: 0; right: 22px; top: 0; height: 2px; background: linear-gradient(90deg, #F5B800, transparent); }
+.lobby-step b { box-shadow: 0 0 16px rgba(245,184,0,.5); }
+.lobby-step h3 { text-transform: uppercase; letter-spacing: 1.5px; }
+.lobby-club { transition: transform .2s, border-color .2s, box-shadow .2s; }
+.lobby-club:hover { transform: translateY(-2px); border-color: rgba(245,184,0,.6); }
+.lobby-club.on { box-shadow: 0 0 0 1px #F5B800 inset, 0 0 22px rgba(245,184,0,.3); }
+.lobby-club i { box-shadow: 0 0 12px color-mix(in srgb, var(--club, #444) 70%, transparent); }
+.gold-button.large.lobby-main { clip-path: polygon(12px 0, 100% 0, calc(100% - 12px) 100%, 0 100%); border: 0; padding: 16px 20px; font-size: 15px; letter-spacing: 3px; text-transform: uppercase;
+  background: linear-gradient(180deg, #ffe27a, #F5B800 60%, #d99a00); box-shadow: 0 0 30px rgba(245,184,0,.35); }
+.gold-button.large.lobby-main:disabled { filter: grayscale(.6); opacity: .6; }
+.lobby-seg button.on { background: linear-gradient(180deg, #ffe27a, #F5B800); }
+.lobby-join input { font-size: 32px; }
+@media (min-width: 900px) {
+  .lobby-wrap { width: min(1040px, calc(100vw - 48px)); max-width: none; grid-template-columns: 1.25fr 1fr; align-items: start; gap: 18px; }
+  .lobby-wrap > .lobby-or { display: none; }
+  .lobby-wrap > .lobby-full { grid-column: 1 / -1; }
+}
 @media (max-width: 720px) {
 .lobby-page .flow-heading p { display: none; }
 .lobby-wrap { gap: 10px; margin-bottom: 20px; }
@@ -144,7 +172,6 @@ export function LobbyScreen({
   onJoin,
   onResume,
   onWatch,
-  onTournament,
   onCancel,
   userId,
   chatMessages,
@@ -160,7 +187,6 @@ export function LobbyScreen({
   onJoin: (code: string, teamId: string) => void;
   onResume: () => void;
   onWatch: (room: Room) => void;
-  onTournament: () => void;
   onCancel: () => void;
   userId: string | null;
   chatMessages: ChatMessage[];
@@ -346,30 +372,11 @@ export function LobbyScreen({
               </>
             )}
           </section>
-          {(error || lookError) && <div className="lobby-error">{lookError || error}</div>}
+          {(error || lookError) && <div className="lobby-error lobby-full">{lookError || error}</div>}
 
-          <div className="lobby-or">
-            <i /> <span>OU</span> <i />
+          <div className="lobby-full">
+            <LiveMatches teams={teams} onWatch={onWatch} />
           </div>
-          <section className="lobby-card">
-            <div className="lobby-step">
-              <b>
-                <Trophy size={16} />
-              </b>
-              <div>
-                <h3>Torneio de 4, 6 ou 8 jogadores</h3>
-                <p>Mata-mata até a final. Quem ganhar a final é o campeão.</p>
-              </div>
-            </div>
-            <button className="gold-button large lobby-main" onClick={onTournament}>
-              Abrir torneio
-            </button>
-          </section>
-
-          <div className="lobby-or">
-            <i /> <span>OU</span> <i />
-          </div>
-          <LiveMatches teams={teams} onWatch={onWatch} />
         </div>
       )}
 
