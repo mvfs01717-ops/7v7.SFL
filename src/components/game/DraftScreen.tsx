@@ -72,6 +72,12 @@ export const draftCss = `
   color: #F5B800;
 }
 .dr-slot.filled .dr-label { color: #e8e6df; }
+.dr-slot.swappable { cursor: pointer; }
+.dr-slot.swappable:hover .dr-glow { transform: translateY(-3px); }
+.dr-slot.sel { z-index: 3; }
+.dr-slot.sel .dr-glow { transform: scale(1.12); filter: drop-shadow(0 0 14px #F5B800) drop-shadow(0 0 4px #fff); }
+.dr-slot.target .dr-glow { animation: dr-pulse 1.3s ease-in-out infinite; }
+.dr-label.oop { background: #7f1d1d; color: #fecaca; }
 .dr-reveal { animation: dr-reveal .95s cubic-bezier(.2,.85,.25,1) both; }
 .dr-reveal-glow { animation: dr-flash 1.5s ease-out both; }
 .dr-bench { width: min(100%, 540px); margin: 22px auto 0; text-align: center; }
@@ -263,6 +269,7 @@ export function DraftScreen({
   onChoose,
   rerollsLeft,
   onReroll,
+  onSwap,
   onConfirm,
   onBack,
 }: {
@@ -275,10 +282,23 @@ export function DraftScreen({
   onChoose: (slot: DraftSlot, player: Player) => void;
   rerollsLeft: number;
   onReroll: (slot: DraftSlot) => void;
+  onSwap: (a: Position, b: Position) => void;
   onConfirm: () => void;
   onBack: () => void;
 }) {
   const [open, setOpen] = useState<DraftSlot | null>(null);
+  // Posição escolhida para trocar com outra (toque em um jogador, depois em outro)
+  const [swapFrom, setSwapFrom] = useState<Position | null>(null);
+  const fits = (player: Player, position: Position) =>
+    player.primary_position === position || (player.alternate_positions ?? []).includes(position);
+  function tapFilled(position: Position) {
+    if (swapFrom === null) setSwapFrom(position);
+    else if (swapFrom === position) setSwapFrom(null);
+    else {
+      onSwap(swapFrom, position);
+      setSwapFrom(null);
+    }
+  }
   const startersFilled = positionList.filter((position) => selected[position]).length;
   const benchFilled = BENCH_SLOTS.filter((slot) => bench[slot.id]).length;
   const total = positionList.length + (withBench ? BENCH_SLOTS.length : 0);
@@ -299,27 +319,38 @@ export function DraftScreen({
     const player = (BENCH_SLOTS.some((item) => item.id === slot) ? bench[slot as BenchSlot] : selected[slot as Position]) as
       | Player
       | undefined;
-    const locked = !!player;
+    const isStarter = !BENCH_SLOTS.some((item) => item.id === slot);
+    // Titular já escolhido: toque para trocar de posição com outro titular. Reserva escolhido fica travado.
+    const swappable = !!player && isStarter;
+    const outOfPlace = swappable && !fits(player as Player, slot as Position);
+    const selectedForSwap = swappable && swapFrom === slot;
+    const act = () => {
+      if (swappable) tapFilled(slot as Position);
+      else if (!player) setOpen(slot);
+    };
     return (
       <div
         key={slot}
-        className={`dr-slot ${player ? 'filled' : ''} ${!player && nextSlot === slot ? 'next' : ''}`}
+        className={`dr-slot ${player ? 'filled' : ''} ${swappable ? 'swappable' : ''} ${selectedForSwap ? 'sel' : ''} ${
+          swapFrom !== null && swappable && !selectedForSwap ? 'target' : ''
+        } ${!player && nextSlot === slot ? 'next' : ''}`}
         style={{ ...style, '--i': index } as React.CSSProperties}
-        role={locked ? undefined : 'button'}
-        tabIndex={locked ? -1 : 0}
-        aria-label={locked ? `${label}: ${player?.name}` : `Revelar cartas: ${label}`}
-        onClick={() => !locked && setOpen(slot)}
+        role={player ? undefined : 'button'}
+        tabIndex={player ? -1 : 0}
+        aria-label={player ? `${label}: ${player.name}` : `Revelar cartas: ${label}`}
+        onClick={player ? undefined : act}
         onKeyDown={(event) => {
-          if (!locked && (event.key === 'Enter' || event.key === ' ')) {
+          if (!player && (event.key === 'Enter' || event.key === ' ')) {
             event.preventDefault();
-            setOpen(slot);
+            act();
           }
         }}
       >
         {player ? (
           <span className="dr-glow dr-reveal-glow" key={player.id}>
             <span className="dr-reveal" style={{ display: 'block' }}>
-              <Card player={player} fluid />
+              {/* O próprio card é o botão: no titular, tocar escolhe/troca de posição */}
+              <Card player={player} fluid onClick={swappable ? act : undefined} />
             </span>
           </span>
         ) : (
@@ -329,7 +360,7 @@ export function DraftScreen({
             </span>
           </span>
         )}
-        <i className="dr-label">{label}</i>
+        <i className={`dr-label ${outOfPlace ? 'oop' : ''}`}>{outOfPlace ? `${label} · FORA −5` : label}</i>
       </div>
     );
   };
@@ -355,6 +386,13 @@ export function DraftScreen({
         </div>
         <p style={{ textAlign: 'center', fontSize: 13, opacity: 0.75, margin: '0 0 14px' }}>
           Toque em uma posição para revelar 3 cartas e escolher uma.{withBench ? ' Depois monte o banco.' : ''}
+          {startersFilled >= 2 && (
+            <>
+              <br />
+              <b style={{ color: '#F5B800' }}>Mudar posição:</b> toque em um jogador e depois em outro para trocar. Fora da
+              posição de origem o jogador perde 5 de overall.
+            </>
+          )}
         </p>
         <div className="dr-field">
           <DraftField />
