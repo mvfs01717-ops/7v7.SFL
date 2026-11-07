@@ -102,7 +102,104 @@ export function BenchPicker({ candidates, onConfirm }: { candidates: Player[]; o
   );
 }
 
-// Escolha da tática depois do draft (o rival só descobre a sua na animação da escalação)
+export const setupCss = `
+.tc { display: grid; gap: 16px; text-align: left; }
+.tc-h { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; }
+.tc-h b { font-size: 12px; letter-spacing: 3px; color: #F5B800; font-weight: 900; }
+.tc-h span { font-size: 12px; opacity: .65; }
+.tc-tactics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.tc-t { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 14px 10px 12px; text-align: center; border-radius: 6px 16px 6px 16px; cursor: pointer; color: #f4f4f0;
+  border: 1px solid rgba(255,255,255,.14); background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.02)); transition: transform .2s, border-color .2s, box-shadow .2s; }
+.tc-t:hover { transform: translateY(-2px); }
+.tc-t .ic { font-size: 30px; line-height: 1; }
+.tc-t b { font-size: 14px; letter-spacing: 1.5px; text-transform: uppercase; }
+.tc-t small { font-size: 11px; line-height: 1.3; opacity: .7; }
+.tc-t.on { border-color: #F5B800; background: linear-gradient(180deg, rgba(245,184,0,.3), rgba(245,184,0,.05)); box-shadow: 0 0 0 1px #F5B800, 0 8px 24px rgba(245,184,0,.25); }
+.tc-t.on b { color: #F5B800; }
+.tc-caps { display: flex; flex-wrap: wrap; gap: 8px; }
+.tc-c { display: flex; align-items: center; gap: 8px; padding: 8px 12px 8px 8px; border-radius: 999px; cursor: pointer; color: #f4f4f0; min-width: 0;
+  border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.05); transition: transform .2s, border-color .2s, box-shadow .2s; }
+.tc-c:hover { transform: translateY(-2px); }
+.tc-c i { font-style: normal; flex: none; min-width: 30px; text-align: center; padding: 5px 0; border-radius: 999px; background: #F5B800; color: #1a1200; font-weight: 900; font-size: 11px; }
+.tc-c span { font-weight: 800; font-size: 13px; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-c strong { font-size: 14px; opacity: .85; }
+.tc-c.on { border-color: #F5B800; background: linear-gradient(90deg, rgba(245,184,0,.32), rgba(245,184,0,.06)); box-shadow: 0 0 0 1px #F5B800, 0 0 18px rgba(245,184,0,.3); }
+.tc-c.on span::after { content: ' ©'; color: #F5B800; }
+.tc-info { font-size: 12px; line-height: 1.5; opacity: .8; padding: 10px 12px; border-radius: 10px; background: rgba(0,0,0,.28); border: 1px solid rgba(255,255,255,.1); }
+.tc-info b { color: #F5B800; }
+@media (max-width: 560px) { .tc-t { padding: 12px 6px 10px; } .tc-t small { font-size: 10px; } .tc-t .ic { font-size: 26px; } .tc-c span { max-width: 84px; } }
+`;
+
+export function bestCaptainId(squad: Partial<Record<Position, Player>>): string {
+  const members = positions.flatMap((position) => (squad[position] ? [squad[position] as Player] : []));
+  return [...members].sort((a, b) => b.overall - a.overall)[0]?.id ?? '';
+}
+
+// Tática + capitão (usado dentro da escalação e no fallback do Modo Dado)
+export function TacticCaptainPanel({
+  squad,
+  tactic,
+  captain,
+  onTactic,
+  onCaptain,
+}: {
+  squad: Partial<Record<Position, Player>>;
+  tactic: Tactic;
+  captain: string;
+  onTactic: (tactic: Tactic) => void;
+  onCaptain: (id: string) => void;
+}) {
+  const members = positions.flatMap((position) => (squad[position] ? [{ position, player: squad[position] as Player }] : []));
+  const chosenCaptain = members.find((member) => member.player.id === captain)?.player;
+  return (
+    <div className="tc">
+      <style>{setupCss}</style>
+      <div>
+        <div className="tc-h">
+          <b>TÁTICA</b>
+          <span>O rival só descobre a sua na apresentação.</span>
+        </div>
+        <div className="tc-tactics">
+          {TACTICS.map((item) => {
+            const info = TACTIC_INFO[item];
+            return (
+              <button key={item} type="button" className={`tc-t ${tactic === item ? 'on' : ''}`} aria-pressed={tactic === item} onClick={() => onTactic(item)}>
+                <span className="ic" aria-hidden="true">{info.icon}</span>
+                <b>{info.label}</b>
+                <small>{info.text}</small>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div>
+        <div className="tc-h">
+          <b>CAPITÃO</b>
+          <span>{chosenCaptain ? `${chosenCaptain.name}: +${CAPTAIN_SELF_BONUS} nele · +${String(captainTeamBonus(chosenCaptain.overall)).replace('.', ',')} no time` : 'Escolha quem leva a braçadeira.'}</span>
+        </div>
+        <div className="tc-caps">
+          {members.map(({ position, player }) => (
+            <button key={player.id} type="button" className={`tc-c ${captain === player.id ? 'on' : ''}`} aria-pressed={captain === player.id} onClick={() => onCaptain(player.id)}>
+              <i>{position}</i>
+              <span>{player.name}</span>
+              <strong>{player.overall}</strong>
+            </button>
+          ))}
+        </div>
+        <details style={{ marginTop: 8 }}>
+          <summary style={{ fontSize: 12, opacity: 0.7, cursor: 'pointer' }}>Como funciona o capitão?</summary>
+          <div className="tc-info" style={{ marginTop: 6 }}>
+            O capitão rende <b>+{CAPTAIN_SELF_BONUS} de overall</b> e dá um bônus a todos os companheiros: <b>+0,5</b> se ele tem menos de 80,
+            <b> +1</b> se tem 80 ou mais e <b>+1,5</b> se tem 90 ou mais. O bônus vale no cálculo da partida, não muda o número da carta. Ele fica em
+            campo o jogo todo e não pode ser substituído no intervalo. O bot também escolhe o melhor jogador dele.
+          </div>
+        </details>
+      </div>
+    </div>
+  );
+}
+
+// Fallback (Modo Dado): tática e capitão em tela própria
 export function TacticPicker({
   squad,
   onPick,
@@ -111,123 +208,19 @@ export function TacticPicker({
   onPick: (tactic: Tactic, captain: string) => void;
 }) {
   const [chosen, setChosen] = useState<Tactic>('equilibrada');
-  const members = positions.flatMap((position) => (squad[position] ? [{ position, player: squad[position] as Player }] : []));
-  // Por padrão o capitão é o jogador de maior overall
-  const [captain, setCaptain] = useState<string>(
-    [...members].sort((a, b) => b.player.overall - a.player.overall)[0]?.player.id ?? '',
-  );
-  const bonusFor = (player: Player) => captainTeamBonus(player.overall);
+  const [captain, setCaptain] = useState<string>(bestCaptainId(squad));
   return (
     <div
       role="dialog"
       aria-label="Escolha a tática"
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 80,
-        overflowY: 'auto',
-        display: 'grid',
-        placeItems: 'center',
-        padding: 16,
-        background: 'rgba(5,8,12,.96)',
-      }}
+      style={{ position: 'fixed', inset: 0, zIndex: 80, overflowY: 'auto', display: 'grid', placeItems: 'center', padding: 16, background: 'rgba(5,8,12,.97)' }}
     >
-      <div style={{ width: 'min(460px, 100%)', textAlign: 'center' }}>
-        <div className="eyebrow">ANTES DA PARTIDA</div>
-        <h2 style={{ margin: '6px 0 4px' }}>ESCOLHA A TÁTICA</h2>
-        <p style={{ margin: '0 0 16px', fontSize: 13, opacity: 0.7 }}>O rival não vê a sua escolha até a bola rolar.</p>
-        <div style={{ display: 'grid', gap: 10, textAlign: 'left' }}>
-          {TACTICS.map((tactic) => {
-            const info = TACTIC_INFO[tactic];
-            const on = chosen === tactic;
-            return (
-              <button
-                key={tactic}
-                type="button"
-                onClick={() => setChosen(tactic)}
-                aria-pressed={on}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 14,
-                  padding: '14px 16px',
-                  borderRadius: 8,
-                  border: `1px solid ${on ? '#F5B800' : '#343d47'}`,
-                  background: on ? '#19180f' : '#10161d',
-                  color: '#f4f4f0',
-                  textAlign: 'left',
-                }}
-              >
-                <span style={{ fontSize: 28 }} aria-hidden="true">{info.icon}</span>
-                <span style={{ flex: 1 }}>
-                  <b style={{ display: 'block', fontSize: 15, color: on ? '#F5B800' : undefined }}>{info.label}</b>
-                  <small style={{ opacity: 0.75, fontSize: 12 }}>{info.text}</small>
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        <div style={{ marginTop: 22, textAlign: 'left' }}>
-          <div className="eyebrow" style={{ textAlign: 'center' }}>BRAÇADEIRA</div>
-          <h2 style={{ margin: '6px 0 4px', textAlign: 'center' }}>ESCOLHA O CAPITÃO</h2>
-          <div
-            style={{
-              margin: '0 0 12px',
-              padding: '10px 12px',
-              borderRadius: 8,
-              border: '1px solid #343d47',
-              background: '#10161d',
-              fontSize: 12,
-              lineHeight: 1.55,
-              opacity: 0.9,
-            }}
-          >
-            <b style={{ color: '#F5B800' }}>Como funciona:</b> o capitão rende <b>+{CAPTAIN_SELF_BONUS} de overall</b> e lidera o time,
-            dando um bônus a todos os companheiros: <b>+0,5</b> se ele tem menos de 80 de overall, <b>+1</b> se tem 80 ou mais e <b>+1,5</b> se
-            tem 90 ou mais. O bônus vale no cálculo da partida (chances de gol e duelos), não muda o número da carta. O capitão fica em campo
-            o jogo todo e não pode ser substituído no intervalo. O bot também escolhe o melhor jogador dele como capitão.
-          </div>
-          <div style={{ display: 'grid', gap: 8 }}>
-            {members.map(({ position, player }) => {
-              const on = captain === player.id;
-              return (
-                <button
-                  key={player.id}
-                  type="button"
-                  onClick={() => setCaptain(player.id)}
-                  aria-pressed={on}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    padding: '10px 12px',
-                    borderRadius: 8,
-                    border: `1px solid ${on ? '#F5B800' : '#343d47'}`,
-                    background: on ? '#19180f' : '#10161d',
-                    color: '#f4f4f0',
-                    textAlign: 'left',
-                  }}
-                >
-                  <b style={{ minWidth: 30, color: '#F5B800' }}>{position}</b>
-                  <span style={{ flex: 1 }}>
-                    {player.name}
-                    {on && <b style={{ color: '#F5B800' }}> ©</b>}
-                  </span>
-                  <strong>{player.overall}</strong>
-                  <small style={{ minWidth: 92, textAlign: 'right', opacity: 0.8 }}>
-                    +{CAPTAIN_SELF_BONUS} ele · +{String(bonusFor(player)).replace(".", ",")} time
-                  </small>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-        <button
-          className="gold-button large lobby-main"
-          style={{ marginTop: 16 }}
-          onClick={() => onPick(chosen, captain)}
-        >
-          Confirmar tática e capitão
+      <div style={{ width: 'min(560px, 100%)' }}>
+        <div className="eyebrow" style={{ justifyContent: 'center' }}>ANTES DA PARTIDA</div>
+        <h2 style={{ margin: '6px 0 16px', textAlign: 'center', fontStyle: 'italic' }}>TÁTICA E CAPITÃO</h2>
+        <TacticCaptainPanel squad={squad} tactic={chosen} captain={captain} onTactic={setChosen} onCaptain={setCaptain} />
+        <button className="gold-button large lobby-main" style={{ marginTop: 18 }} onClick={() => onPick(chosen, captain)}>
+          Confirmar
         </button>
       </div>
     </div>
