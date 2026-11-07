@@ -1637,7 +1637,10 @@ function App() {
         onHome={reset}
         onLeaderboard={() => navigate('leaderboard')}
         onSquad={() => navigate('squad')}
+        onProfile={() => navigate('profile')}
         onLogin={() => setShowLogin(true)}
+        loggedIn={!!userId}
+        active={screen}
       />
 
       {mpNotice && (
