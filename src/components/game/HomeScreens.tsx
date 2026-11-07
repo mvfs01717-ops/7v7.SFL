@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { stadiumCss } from '@/lib/game/stadiumCss';
 import { ArrowLeft, ArrowRight, CircleUserRound, Database, Menu, Play, RefreshCw, Shield, Swords, Trophy, X, Zap } from 'lucide-react';
 import { positionNames, type Player, type Team } from '@/lib/game/types';
 import { Badge, Card, LogoMark } from '@/components/game/Card';
@@ -464,6 +465,41 @@ export function Feature({
   );
 }
 
+const clubCss = `
+.cc { max-width: 980px; }
+.cc .flow-heading { margin: 22px auto 22px; }
+.cc .flow-heading .eyebrow { justify-content: center; letter-spacing: 4px; }
+.cc .flow-heading h2 { font-style: italic; font-size: clamp(42px, 7vw, 68px); }
+.cc-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 0 auto 22px; max-width: 760px; }
+.cc-box { padding: 14px 16px 16px; }
+.cc-box > b { display: block; margin-bottom: 8px; font-size: 11px; letter-spacing: 2.5px; color: #F5B800; font-weight: 900; }
+.cc-seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; padding: 4px; border-radius: 12px; background: rgba(0,0,0,.4); border: 1px solid rgba(255,255,255,.1); }
+.cc-seg button { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 11px 6px; border: 0; border-radius: 9px; background: transparent; color: #cfd6de; font-weight: 800; font-size: 13px; cursor: pointer; transition: background .2s, color .2s; }
+.cc-seg button:hover { color: #fff; }
+.cc-seg button.on { background: linear-gradient(180deg, #ffe27a, #F5B800); color: #1a1200; box-shadow: 0 4px 14px rgba(245,184,0,.35); }
+.cc-test { display: flex; justify-content: center; margin: -8px 0 18px; }
+.cc-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.cc-club { position: relative; overflow: hidden; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 24px 12px 18px; text-align: center; color: #fff; cursor: pointer;
+  border-radius: 6px 22px 6px 22px; border: 1px solid rgba(255,255,255,.14);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--club) 45%, #0a1020), #0a1020 90%);
+  transition: transform .3s cubic-bezier(.2,.8,.2,1), border-color .25s, box-shadow .3s; animation: ccIn .6s cubic-bezier(.2,.8,.2,1) both; animation-delay: calc(var(--i) * 60ms); }
+.cc-club::before { content: ''; position: absolute; inset: 0; background: radial-gradient(80% 60% at 50% 0%, color-mix(in srgb, var(--club) 70%, transparent), transparent 70%); opacity: .55; transition: opacity .3s; }
+.cc-club::after { content: ''; position: absolute; inset: 0; background: linear-gradient(115deg, transparent 40%, rgba(255,255,255,.18) 50%, transparent 60%); transform: translateX(-130%); transition: transform .7s; }
+.cc-club:hover { transform: translateY(-6px) scale(1.03); border-color: #F5B800; box-shadow: 0 18px 40px rgba(0,0,0,.55), 0 0 28px color-mix(in srgb, var(--club) 60%, transparent); }
+.cc-club:hover::before { opacity: 1; } .cc-club:hover::after { transform: translateX(130%); }
+.cc-club > * { position: relative; z-index: 1; }
+.cc-club .cc-badge { transform: scale(1.35); margin: 8px 0 6px; filter: drop-shadow(0 8px 10px rgba(0,0,0,.55)); }
+.cc-club h3 { margin: 0; font-size: 20px; font-style: italic; text-transform: uppercase; letter-spacing: .5px; line-height: 1.05; }
+.cc-club p { margin: 0; font-size: 10px; letter-spacing: 2px; font-weight: 800; color: #F5B800; opacity: 0; transform: translateY(6px); transition: opacity .25s, transform .25s; }
+.cc-club:hover p { opacity: 1; transform: none; }
+@keyframes ccIn { from { opacity: 0; transform: translateY(22px) scale(.95); } to { opacity: 1; transform: none; } }
+.cc-vs { display: flex; align-items: center; gap: 14px; justify-content: center; margin: 26px 0 8px; font-size: 11px; letter-spacing: 2px; opacity: .6; font-weight: 800; }
+.cc-vs i { flex: 1; max-width: 120px; height: 1px; background: rgba(255,255,255,.25); } .cc-vs strong { color: #F5B800; font-size: 18px; font-style: italic; }
+@media (max-width: 860px) { .cc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .cc-opts { grid-template-columns: 1fr; } }
+@media (max-width: 420px) { .cc-club { padding: 18px 8px 14px; } .cc-club h3 { font-size: 17px; } .cc-vs span { font-size: 9px; } }
+@media (prefers-reduced-motion: reduce) { .cc-club, .cc-club::after { animation: none !important; transition: none !important; } }
+`;
+
 export function ClubChoice({
   teams,
   mode,
@@ -488,7 +524,9 @@ export function ClubChoice({
   onBotLevel: (value: 1 | 3 | 5) => void;
 }) {
   return (
-    <main className="flow-page">
+    <main className="flow-page cc stadium-bg">
+      <style>{stadiumCss}</style>
+      <style>{clubCss}</style>
       <button className="back-button" onClick={onBack}>
         <ArrowLeft size={16} /> Voltar
       </button>
@@ -499,61 +537,47 @@ export function ClubChoice({
         </h2>
         <p>Suas cores. Sua identidade. O rival será controlado pelo bot.</p>
       </div>
-      <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap', margin: '0 0 20px' }}>
-        <button
-          className={mode === 'classic' ? 'gold-button' : 'outline-button'}
-          onClick={() => onMode('classic')}
-        >
-          Draft clássico
-        </button>
-        <button
-          className={mode === 'dice' ? 'gold-button' : 'outline-button'}
-          onClick={() => onMode('dice')}
-        >
-          <span aria-hidden="true">🎲</span> Modo Dado
-        </button>
-      </div>
-      <div style={{ display: 'flex', gap: 8, justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap', margin: '0 0 20px' }}>
-        <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.5, color: '#F5B800' }}>BOT</span>
-        {([[1, 'Fácil'], [3, 'Normal'], [5, 'Difícil']] as const).map(([level, label]) => (
-          <button
-            key={level}
-            className={botLevel === level ? 'gold-button' : 'outline-button'}
-            onClick={() => onBotLevel(level)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      {showTestTools && (
-        <div style={{ display: 'flex', justifyContent: 'center', margin: '-6px 0 20px' }}>
-          <button
-            className={forceShootout ? 'gold-button' : 'outline-button'}
-            onClick={() => onForceShootout(!forceShootout)}
-          >
-            <span aria-hidden="true">🧪</span> Teste: forçar pênaltis contra o bot {forceShootout ? '(LIGADO)' : '(desligado)'}
-          </button>
+      <div className="cc-opts">
+        <div className="cc-box glass-card">
+          <b>MODO DO DRAFT</b>
+          <div className="cc-seg">
+            <button className={mode === 'classic' ? 'on' : ''} onClick={() => onMode('classic')}>
+              Draft clássico
+            </button>
+            <button className={mode === 'dice' ? 'on' : ''} onClick={() => onMode('dice')}>
+              <span aria-hidden="true">🎲</span> Modo Dado
+            </button>
+          </div>
         </div>
-      )}
-      <div className="club-grid">
-        {teams.map((team) => (
+        <div className="cc-box glass-card">
+          <b>DIFICULDADE DO BOT</b>
+          <div className="cc-seg">
+            {([[1, 'Fácil'], [3, 'Normal'], [5, 'Difícil']] as const).map(([level, label]) => (
+              <button key={level} className={botLevel === level ? 'on' : ''} onClick={() => onBotLevel(level)}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="cc-grid">
+        {teams.map((team, index) => (
           <button
-            className="club-card"
+            className="cc-club"
             key={team.id}
             onClick={() => onChoose(team)}
-            style={{ '--club': team.primary_color } as React.CSSProperties}
+            style={{ '--club': team.primary_color, '--i': index } as React.CSSProperties}
           >
-            <div className="club-card-bg" />
-            <Badge team={team} />
-            <div>
-              <h3>{team.name}</h3>
-              <p>Representar este clube</p>
-            </div>
-            <ArrowRight />
+            <span className="cc-badge">
+              <Badge team={team} />
+            </span>
+            <h3>{team.name}</h3>
+            <p>REPRESENTAR ›</p>
           </button>
         ))}
       </div>
-      <div className="versus-line">
+      <div className="cc-vs">
         <span>VOCÊ ESCOLHE</span>
         <i /> <strong>VS</strong> <i />
         <span>O BOT JOGA PELO RIVAL</span>
