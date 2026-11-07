@@ -282,16 +282,16 @@ export function DraftScreen({
   onChoose: (slot: DraftSlot, player: Player) => void;
   rerollsLeft: number;
   onReroll: (slot: DraftSlot) => void;
-  onSwap: (a: Position, b: Position) => void;
+  onSwap: (a: DraftSlot, b: DraftSlot) => void;
   onConfirm: () => void;
   onBack: () => void;
 }) {
   const [open, setOpen] = useState<DraftSlot | null>(null);
   // Posição escolhida para trocar com outra (toque em um jogador, depois em outro)
-  const [swapFrom, setSwapFrom] = useState<Position | null>(null);
+  const [swapFrom, setSwapFrom] = useState<DraftSlot | null>(null);
   const fits = (player: Player, position: Position) =>
     player.primary_position === position || (player.alternate_positions ?? []).includes(position);
-  function tapFilled(position: Position) {
+  function tapFilled(position: DraftSlot) {
     if (swapFrom === null) setSwapFrom(position);
     else if (swapFrom === position) setSwapFrom(null);
     else {
@@ -320,12 +320,12 @@ export function DraftScreen({
       | Player
       | undefined;
     const isStarter = !BENCH_SLOTS.some((item) => item.id === slot);
-    // Titular já escolhido: toque para trocar de posição com outro titular. Reserva escolhido fica travado.
-    const swappable = !!player && isStarter;
-    const outOfPlace = swappable && !fits(player as Player, slot as Position);
+    // Jogador já escolhido (titular ou reserva): toque para trocar de lugar com outro, inclusive titular ↔ banco
+    const swappable = !!player;
+    const outOfPlace = swappable && isStarter && !fits(player as Player, slot as Position);
     const selectedForSwap = swappable && swapFrom === slot;
     const act = () => {
-      if (swappable) tapFilled(slot as Position);
+      if (swappable) tapFilled(slot);
       else if (!player) setOpen(slot);
     };
     return (
@@ -386,11 +386,11 @@ export function DraftScreen({
         </div>
         <p style={{ textAlign: 'center', fontSize: 13, opacity: 0.75, margin: '0 0 14px' }}>
           Toque em uma posição para revelar 3 cartas e escolher uma.{withBench ? ' Depois monte o banco.' : ''}
-          {startersFilled >= 2 && (
+          {startersFilled + benchFilled >= 2 && (
             <>
               <br />
-              <b style={{ color: '#F5B800' }}>Mudar posição:</b> toque em um jogador e depois em outro para trocar. Fora da
-              posição de origem o jogador perde 5 de overall.
+              <b style={{ color: '#F5B800' }}>Mudar escalação:</b> toque em um jogador e depois em outro para trocar de lugar
+              {withBench ? ' (também com o banco)' : ''}. Fora da posição de origem o jogador perde 5 de overall.
             </>
           )}
         </p>
