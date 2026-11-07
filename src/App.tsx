@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Shield } from 'lucide-react';
 import AdminScreen from '@/components/AdminScreen';
 import { type Shootout } from '@/components/PenaltyShootout';
 import { globalCss } from '@/lib/game/globalCss';
 import { HALFTIME_MS, HT_BREAK_MS, HT_RETURN_MS, HT_RETURN_NO_SUBS_MS, LINEUP_REVEAL_MS, MINUTE_MS, PENALTY_PREP_MS, SHOOTOUT_CHANCE, average, forceDrawPlan, getPlayerPositions, pickByRoll, pickShooter, slotOf, type PlanEntry } from '@/lib/game/helpers';
 import { BENCH_SLOTS, emptyStats, positions, slotPositionsOf, type BenchSlot, type DraftSlot, type GoalRecord, type MatchEvent, type MatchStats, type Player, type Position, type Screen, type Team } from '@/lib/game/types';
-import { BENCH_KEYS, SUBS_MAX, SUBS_WINDOW_SEC, autoSubstitutions, encodeSubs, hasBench, subsDecided, subsOf, createRoom, effortLoss, fetchRoom, fitsSlot, generatePlan, isRoomLive, joinRoom, openRoomChat, patchRoom, recordResult, reshapeSecondHalf, slowdown, staminaAt, tacticOf, type ChatMessage, type FieldLite, type PlanItem, type Room, type Tactic } from '@/lib/multiplayer';
+import { BENCH_KEYS, SUBS_MAX, SUBS_WINDOW_SEC, autoSubstitutions, encodeSubs, hasBench, subsDecided, subsOf, createRoom, effortLoss, fetchRoom, fitsSlot, generatePlan, isRoomLive, listLiveRooms, joinRoom, openRoomChat, patchRoom, recordResult, reshapeSecondHalf, slowdown, staminaAt, tacticOf, type ChatMessage, type FieldLite, type PlanItem, type Room, type Tactic } from '@/lib/multiplayer';
 import { supabase } from '@/lib/supabase';
 import { createTournament, currentSlot, decideWinner, fetchTournament, joinTournament, leaveTournament, setTournamentMatch, slotOfRoom, startTournament, type Slot, type Tournament } from '@/lib/tournament';
 import { LogoMark, cardCss } from '@/components/game/Card';
@@ -13,6 +13,7 @@ import { DiceDraftScreen } from '@/components/game/DiceDraftScreen';
 import { DraftScreen } from '@/components/game/DraftScreen';
 import { ClubChoice, Header, Home } from '@/components/game/HomeScreens';
 import { Leaderboard } from '@/components/game/Leaderboard';
+import { ProfileScreen } from '@/components/game/ProfileScreen';
 import { LobbyScreen } from '@/components/game/LobbyScreen';
 import { LoginModal } from '@/components/game/LoginModal';
 import { MatchScreen } from '@/components/game/MatchScreen';
@@ -218,6 +219,21 @@ function App() {
     setLoading(false);
   }
 
+  const featuredPlayers = useMemo(() => {
+    const byOverall = (a: Player, b: Player) => b.overall - a.overall;
+    const withImg = players.filter((p) => p.image_url).sort(byOverall);
+    const rest = players.filter((p) => !p.image_url).sort(byOverall);
+    return [...withImg, ...rest].slice(0, 5);
+  }, [players]);
+  const [liveRoomCount, setLiveRoomCount] = useState(0);
+  useEffect(() => {
+    if (screen !== 'home' || !userId) return;
+    let alive = true;
+    void listLiveRooms().then((rooms) => alive && setLiveRoomCount(rooms.length)).catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [screen, userId]);
   const myRole: 'host' | 'guest' | null = room && userId ? (room.host_id === userId ? 'host' : 'guest') : null;
   const theirSquad = room ? (myRole === 'host' ? room.guest_squad : room.host_squad) : null;
   // Jogadores que o adversário já escolheu no draft multiplayer
@@ -1705,9 +1721,15 @@ function App() {
           onAdmin={() => navigate('admin')}
           onPlay={() => startClubChoice('classic')}
           onMultiplayer={openMultiplayer}
+          onTournament={openTournament}
+          onSquad={() => navigate('squad')}
+          onProfile={() => navigate('profile')}
           loggedIn={!!userId}
           onLogin={() => setShowLogin(true)}
           onLeaderboard={() => navigate('leaderboard')}
+          nickname={nickname}
+          featured={featuredPlayers}
+          liveRooms={liveRoomCount}
         />
       )}
 
@@ -1886,6 +1908,7 @@ function App() {
       )}
 
       {screen === 'leaderboard' && <Leaderboard onBack={reset} />}
+      {screen === 'profile' && <ProfileScreen nickname={nickname} userId={userId} onBack={reset} />}
       {screen === 'squad' && <Squad players={players} teams={teams} onBack={reset} />}
       {screen === 'admin' && (
         <AdminScreen players={players} teams={teams} onBack={reset} onReload={loadData} />
