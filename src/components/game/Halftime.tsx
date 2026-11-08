@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { PENALTY_PREP_MS, slotOf } from '@/lib/game/helpers';
 import { positions, type Player, type Position, type Team } from '@/lib/game/types';
+import { Card, cardCss } from '@/components/game/Card';
+import { FIELD_SPOTS, DraftField, draftCss } from '@/components/game/DraftScreen';
 import { SUBS_MAX, fitsSlot, staminaAt, substitutionGain, type FieldLite, type Tactic } from '@/lib/multiplayer';
 
 // ---- Intervalo e transição para os pênaltis: usam o mesmo campo do MatchPitch (SVG 740 x 440, time do usuário à esquerda) ----
@@ -158,155 +160,124 @@ export function SubstitutionPanel({
   }
   const sign = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(1)}`;
   const gainColor = (value: number) => (value > 0.4 ? '#22c55e' : value < -0.4 ? '#ef4444' : '#cbd5e1');
+  const starterSlotView = (slot: Position, index: number) => {
+    const player = starterAt(slot);
+    if (!player) return null;
+    const stamina = staminaAt(slot, minute, tactic, player.since ?? 0, player.carried ?? 0);
+    const reserve = bench.find((item) => item.id === picks[slot]);
+    const locked = slot === 'GK' || !!player.captain;
+    const active = selected === slot;
+    const shown = reserve ?? player;
+    return (
+      <div
+        key={slot}
+        className={`dr-slot filled ht-slot ${active ? 'sel' : ''} ${selected && !locked && !active ? 'target' : ''} ${reserve ? 'ht-in' : ''} ${locked ? 'ht-lock' : 'swappable'}`}
+        style={{ left: `${FIELD_SPOTS[slot].x}%`, top: `${FIELD_SPOTS[slot].y}%`, '--i': index } as React.CSSProperties}
+        aria-label={`${slot}: ${shown.name}`}
+      >
+        <span className="dr-glow">
+          <Card player={shown} fluid onClick={() => toggleStarter(slot)} />
+        </span>
+        <i className="dr-label">{reserve ? `${slot} · ENTRA` : locked ? `${slot} · ${slot === 'GK' ? 'GOLEIRO' : 'CAPITÃO ©'}` : slot}</i>
+        <span className="ht-stam" title="Fôlego">
+          <i style={{ width: `${reserve ? 100 : stamina}%`, background: reserve ? '#22c55e' : staminaColor(stamina) }} />
+        </span>
+        <b className="ht-pct" style={{ color: reserve ? '#22c55e' : staminaColor(stamina) }}>
+          {reserve ? sign(gainOf(slot, reserve)) : `${Math.round(stamina)}%`}
+        </b>
+      </div>
+    );
+  };
   return (
-    <div
-      role="dialog"
-      aria-label="Substituições"
-      style={{
-        position: 'absolute',
-        inset: 0,
-        zIndex: 6,
-        overflow: 'auto',
-        padding: 14,
-        borderRadius: 14,
-        border: '1px solid rgba(255,255,255,.12)',
-        background: 'linear-gradient(180deg,#0a2417,#0b1710)',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+    <div role="dialog" aria-label="Substituições" className="ht-panel">
+      <style>{cardCss}</style>
+      <style>{draftCss}</style>
+      <style>{subsCss}</style>
+      <div className="ht-head">
         <div>
           <span className="eyebrow">INTERVALO · {club.abbreviation}</span>
-          <h3 style={{ margin: '2px 0 0', fontFamily: "'Bebas Neue', sans-serif", fontSize: 26, letterSpacing: 2 }}>
-            SUBSTITUIÇÕES
-          </h3>
+          <h3>SUBSTITUIÇÕES</h3>
         </div>
-        <b style={{ color: '#F5B800' }}>
+        <b className="ht-count">
           {limitSec ? `⏱ ${left}s · ` : ''}
           {made}/{SUBS_MAX} trocas
         </b>
       </div>
-      <p style={{ margin: '4px 0 10px', fontSize: 13, opacity: 0.8 }}>
-        A barra mostra o fôlego aos {minute}', já descontado o esforço de cada um em campo (corridas, condução, desarmes). Quem está cansado rende menos e corre mais devagar no 2º tempo. Toque em quem sai e depois no reserva que entra.
-        Reserva fora de posição perde 5 pontos.
+      <p className="ht-hint">
+        {selected
+          ? `Agora toque no reserva que entra no lugar de ${starterAt(selected)?.name ?? selected}.`
+          : `Toque em quem sai e depois no reserva que entra. A barra mostra o fôlego aos ${minute}'. Reserva fora de posição perde 5.`}
       </p>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 12 }}>
-        <section>
-          <span className="eyebrow">EM CAMPO</span>
-          {positions.map((slot) => {
-            const player = starterAt(slot);
-            if (!player) return null;
-            const stamina = staminaAt(slot, minute, tactic, player.since ?? 0, player.carried ?? 0);
-            const reserve = bench.find((item) => item.id === picks[slot]);
-            const active = selected === slot;
-            return (
-              <button
-                key={slot}
-                type="button"
-                onClick={() => toggleStarter(slot)}
-                disabled={slot === 'GK' || !!player.captain}
-                aria-pressed={active || !!reserve}
-                style={{
-                  display: 'block',
-                  width: '100%',
-                  margin: '6px 0 0',
-                  padding: '8px 10px',
-                  textAlign: 'left',
-                  color: 'inherit',
-                  cursor: slot === 'GK' || player.captain ? 'default' : 'pointer',
-                  borderRadius: 10,
-                  border: `1px solid ${active ? '#F5B800' : reserve ? '#22c55e' : 'rgba(255,255,255,.14)'}`,
-                  background: active ? 'rgba(245,184,0,.12)' : 'rgba(255,255,255,.04)',
-                  opacity: slot === 'GK' || player.captain ? 0.7 : 1,
-                }}
-              >
-                <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <b style={{ minWidth: 28, color: '#F5B800' }}>{slot}</b>
-                  <span style={{ flex: 1, textDecoration: reserve ? 'line-through' : undefined, opacity: reserve ? 0.6 : 1 }}>
-                    {player.name}
-                    {player.captain ? <b style={{ color: '#F5B800' }}> ©</b> : null}
-                  </span>
-                  <strong>{player.overall}</strong>
-                  <small style={{ minWidth: 34, textAlign: 'right', color: staminaColor(stamina) }}>{Math.round(stamina)}%</small>
-                </span>
-                <span style={{ display: 'block', height: 5, marginTop: 5, borderRadius: 3, background: 'rgba(255,255,255,.12)', overflow: 'hidden' }}>
-                  <span style={{ display: 'block', height: '100%', width: `${stamina}%`, background: staminaColor(stamina) }} />
-                </span>
-                {reserve && (
-                  <span style={{ display: 'flex', gap: 8, marginTop: 6, fontSize: 13 }}>
-                    <span style={{ color: '#22c55e' }}>➜ {reserve.name}</span>
-                    <strong>{reserve.overall}</strong>
-                    <small style={{ marginLeft: 'auto', color: gainColor(gainOf(slot, reserve)) }}>
-                      {sign(gainOf(slot, reserve))} no 2º tempo
-                    </small>
-                  </span>
-                )}
-                {slot === 'GK' && <small style={{ opacity: 0.6 }}>Goleiro não é substituído</small>}
-                {player.captain && <small style={{ opacity: 0.6 }}>Capitão fica em campo</small>}
-              </button>
-            );
-          })}
-        </section>
-        <section>
-          <span className="eyebrow">BANCO</span>
-          {bench.length === 0 && <p style={{ opacity: 0.7 }}>Sem reservas disponíveis.</p>}
-          {bench.map((reserve) => {
+      <div className="dr-field ht-field">
+        <DraftField />
+        {positions.map((slot, index) => starterSlotView(slot, index))}
+      </div>
+      <div className="dr-bench">
+        <span className="eyebrow" style={{ justifyContent: 'center' }}>
+          BANCO · {bench.length - used.length} disponíveis
+        </span>
+        {bench.length === 0 && <p style={{ opacity: 0.7 }}>Sem reservas disponíveis.</p>}
+        <div className="dr-bench-row">
+          {bench.map((reserve, index) => {
             const taken = used.includes(reserve.id);
             const gain = selected ? gainOf(selected, reserve) : null;
             const fits = selected ? fitsSlot(lite(reserve), selected) : true;
-            const blocked = taken || !selected || (!picks[selected] && made >= SUBS_MAX);
             return (
-              <button
+              <div
                 key={reserve.id}
-                type="button"
-                onClick={() => chooseReserve(reserve)}
-                disabled={blocked}
-                style={{
-                  display: 'block',
-                  width: '100%',
-                  margin: '6px 0 0',
-                  padding: '8px 10px',
-                  textAlign: 'left',
-                  color: 'inherit',
-                  cursor: blocked ? 'default' : 'pointer',
-                  borderRadius: 10,
-                  border: `1px solid ${taken ? '#22c55e' : 'rgba(255,255,255,.14)'}`,
-                  background: 'rgba(255,255,255,.04)',
-                  opacity: taken ? 0.5 : blocked ? 0.75 : 1,
-                }}
+                className={`dr-slot filled ht-res ${selected && !taken ? 'target swappable' : ''} ${taken ? 'ht-taken' : ''}`}
+                style={{ '--i': index } as React.CSSProperties}
               >
-                <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <b style={{ minWidth: 28, color: '#F5B800' }}>{reserve.primary_position}</b>
-                  <span style={{ flex: 1 }}>{reserve.name}</span>
-                  <strong>{reserve.overall}</strong>
-                  <small style={{ minWidth: 34, textAlign: 'right', color: '#22c55e' }}>100%</small>
+                <span className="dr-glow">
+                  <Card player={reserve} fluid onClick={() => chooseReserve(reserve)} />
                 </span>
-                <small style={{ display: 'block', marginTop: 3, opacity: 0.75 }}>
-                  {[reserve.primary_position, ...(reserve.alternate_positions ?? [])].join(' · ')}
-                  {taken ? ' · já escolhido' : ''}
-                  {selected && !taken && !fits ? ' · fora de posição (−5)' : ''}
-                  {selected && !taken && gain !== null ? ` · ${sign(gain)} no 2º tempo` : ''}
-                </small>
-              </button>
+                <i className={`dr-label ${selected && !taken && !fits ? 'oop' : ''}`}>
+                  {taken ? 'JÁ ESCOLHIDO' : selected && !fits ? 'FORA −5' : reserve.primary_position}
+                </i>
+                {selected && !taken && gain !== null && (
+                  <b className="ht-pct" style={{ color: gainColor(gain) }}>
+                    {sign(gain)} no 2º tempo
+                  </b>
+                )}
+              </div>
             );
           })}
-        </section>
+        </div>
       </div>
-      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 14, flexWrap: 'wrap' }}>
-        {sent && (
-          <b style={{ alignSelf: 'center', color: '#22c55e' }}>✅ Trocas enviadas. Esperando o adversário...</b>
-        )}
+      <div className="ht-actions">
+        {sent && <b style={{ alignSelf: 'center', color: '#22c55e' }}>✅ Trocas enviadas. Esperando o adversário...</b>}
         {made > 0 && !sent && (
           <button type="button" className="outline-button" onClick={() => setPicks({})}>
             Desfazer trocas
           </button>
         )}
-        <button type="button" className="gold-button" disabled={sent} onClick={send}>
-          {made ? `Confirmar ${made} ${made === 1 ? 'troca' : 'trocas'} e voltar para o jogo` : 'Seguir sem trocas'}
+        <button type="button" className="gold-button cta-slant" disabled={sent} onClick={send} style={{ padding: '14px 26px' }}>
+          {made ? `Confirmar ${made} ${made === 1 ? 'troca' : 'trocas'} e voltar` : 'Seguir sem trocas'}
         </button>
       </div>
     </div>
   );
 }
+
+const subsCss = `
+.ht-panel { position: fixed; inset: 0; z-index: 90; overflow: auto; padding: 16px 12px 28px;
+  background: radial-gradient(120% 60% at 50% 0, rgba(255,246,200,.1), transparent 60%), linear-gradient(180deg, #0b1d33, #07110c 70%); }
+.ht-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; flex-wrap: wrap; max-width: 560px; margin: 0 auto; }
+.ht-head h3 { margin: 2px 0 0; font-size: 30px; font-style: italic; letter-spacing: 2px; }
+.ht-count { padding: 6px 14px; border-radius: 999px; background: rgba(245,184,0,.16); border: 1px solid rgba(245,184,0,.5); color: #F5B800; font-size: 13px; }
+.ht-hint { max-width: 560px; margin: 8px auto 12px; font-size: 12.5px; line-height: 1.45; opacity: .8; text-align: center; }
+.ht-field { width: min(100%, 480px); aspect-ratio: .74; animation: none; margin-bottom: 14px; }
+.ht-slot .ht-stam, .ht-res .ht-stam { display: block; height: 5px; margin: 3px 4px 0; border-radius: 4px; background: rgba(255,255,255,.18); overflow: hidden; }
+.ht-stam i { display: block; height: 100%; border-radius: 4px; }
+.ht-pct { display: block; margin-top: 1px; text-align: center; font-size: 11px; text-shadow: 0 1px 3px #000; }
+.ht-slot.ht-lock .dr-glow { filter: grayscale(.45) brightness(.85); }
+.ht-slot.ht-in .dr-glow { filter: drop-shadow(0 0 12px #22c55e); }
+.ht-slot.ht-in .dr-label { background: #14532d; color: #bbf7d0; }
+.ht-res.ht-taken { opacity: .4; pointer-events: none; }
+.ht-actions { display: flex; gap: 10px; justify-content: center; margin-top: 34px; flex-wrap: wrap; }
+.ht-panel .dr-bench-row { padding-bottom: 8px; }
+.ht-slot, .ht-res { animation-delay: calc(var(--i) * 40ms) !important; }
+`;
 
 // Intervalo: os jogadores saem do campo pelo túnel, aparece o placar e eles voltam para o 2º tempo.
 // Cobre o campo da partida enquanto dura (HALFTIME_MS); o relógio do jogo fica parado.
