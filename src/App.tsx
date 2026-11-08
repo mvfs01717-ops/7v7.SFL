@@ -1316,13 +1316,15 @@ function App() {
       ? pickedGoal
       : assist
         ? `${pickedGoal} Passe de ${assist.name}.`
-        : `${pickedGoal} Jogada individual.`;
+        : /^Escanteio cobrado/.test(pickedGoal)
+          ? pickedGoal
+          : `${pickedGoal} Jogada individual.`;
     const shotTexts = [
       `${shooterName} finaliza de primeira, mas a bola passa por cima do gol.`,
       `${shooterName} bate cruzado e a bola sai rente à trave.`,
       `${shooterName} arrisca de longe e isola.`,
       `${shooterName} chuta torto e a bola vai pela linha de fundo.`,
-      `Bola na trave! ${shooterName} quase abre o placar para ${club}.`,
+      `Bola na trave! ${shooterName} quase marca para ${club}.`,
       `${shooterName} cabeceia, mas sem direção.`,
       `${shooterName} fica de frente para o gol e chuta para fora.`,
     ];
