@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Shield } from 'lucide-react';
 import AdminScreen from '@/components/AdminScreen';
 import { type Shootout } from '@/components/PenaltyShootout';
 import { globalCss } from '@/lib/game/globalCss';
@@ -8,10 +7,11 @@ import { BENCH_SLOTS, emptyStats, positions, slotPositionsOf, type BenchSlot, ty
 import { BENCH_KEYS, SUBS_MAX, SUBS_WINDOW_SEC, autoSubstitutions, encodeSubs, hasBench, subsDecided, subsOf, createRoom, effortLoss, fetchRoom, fitsSlot, generatePlan, isRoomLive, listLiveRooms, joinRoom, openRoomChat, patchRoom, recordResult, reshapeSecondHalf, slowdown, staminaAt, tacticOf, type ChatMessage, type FieldLite, type PlanItem, type Room, type Tactic } from '@/lib/multiplayer';
 import { supabase } from '@/lib/supabase';
 import { createTournament, currentSlot, decideWinner, fetchTournament, joinTournament, leaveTournament, setTournamentMatch, slotOfRoom, startTournament, type Slot, type Tournament } from '@/lib/tournament';
-import { LogoMark, cardCss } from '@/components/game/Card';
+import { cardCss } from '@/components/game/Card';
 import { DiceDraftScreen } from '@/components/game/DiceDraftScreen';
 import { DraftScreen } from '@/components/game/DraftScreen';
 import { ClubChoice, Header, Home } from '@/components/game/HomeScreens';
+import { LoadingScreen } from '@/components/game/LoadingScreen';
 import { Leaderboard } from '@/components/game/Leaderboard';
 import { ProfileScreen } from '@/components/game/ProfileScreen';
 import { LobbyScreen } from '@/components/game/LobbyScreen';
@@ -126,6 +126,9 @@ function App() {
   const halftimeDone = useRef(false);
   // Tempo de espera fixo antes do intervalo quando saiu gol no fim do 1º tempo (para a jogada terminar na animação)
   const halftimeWait = useRef(0);
+  // Fim do 1º tempo: o apito só toca com a bola fora de jogo (lateral). endHalf pede a bola fora; deadBall diz que ela está fora.
+  const endHalfRef = useRef(false);
+  const deadBallRef = useRef(false);
   const eventsRef = useRef<MatchEvent[]>([]);
   // Muda quando o 2º tempo começa: o campo recomeça com a saída de bola
   const [restartKey, setRestartKey] = useState(0);
@@ -1037,6 +1040,8 @@ function App() {
     setPause(null);
     halftimeDone.current = false;
     halftimeWait.current = 0;
+    endHalfRef.current = false;
+    deadBallRef.current = false;
     setScore({ user: 0, bot: 0 });
     setEvents([]);
     setStats(emptyStats);
@@ -1167,6 +1172,15 @@ function App() {
         halftimeWait.current += 1;
         return;
       }
+      // O apito só toca quando a bola sai (lateral): pede ao campo e espera até ~9 s. Quem assiste ao vivo não espera (segue o relógio do anfitrião).
+      if (!spectating && !skipped) {
+        endHalfRef.current = true;
+        if (!deadBallRef.current && halftimeWait.current < holdTicksFor() + 10) {
+          halftimeWait.current += 1;
+          return;
+        }
+      }
+      endHalfRef.current = false;
       // Se a bola ainda não entrou, o gol é confirmado agora (o intervalo cobre o campo)
       eventsRef.current.forEach((event) => {
         if (event.type === 'gol' && !shownRef.current.has(event.id)) handleGoal(event.id, event.team);
@@ -1585,25 +1599,8 @@ function App() {
     goHome();
   }
 
-  if (loading) {
-    return (
-      <div className="loading-screen">
-        <LogoMark size={76} variant="full" />
-        <p>Carregando a federação...</p>
-      </div>
-    );
-  }
-  if (error) {
-    return (
-      <div className="loading-screen">
-        <Shield size={38} color="#f5b800" />
-        <p>{error}</p>
-        <button className="gold-button" onClick={() => void loadData()}>
-          Tentar novamente
-        </button>
-      </div>
-    );
-  }
+  if (loading) return <LoadingScreen />;
+  if (error) return <LoadingScreen error={error} onRetry={() => void loadData()} />;
 
   const opponentTeam = selectedClub ? teams.find((team) => team.id !== selectedClub.id) : undefined;
   const inTournamentMatch = !!room && !!tournament && !!slotOfRoom(tournament, room.id);
@@ -1862,6 +1859,8 @@ function App() {
           canSkip={!room && !spectating}
           bench={userBench}
           workRef={workRef}
+          endHalfRef={endHalfRef}
+          deadBallRef={deadBallRef}
           tactic={matchTactics.user}
           staminaOn={!spectating}
           subsLog={subsLog}
