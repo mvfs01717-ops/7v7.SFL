@@ -6,7 +6,7 @@ const TIPS = [
   'O capitão dá +2 de overall e um bônus para o time inteiro.',
   'Jogador fora de posição perde 5 de overall.',
   'Troque os cansados no intervalo: fôlego baixo rende menos.',
-  'Monte o banco: são até 3 trocas no intervalo.',
+  'Monte o banco: são até 2 trocas no intervalo.',
   'A tática do rival só aparece na apresentação.',
 ];
 
