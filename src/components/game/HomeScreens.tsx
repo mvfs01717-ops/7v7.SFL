@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { stadiumCss } from '@/lib/game/stadiumCss';
-import { ArrowLeft, ArrowRight, CircleUserRound, Database, Menu, Play, Shield, Swords, Trophy, X, Zap } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CircleUserRound, Database, Menu, Play, Shield, Swords, Trophy, Users, X, Zap } from 'lucide-react';
 import { positionNames, type Player, type Team } from '@/lib/game/types';
 import { Badge, Card, LogoMark, SHIELD_CLIP } from '@/components/game/Card';
 
@@ -44,6 +44,7 @@ export function Header({
   onLeaderboard,
   onSquad,
   onProfile,
+  onFriends,
   onLogin,
   loggedIn,
   active,
@@ -55,6 +56,7 @@ export function Header({
   onLeaderboard: () => void;
   onSquad: () => void;
   onProfile: () => void;
+  onFriends: () => void;
   onLogin: () => void;
   loggedIn: boolean;
   active: string;
@@ -66,6 +68,7 @@ export function Header({
   };
   const links: { key: string; label: string; icon: JSX.Element; run: () => void }[] = [
     { key: 'home', label: 'Início', icon: <Play size={16} />, run: onHome },
+    { key: 'friends', label: 'Amigos', icon: <Users size={16} />, run: onFriends },
     { key: 'squad', label: 'Elenco', icon: <Database size={16} />, run: onSquad },
     { key: 'leaderboard', label: 'Classificação', icon: <Trophy size={16} />, run: onLeaderboard },
     { key: 'profile', label: 'Perfil', icon: <CircleUserRound size={16} />, run: onProfile },
@@ -134,7 +137,7 @@ const homeCss = `
   background: linear-gradient(100deg, rgba(255,255,255,.07), rgba(255,255,255,.02)); color: #fff; text-align: left; cursor: pointer; backdrop-filter: blur(6px);
   transition: transform .25s cubic-bezier(.2,.8,.2,1), background .25s, border-color .25s, box-shadow .25s; animation: hmSlide .6s cubic-bezier(.2,.8,.2,1) both; }
 .hm-item:nth-child(2) { animation-delay: .05s; } .hm-item:nth-child(3) { animation-delay: .1s; } .hm-item:nth-child(4) { animation-delay: .15s; }
-.hm-item:nth-child(5) { animation-delay: .2s; } .hm-item:nth-child(6) { animation-delay: .25s; }
+.hm-item:nth-child(5) { animation-delay: .2s; } .hm-item:nth-child(6) { animation-delay: .25s; } .hm-item:nth-child(7) { animation-delay: .3s; }
 .hm-item::before { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0;
   background: linear-gradient(105deg, transparent 30%, rgba(255,226,122,.28) 50%, transparent 70%); transform: translateX(-100%); }
 .hm-item:hover::before, .hm-item.on::before { opacity: 1; animation: hmSweep .9s ease-out both; }
@@ -262,6 +265,8 @@ const homeCss = `
   .hm-item small { display: none; }
   .hm-item.on { transform: none; border-color: #F5B800; box-shadow: 0 0 0 1px #F5B800, 0 8px 22px rgba(245,184,0,.25); background: linear-gradient(180deg, rgba(245,184,0,.32), rgba(245,184,0,.06)); }
   .hm-item:hover { transform: none; }
+  .hm-item:last-child:nth-child(3n + 1) { grid-column: 1 / -1; flex-direction: row; min-height: 64px; gap: 10px; }
+  .hm-item:last-child:nth-child(3n + 1) small { display: none; }
   .hm-item.on svg { color: #F5B800; }
   .hm-badge { position: absolute; top: -7px; left: 50%; right: auto; transform: translateX(-50%); margin: 0; font-size: 9px; padding: 2px 7px; }
   .hm-dot { top: 8px; right: 10px; }
@@ -269,7 +274,7 @@ const homeCss = `
 @media (prefers-reduced-motion: reduce) { .hm *, .hm *::before, .hm-leave { animation: none !important; transition: none !important; } }
 `;
 
-type HomeKey = 'play' | 'multi' | 'tour' | 'squad' | 'rank' | 'profile';
+type HomeKey = 'play' | 'multi' | 'friends' | 'tour' | 'squad' | 'rank' | 'profile';
 
 export function Home({
   isAdmin,
@@ -279,6 +284,9 @@ export function Home({
   onTournament,
   onSquad,
   onProfile,
+  onFriends,
+  friendsOnline = 0,
+  friendsPending = false,
   loggedIn,
   onLogin,
   onLeaderboard,
@@ -293,6 +301,9 @@ export function Home({
   onTournament: () => void;
   onSquad: () => void;
   onProfile: () => void;
+  onFriends: () => void;
+  friendsOnline?: number;
+  friendsPending?: boolean;
   loggedIn: boolean;
   onLogin: () => void;
   onLeaderboard: () => void;
@@ -323,6 +334,10 @@ export function Home({
       run: loggedIn ? onMultiplayer : onLogin, cta: loggedIn ? 'Entrar em partidas' : 'Entrar na conta',
       badge: liveRooms > 0 ? `${liveRooms} AO VIVO` : loggedIn ? undefined : '🔒', dot: liveRooms > 0,
       title: <>FRENTE A<br /><em>FRENTE.</em></>, text: 'Crie uma sala, convide um amigo ou assista às partidas que estão rolando agora.' },
+    { key: 'friends', label: 'Amigos', sub: loggedIn ? 'Convide e assista' : 'Precisa de conta', icon: <Users size={22} />,
+      run: loggedIn ? onFriends : onLogin, cta: loggedIn ? 'Abrir amigos' : 'Entrar na conta',
+      badge: friendsOnline > 0 ? `${friendsOnline} ONLINE` : loggedIn ? undefined : '🔒', dot: friendsOnline > 0 || friendsPending,
+      title: <>JOGUE COM<br /><em>QUEM CURTE.</em></>, text: 'Adicione amigos pelo apelido, veja quem está online, convide para jogar ou assista à partida deles ao vivo.' },
     { key: 'tour', label: 'Torneios', sub: 'Competições e confrontos', icon: <Trophy size={22} />, run: onTournament, cta: 'Ver torneios',
       badge: loggedIn ? undefined : '🔒',
       title: <>RUMO À<br /><em>TAÇA.</em></>, text: 'Participe de competições, acompanhe seus próximos confrontos e dispute o título.' },
