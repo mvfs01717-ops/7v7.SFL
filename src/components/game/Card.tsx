@@ -1,5 +1,5 @@
 import { useEffect, useRef, type CSSProperties } from 'react';
-import { colorForOverall } from '@/lib/game/helpers';
+import { colorForOverall, isFreeAgent } from '@/lib/game/helpers';
 import { positionNames, type Player, type Team } from '@/lib/game/types';
 
 function CardFace({
@@ -78,7 +78,7 @@ function CardFace({
       </div>
       <div className="player-avatar">{player.name.slice(0, 1).toUpperCase()}</div>
       <strong>{player.name}</strong>
-      <small>{player.team?.abbreviation ?? '7V7'}</small>
+      <small>{player.team && isFreeAgent(player.team) ? 'SEM CLUBE' : (player.team?.abbreviation ?? '7V7')}</small>
       <div className="card-alternates">
         {player.alternate_positions.length
           ? player.alternate_positions.join(' · ')
