@@ -1,6 +1,7 @@
 import { ArrowLeft, Users } from 'lucide-react';
 import { type Player, type Team } from '@/lib/game/types';
 import { Card, TeamMark } from '@/components/game/Card';
+import { isFreeAgent } from '@/lib/game/helpers';
 
 export function Squad({ players, teams, onBack }: { players: Player[]; teams: Team[]; onBack: () => void }) {
   return (
@@ -20,7 +21,13 @@ export function Squad({ players, teams, onBack }: { players: Player[]; teams: Te
       {teams.map((team) => (
         <section className="squad-section" key={team.id}>
           <div className="squad-heading">
-            <TeamMark team={team} />
+            {isFreeAgent(team) ? (
+              <div className="team-mark">
+                <span>Jogadores sem clube</span>
+              </div>
+            ) : (
+              <TeamMark team={team} />
+            )}
             <span>{players.filter((player) => player.team_id === team.id).length} cartas</span>
           </div>
           <div className="squad-grid">
