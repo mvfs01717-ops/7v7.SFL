@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { isFreeAgent } from '@/lib/game/helpers';
 import { stadiumCss } from '@/lib/game/stadiumCss';
 import { ArrowLeft, ArrowRight, CircleUserRound, Database, Menu, Play, Shield, Swords, Trophy, X, Zap } from 'lucide-react';
 import { positionNames, type Player, type Team } from '@/lib/game/types';
@@ -509,7 +508,6 @@ const clubCss = `
 .cc-club:hover::before { opacity: 1; } .cc-club:hover::after { transform: translateX(130%); }
 .cc-club > * { position: relative; z-index: 1; }
 .cc-club .cc-badge { transform: scale(1.35); margin: 8px 0 6px; filter: drop-shadow(0 8px 10px rgba(0,0,0,.55)); }
-.cc-fa { font-style: normal; font-size: 10px; font-weight: 900; letter-spacing: 2px; padding: 3px 9px; border-radius: 99px; color: #1a1200; background: linear-gradient(180deg, #ffe27a, #F5B800); }
 .cc-club h3 { margin: 0; font-size: 20px; font-style: italic; text-transform: uppercase; letter-spacing: .5px; line-height: 1.05; }
 .cc-club p { margin: 0; font-size: 10px; letter-spacing: 2px; font-weight: 800; color: #F5B800; opacity: 0; transform: translateY(6px); transition: opacity .25s, transform .25s; }
 .cc-club:hover p { opacity: 1; transform: none; }
@@ -600,8 +598,7 @@ export function ClubChoice({
               <Badge team={team} />
             </span>
             <h3>{team.name}</h3>
-            {isFreeAgent(team) && <em className="cc-fa">SEM TIME</em>}
-            <p>{isFreeAgent(team) ? 'JOGADORES SEM CLUBE ›' : 'REPRESENTAR ›'}</p>
+            <p>REPRESENTAR ›</p>
           </button>
         ))}
       </div>
