@@ -1,5 +1,9 @@
 import { CircleUserRound, Goal, RefreshCw, Shield, SkipForward, Zap } from 'lucide-react';
 import MatchPitch from '@/components/MatchPitch';
+import type { ClipData } from '@/components/game/ReplayPlayer';
+import type { MatchMapData } from '@/lib/game/matchMap';
+import { useCrowd } from '@/components/game/useCrowd';
+import { useWatchers } from '@/lib/friends';
 import PenaltyShootout, { type Shootout } from '@/components/PenaltyShootout';
 import { slotOf } from '@/lib/game/helpers';
 import { type MatchEvent, type MatchStats, type Player, type Position, type Team } from '@/lib/game/types';
@@ -21,6 +25,8 @@ const matchCss = `
 .mt .scoreboard > span { color: #F5B800; font-size: 28px; font-weight: 900; }
 .mt .scoreboard .team-mark span { font-weight: 800; letter-spacing: .5px; }
 .mt .match-meta { letter-spacing: 3px; font-size: 10px; opacity: .65; }
+.mt .match-meta .mt-eye { opacity: 1; color: #F5B800; font-weight: 800; }
+.mt .match-meta .mt-spec { opacity: 1; color: #fff; font-weight: 800; padding: 2px 8px; border-radius: 999px; background: rgba(245,184,0,.22); border: 1px solid rgba(245,184,0,.6); }
 .mt .skip-button { border-radius: 999px; border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.08); color: #fff; padding: 8px 14px; font-weight: 800; letter-spacing: .5px; }
 .mt .skip-button:hover { border-color: #F5B800; color: #F5B800; }
 .mt .match-feed, .mt .match-side { border-radius: 6px 22px 6px 22px; border: 1px solid rgba(245,184,0,.2); position: relative;
@@ -51,6 +57,8 @@ export function MatchScreen({
   events,
   shownGoalIds,
   onGoal,
+  onClip,
+  mapRef,
   onSkip,
   stats,
   penaltyPhase,
@@ -58,6 +66,8 @@ export function MatchScreen({
   canSkip,
   bench,
   workRef,
+  endHalfRef,
+  deadBallRef,
   tactic,
   staminaOn,
   subsLog,
@@ -82,13 +92,17 @@ export function MatchScreen({
   events: MatchEvent[];
   shownGoalIds: number[];
   onGoal: (id: number, side: 'user' | 'bot') => void;
+  onClip?: (eventId: number, clip: ClipData) => void;
+  mapRef?: { current: MatchMapData | null };
   onSkip: () => void;
   stats: MatchStats;
   penaltyPhase: boolean;
   onShootoutFinish: (result: Shootout) => void;
   canSkip: boolean;
   bench: Player[];
-  workRef: { current: { effort: Record<string, number>; slow: Record<string, number> } };
+  workRef: { current: { effort: Record<string, number>; slow: Record<string, number>; stamina?: Record<string, number> } };
+  endHalfRef: { current: boolean };
+  deadBallRef: { current: boolean };
   tactic: Tactic;
   staminaOn: boolean;
   subsLog: { user: string[]; bot: string[] };
@@ -100,6 +114,8 @@ export function MatchScreen({
   chatMessages: ChatMessage[];
   onSendChat: (text: string) => boolean;
 }) {
+  const watchers = useWatchers(net?.roomId, net?.role);
+  const crowd = useCrowd({ club, opponent, events, shownGoalIds, score, minute, pause, active: !penaltyPhase && !penaltyPrep, squads: { user: userTeam, bot: botTeam } });
   // O lance do gol só aparece no feed depois que a bola entrou na animação
   const feed = events.filter((event) => event.type !== 'gol' || shownGoalIds.includes(event.id));
   // Fôlego atual de cada jogador (só quando o fôlego está ligado)
@@ -141,8 +157,9 @@ export function MatchScreen({
           </div>
         </div>
         <div className="match-meta">
-          <span>SIMULAÇÃO 7V7</span>
+          {net?.role === 'spectator' ? <span className="mt-spec">👁 VOCÊ ESTÁ ASSISTINDO</span> : <span>SIMULAÇÃO 7V7</span>}
           <span>90 MINUTOS</span>
+          {watchers > 0 && <span className="mt-eye">👁 {watchers} ASSISTINDO</span>}
         </div>
       </div>
 
@@ -159,6 +176,9 @@ export function MatchScreen({
       ) : (
         <div style={{ position: 'relative', minHeight: pause === 'subs' ? 620 : undefined }}>
           <MatchPitch
+            crowd={crowd}
+            onClip={onClip}
+            mapRef={mapRef}
             club={club}
             opponent={opponent}
             userTeam={userTeam}
@@ -167,6 +187,8 @@ export function MatchScreen({
             onGoal={onGoal}
             restartKey={restartKey}
             workRef={staminaOn ? workRef : undefined}
+            endHalfRef={endHalfRef}
+            deadBallRef={deadBallRef}
           />
           {(pause === 'halftime' || pause === 'break' || pause === 'return') && (
             <HalftimeBreak
