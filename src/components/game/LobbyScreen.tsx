@@ -3,8 +3,7 @@ import { ArrowLeft, RefreshCw, Swords } from 'lucide-react';
 import { type Team } from '@/lib/game/types';
 import { listLiveRooms, lookupRoom, type ChatMessage, type Room } from '@/lib/multiplayer';
 import { ChatBox } from '@/components/game/Chat';
-import { FriendsPanel } from '@/components/game/FriendsPanel';
-import type { FriendRow, FriendsApi } from '@/lib/friends';
+import type { FriendsApi } from '@/lib/friends';
 
 export const lobbyCss = `
 .lobby-page { width: 100%; max-width: 100vw; min-width: 0; box-sizing: border-box; overflow-x: clip; }
@@ -44,11 +43,6 @@ export const lobbyCss = `
 .lobby-error { padding: 10px 14px; border-radius: 10px; border: 1px solid #ff6b6b; background: rgba(255,107,107,.1); color: #ffb3b3; font-size: 14px; text-align: center; }
 
 .lobby-page { position: relative; isolation: isolate; }
-.lobby-page::before { content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none; background:
-  conic-gradient(from 198deg at 14% -8%, transparent 0 7%, rgba(255,246,200,.17) 9% 13%, transparent 15%),
-  conic-gradient(from 162deg at 86% -8%, transparent 0 7%, rgba(255,246,200,.17) 9% 13%, transparent 15%),
-  linear-gradient(0deg, rgba(15,77,43,.5), transparent 28%),
-  radial-gradient(120% 70% at 50% 0, #1b2a44 0, #0a1020 55%, #05070d 100%); }
 .lobby-page .flow-heading h2 { font-style: italic; font-size: clamp(42px, 7vw, 68px); }
 .lobby-page .flow-heading .eyebrow { justify-content: center; letter-spacing: 3px; }
 .lobby-card { position: relative; border-radius: 6px 22px 6px 22px; border-color: rgba(245,184,0,.22);
@@ -233,9 +227,6 @@ export function LobbyScreen({
   const [looking, setLooking] = useState(false);
   const [lookError, setLookError] = useState('');
   const chosenTeam = teamId || teams[0]?.id || '';
-  // Convites: amigos que já receberam o convite desta sala e amigo na fila (sala sendo criada)
-  const [sentIds, setSentIds] = useState<string[]>([]);
-  const [queued, setQueued] = useState<FriendRow | null>(null);
   // Partidas ao vivo (compartilhadas entre "Amigos" e "Assistir ao vivo"); só busca quando a tela de entrada está aberta
   const live = useLiveRooms(!room);
   const friendIds = useMemo(() => new Set((friends?.rows ?? []).filter((row) => row.status === 'accepted').map((row) => row.user_id)), [friends?.rows]);
@@ -255,30 +246,6 @@ export function LobbyScreen({
     setFound(result.room);
     setJoinTeamId('');
   }
-  async function sendInviteTo(friend: FriendRow, target: Room) {
-    if (!friends) return;
-    const ok = await friends.sendInvite(friend.user_id, target.code, target.mode);
-    if (ok) setSentIds((list) => (list.includes(friend.user_id) ? list : [...list, friend.user_id]));
-    else setLookError(`Não foi possível avisar ${friend.nickname}. Passe o código ${target.code} para ele.`);
-  }
-  function inviteFriend(friend: FriendRow) {
-    if (room && myRole === 'host' && room.status === 'waiting') void sendInviteTo(friend, room);
-    else if (!room) {
-      // Cria a sala com o clube e o modo escolhidos e convida assim que ela existir
-      setQueued(friend);
-      onCreate(chosenTeam, roomMode);
-    }
-  }
-  useEffect(() => {
-    if (queued && room && myRole === 'host' && room.status === 'waiting') {
-      void sendInviteTo(queued, room);
-      setQueued(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queued, room?.code, room?.status, myRole]);
-  useEffect(() => {
-    if (!room) setSentIds([]);
-  }, [room]);
   // Convite aceito: procura a sala e deixa o convidado escolher o clube
   useEffect(() => {
     if (!inviteCode || !userId) return;
@@ -462,20 +429,6 @@ export function LobbyScreen({
           </section>
           {(error || lookError) && <div className="lobby-error lobby-full">{lookError || error}</div>}
 
-          {friends && !!userId && (
-            <div className="lobby-full">
-              <FriendsPanel
-                friends={friends}
-                canInvite
-                sentIds={sentIds}
-                onInvite={inviteFriend}
-                hint="Ao convidar, a sala é criada com o clube e o modo escolhidos acima. O amigo recebe o aviso dentro do jogo."
-                liveRooms={live.rooms}
-                onWatch={onWatch}
-              />
-            </div>
-          )}
-
           <div className="lobby-full">
             <LiveMatches teams={teams} onWatch={onWatch} live={live} friendIds={friendIds} />
           </div>
@@ -495,11 +448,6 @@ export function LobbyScreen({
           <button className="outline-button" onClick={onCancel}>
             Cancelar sala
           </button>
-          {friends && !!userId && (
-            <div style={{ marginTop: 20, textAlign: 'left' }}>
-              <FriendsPanel friends={friends} canInvite sentIds={sentIds} onInvite={inviteFriend} />
-            </div>
-          )}
         </div>
       )}
 
