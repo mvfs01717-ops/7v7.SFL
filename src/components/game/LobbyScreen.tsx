@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, RefreshCw, Swords } from 'lucide-react';
 import { type Team } from '@/lib/game/types';
 import { listLiveRooms, lookupRoom, type ChatMessage, type Room } from '@/lib/multiplayer';
 import { ChatBox } from '@/components/game/Chat';
+import { FriendsPanel } from '@/components/game/FriendsPanel';
+import type { FriendRow, FriendsApi } from '@/lib/friends';
 
 export const lobbyCss = `
 .lobby-page { width: 100%; max-width: 100vw; min-width: 0; box-sizing: border-box; overflow-x: clip; }
@@ -91,32 +93,53 @@ export const lobbyCss = `
 }
 `;
 
-export function LiveMatches({ teams, onWatch }: { teams: Team[]; onWatch: (room: Room) => void }) {
+// Lista de partidas rolando agora; atualiza sozinha enquanto `enabled`
+export function useLiveRooms(enabled = true) {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [reloading, setReloading] = useState(false);
   const alive = useRef(true);
-  async function load() {
+  const load = useCallback(async () => {
     const list = await listLiveRooms();
     if (alive.current) {
       setRooms(list);
       setLoaded(true);
     }
-  }
-  async function reload() {
+  }, []);
+  const reload = useCallback(async () => {
     setReloading(true);
     await load();
     if (alive.current) setReloading(false);
-  }
+  }, [load]);
   useEffect(() => {
     alive.current = true;
+    if (!enabled) return undefined;
     void load();
     const timer = window.setInterval(() => void load(), 8000);
     return () => {
       alive.current = false;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [enabled, load]);
+  return { rooms, loaded, reloading, reload };
+}
+
+export function LiveMatches({
+  teams,
+  onWatch,
+  live,
+  friendIds,
+}: {
+  teams: Team[];
+  onWatch: (room: Room) => void;
+  live: ReturnType<typeof useLiveRooms>;
+  // Partidas de amigos aparecem primeiro, com destaque
+  friendIds?: Set<string>;
+}) {
+  const { loaded, reloading } = live;
+  const reload = live.reload;
+  const isFriendRoom = (item: Room) => !!friendIds && (friendIds.has(item.host_id) || (!!item.guest_id && friendIds.has(item.guest_id)));
+  const rooms = [...live.rooms].sort((a, b) => Number(isFriendRoom(b)) - Number(isFriendRoom(a)));
   const abbr = (id: string | null) => teams.find((team) => team.id === id)?.abbreviation ?? '';
   return (
     <section className="lobby-card">
@@ -151,6 +174,7 @@ export function LiveMatches({ teams, onWatch }: { teams: Team[]; onWatch: (room:
             onClick={() => onWatch(item)}
           >
             <span>
+              {isFriendRoom(item) && <b style={{ color: '#4ade80', marginRight: 6 }}>★ AMIGO</b>}
               {item.host_nick} ({abbr(item.host_team_id)}) x {item.guest_nick ?? 'Jogador'} ({abbr(item.guest_team_id)})
             </span>
             <b style={{ color: '#F5B800', fontSize: 12 }}>👁 ASSISTIR</b>
@@ -176,6 +200,9 @@ export function LobbyScreen({
   userId,
   chatMessages,
   onSendChat,
+  friends,
+  inviteCode,
+  onInviteUsed,
 }: {
   teams: Team[];
   room: Room | null;
@@ -191,6 +218,10 @@ export function LobbyScreen({
   userId: string | null;
   chatMessages: ChatMessage[];
   onSendChat: (text: string) => boolean;
+  friends?: FriendsApi;
+  // Código vindo de um convite aceito: a sala é procurada sozinha
+  inviteCode?: string | null;
+  onInviteUsed?: () => void;
 }) {
   const [teamId, setTeamId] = useState('');
   const [roomMode, setRoomMode] = useState<'classic' | 'dice'>('classic');
@@ -202,6 +233,12 @@ export function LobbyScreen({
   const [looking, setLooking] = useState(false);
   const [lookError, setLookError] = useState('');
   const chosenTeam = teamId || teams[0]?.id || '';
+  // Convites: amigos que já receberam o convite desta sala e amigo na fila (sala sendo criada)
+  const [sentIds, setSentIds] = useState<string[]>([]);
+  const [queued, setQueued] = useState<FriendRow | null>(null);
+  // Partidas ao vivo (compartilhadas entre "Amigos" e "Assistir ao vivo"); só busca quando a tela de entrada está aberta
+  const live = useLiveRooms(!room);
+  const friendIds = useMemo(() => new Set((friends?.rows ?? []).filter((row) => row.status === 'accepted').map((row) => row.user_id)), [friends?.rows]);
   const joinTeams = found ? teams.filter((team) => team.id !== found.host_team_id) : [];
   const chosenJoinTeam = joinTeams.some((team) => team.id === joinTeamId) ? joinTeamId : joinTeams[0]?.id || '';
 
@@ -218,6 +255,57 @@ export function LobbyScreen({
     setFound(result.room);
     setJoinTeamId('');
   }
+  async function sendInviteTo(friend: FriendRow, target: Room) {
+    if (!friends) return;
+    const ok = await friends.sendInvite(friend.user_id, target.code, target.mode);
+    if (ok) setSentIds((list) => (list.includes(friend.user_id) ? list : [...list, friend.user_id]));
+    else setLookError(`Não foi possível avisar ${friend.nickname}. Passe o código ${target.code} para ele.`);
+  }
+  function inviteFriend(friend: FriendRow) {
+    if (room && myRole === 'host' && room.status === 'waiting') void sendInviteTo(friend, room);
+    else if (!room) {
+      // Cria a sala com o clube e o modo escolhidos e convida assim que ela existir
+      setQueued(friend);
+      onCreate(chosenTeam, roomMode);
+    }
+  }
+  useEffect(() => {
+    if (queued && room && myRole === 'host' && room.status === 'waiting') {
+      void sendInviteTo(queued, room);
+      setQueued(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queued, room?.code, room?.status, myRole]);
+  useEffect(() => {
+    if (!room) setSentIds([]);
+  }, [room]);
+  // Convite aceito: procura a sala e deixa o convidado escolher o clube
+  useEffect(() => {
+    if (!inviteCode || !userId) return;
+    if (room) {
+      setLookError('Saia da sala atual para aceitar o convite.');
+      onInviteUsed?.();
+      return;
+    }
+    let cancelled = false;
+    setCode(inviteCode);
+    setLooking(true);
+    setLookError('');
+    void lookupRoom(inviteCode, userId).then((result) => {
+      if (cancelled) return;
+      setLooking(false);
+      if (result.error || !result.room) setLookError(result.error ?? 'Essa sala não está mais disponível.');
+      else {
+        setFound(result.room);
+        setJoinTeamId('');
+      }
+      onInviteUsed?.();
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inviteCode, userId]);
   const myReady = room && myRole ? (myRole === 'host' ? room.host_ready : room.guest_ready) : false;
   const rivalName = room && myRole ? (myRole === 'host' ? room.guest_nick : room.host_nick) : null;
 
@@ -374,8 +462,22 @@ export function LobbyScreen({
           </section>
           {(error || lookError) && <div className="lobby-error lobby-full">{lookError || error}</div>}
 
+          {friends && !!userId && (
+            <div className="lobby-full">
+              <FriendsPanel
+                friends={friends}
+                canInvite
+                sentIds={sentIds}
+                onInvite={inviteFriend}
+                hint="Ao convidar, a sala é criada com o clube e o modo escolhidos acima. O amigo recebe o aviso dentro do jogo."
+                liveRooms={live.rooms}
+                onWatch={onWatch}
+              />
+            </div>
+          )}
+
           <div className="lobby-full">
-            <LiveMatches teams={teams} onWatch={onWatch} />
+            <LiveMatches teams={teams} onWatch={onWatch} live={live} friendIds={friendIds} />
           </div>
         </div>
       )}
@@ -393,6 +495,11 @@ export function LobbyScreen({
           <button className="outline-button" onClick={onCancel}>
             Cancelar sala
           </button>
+          {friends && !!userId && (
+            <div style={{ marginTop: 20, textAlign: 'left' }}>
+              <FriendsPanel friends={friends} canInvite sentIds={sentIds} onInvite={inviteFriend} />
+            </div>
+          )}
         </div>
       )}
 
