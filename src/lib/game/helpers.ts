@@ -101,3 +101,8 @@ export function groupAverage(squad: Partial<Record<Position, Player>>, group: Po
   const list = group.map((position) => squad[position]).filter(Boolean) as Player[];
   return list.length ? Math.round(list.reduce((sum, player) => sum + player.overall, 0) / list.length) : 0;
 }
+
+// Time especial "Free Agent": jogadores que não têm clube
+export const FREE_AGENT_NAME = 'Free Agent';
+export const isFreeAgent = (team: { name: string; abbreviation: string } | null | undefined) =>
+  !!team && (team.name.toLowerCase() === 'free agent' || team.abbreviation.toUpperCase() === 'FA');
