@@ -3,7 +3,7 @@ import AdminScreen from '@/components/AdminScreen';
 import { type Shootout } from '@/components/PenaltyShootout';
 import StadiumBackdrop, { type BackdropCamera } from '@/components/game/StadiumBackdrop';
 import { globalCss } from '@/lib/game/globalCss';
-import { HALFTIME_MS, HT_BREAK_MS, HT_RETURN_MS, HT_RETURN_NO_SUBS_MS, LINEUP_REVEAL_MS, MINUTE_MS, PENALTY_PREP_MS, SHOOTOUT_CHANCE, average, forceDrawPlan, getPlayerPositions, pickByRoll, pickShooter, slotOf, type PlanEntry } from '@/lib/game/helpers';
+import { isFreeAgent, HALFTIME_MS, HT_BREAK_MS, HT_RETURN_MS, HT_RETURN_NO_SUBS_MS, LINEUP_REVEAL_MS, MINUTE_MS, PENALTY_PREP_MS, SHOOTOUT_CHANCE, average, forceDrawPlan, getPlayerPositions, pickByRoll, pickShooter, slotOf, type PlanEntry } from '@/lib/game/helpers';
 import { BENCH_SLOTS, emptyStats, positions, slotPositionsOf, type BenchSlot, type DraftSlot, type GoalRecord, type MatchEvent, type MatchStats, type Player, type Position, type Screen, type Team } from '@/lib/game/types';
 import { BENCH_KEYS, SUBS_MAX, SUBS_WINDOW_SEC, autoSubstitutions, encodeSubs, hasBench, subsDecided, subsOf, createRoom, effortLoss, fetchRoom, fitsSlot, generatePlan, isRoomLive, listLiveRooms, joinRoom, openRoomChat, patchRoom, recordResult, reshapeSecondHalf, slowdown, staminaAt, tacticOf, type ChatMessage, type FieldLite, type PlanItem, type Room, type Tactic } from '@/lib/multiplayer';
 import { supabase } from '@/lib/supabase';
@@ -20,7 +20,8 @@ import { LoginModal } from '@/components/game/LoginModal';
 import { MatchScreen } from '@/components/game/MatchScreen';
 import { ResultsScreen } from '@/components/game/ResultsScreen';
 import { InviteToast } from '@/components/game/FriendsPanel';
-import { useFriends } from '@/lib/friends';
+import { useFriends, type FriendRow } from '@/lib/friends';
+import FriendsScreen from '@/components/game/FriendsScreen';
 import type { ClipData } from '@/components/game/ReplayPlayer';
 import type { MatchMapData } from '@/lib/game/matchMap';
 import { RivalReveal, TeamReveal } from '@/components/game/Reveals';
@@ -34,6 +35,8 @@ function App() {
   const baseScreen = useRef<Screen>(initialScreen);
   const clubRef = useRef<Team | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
+  // "Free Agent" não é clube: guarda os jogadores sem time. Fica fora da escolha de clube, do adversário, do lobby e do torneio.
+  const clubs = teams.filter((team) => !isFreeAgent(team));
   const [players, setPlayers] = useState<Player[]>([]);
   const [selectedClub, setSelectedClub] = useState<Team | null>(null);
   clubRef.current = selectedClub;
@@ -322,6 +325,40 @@ function App() {
       return;
     }
     setMpError('');
+    navigate('lobby');
+  }
+  function openFriends() {
+    if (!userId) {
+      setAuthMessage('Entre na sua conta para usar a lista de amigos.');
+      setShowLogin(true);
+      return;
+    }
+    setMpError('');
+    navigate('friends');
+  }
+  // Convidar um amigo: cria a sala com o clube e o modo escolhidos, avisa o amigo e leva você para a sala de espera
+  async function handleInviteFriend(friend: FriendRow, teamId: string, roomMode: 'classic' | 'dice') {
+    if (!userId) return;
+    setMpError('');
+    if (room) {
+      if (myRole === 'host' && room.status === 'waiting') {
+        const sent = await friends.sendInvite(friend.user_id, room.code, room.mode);
+        if (sent) navigate('lobby');
+        else setMpError(`Não foi possível avisar ${friend.nickname}. Passe o código ${room.code} para ele.`);
+      } else setMpError('Saia da sala atual para convidar um amigo.');
+      return;
+    }
+    setMpBusy(true);
+    const result = await createRoom(userId, nickname, teamId, roomMode);
+    if (result.error || !result.room) {
+      setMpBusy(false);
+      setMpError(result.error ?? 'Erro ao criar a sala.');
+      return;
+    }
+    setRoom(result.room);
+    const sent = await friends.sendInvite(friend.user_id, result.room.code, result.room.mode);
+    setMpBusy(false);
+    if (!sent) setMpError(`Não foi possível avisar ${friend.nickname}. Passe o código ${result.room.code} para ele.`);
     navigate('lobby');
   }
   function openTournament() {
@@ -964,7 +1001,7 @@ function App() {
       return picked ? [{ ...picked, slot: position, captain: picked.id === captain }] : [];
     }) as Player[];
     const chosenIds = new Set(chosen.map((player) => player.id));
-    const botClub = teams.find((team) => team.id !== selectedClub?.id);
+    const botClub = clubs.find((team) => team.id !== selectedClub?.id);
     // O bot completa o time com os jogadores que sobraram. Prefere os do clube rival,
     // mas usa qualquer jogador livre se faltar (o draft mistura os dois clubes).
     // O banco escolhido pelo jogador também não pode ser sorteado para o bot
@@ -1278,7 +1315,7 @@ function App() {
     const club =
       side === 'user'
         ? selectedClub?.abbreviation
-        : teams.find((team) => team.id !== selectedClub?.id)?.abbreviation;
+        : clubs.find((team) => team.id !== selectedClub?.id)?.abbreviation;
     // Sorteio de variações da narração. No multiplayer/espectador sai do minuto (igual nos dois lados);
     // no modo solo é aleatório.
     const shared = !!roomRef.current || !!spectating;
@@ -1620,7 +1657,7 @@ function App() {
   if (loading) return <LoadingScreen />;
   if (error) return <LoadingScreen error={error} onRetry={() => void loadData()} />;
 
-  const opponentTeam = selectedClub ? teams.find((team) => team.id !== selectedClub.id) : undefined;
+  const opponentTeam = selectedClub ? clubs.find((team) => team.id !== selectedClub.id) : undefined;
   const inTournamentMatch = !!room && !!tournament && !!slotOfRoom(tournament, room.id);
   // Pênaltis no multiplayer: os dois jogam ao vivo (um bate, o outro defende); espectador só assiste
   const liveNet: { roomId: string; role: 'host' | 'guest' | 'spectator' } | undefined = spectating
@@ -1643,10 +1680,10 @@ function App() {
   }
 
   // Acento do fundo: multiplayer (lobby, torneio, qualquer sala) violeta; jogo contra o bot verde; menus dourado
-  const theme = screen === 'lobby' || screen === 'tournament' || !!room || spectating ? 'mp' : screen === 'draft' || screen === 'match' || screen === 'results' ? 'draft' : 'home';
+  const theme = screen === 'lobby' || screen === 'tournament' || screen === 'friends' || !!room || spectating ? 'mp' : screen === 'draft' || screen === 'match' || screen === 'results' ? 'draft' : 'home';
   // Câmera do fundo do estádio: cada tela olha para um lugar (Home: campo; multiplayer: arquibancada...)
   const camera: BackdropCamera =
-    screen === 'home' ? 'wide' : screen === 'club' ? 'left' : screen === 'lobby' || screen === 'tournament' ? 'stands' : screen === 'leaderboard' || screen === 'profile' || screen === 'squad' ? 'right' : null;
+    screen === 'home' ? 'wide' : screen === 'club' ? 'left' : screen === 'lobby' || screen === 'tournament' ? 'stands' : screen === 'leaderboard' || screen === 'profile' || screen === 'squad' || screen === 'friends' ? 'right' : null;
   return (
     <div className="app-shell" data-theme={theme}>
       <StadiumBackdrop camera={camera} />
@@ -1660,6 +1697,7 @@ function App() {
         onLeaderboard={() => navigate('leaderboard')}
         onSquad={() => navigate('squad')}
         onProfile={() => navigate('profile')}
+        onFriends={openFriends}
         onLogin={() => setShowLogin(true)}
         loggedIn={!!userId}
         active={screen}
@@ -1697,7 +1735,7 @@ function App() {
 
       {screen === 'lobby' && !!userId && (
         <LobbyScreen
-          teams={teams}
+          teams={clubs}
           room={room}
           myRole={myRole}
           busy={mpBusy}
@@ -1722,7 +1760,7 @@ function App() {
 
       {screen === 'tournament' && !!userId && (
         <TournamentScreen
-          teams={teams}
+          teams={clubs}
           userId={userId}
           tournament={tournament}
           mySlot={mySlot}
@@ -1751,6 +1789,9 @@ function App() {
           onTournament={openTournament}
           onSquad={() => navigate('squad')}
           onProfile={() => navigate('profile')}
+          onFriends={openFriends}
+          friendsOnline={friends.rows.filter((row) => row.status === 'accepted' && friends.online.has(row.user_id)).length}
+          friendsPending={friends.rows.some((row) => row.status === 'pending' && row.incoming)}
           loggedIn={!!userId}
           onLogin={() => setShowLogin(true)}
           onLeaderboard={() => navigate('leaderboard')}
@@ -1762,7 +1803,7 @@ function App() {
 
       {screen === 'club' && (
         <ClubChoice
-          teams={teams}
+          teams={clubs}
           mode={mode}
           onMode={setMode}
           onBack={reset}
@@ -1941,6 +1982,17 @@ function App() {
       )}
 
       {screen === 'leaderboard' && <Leaderboard onBack={reset} />}
+      {screen === 'friends' && !!userId && (
+        <FriendsScreen
+          teams={clubs}
+          friends={friends}
+          busy={mpBusy}
+          error={mpError}
+          onBack={reset}
+          onInvite={(friend, teamId, roomMode) => void handleInviteFriend(friend, teamId, roomMode)}
+          onWatch={watchRoom}
+        />
+      )}
       {screen === 'profile' && <ProfileScreen nickname={nickname} userId={userId} onBack={reset} />}
       {screen === 'squad' && <Squad players={players} teams={teams} onBack={reset} />}
       {screen === 'admin' && (
