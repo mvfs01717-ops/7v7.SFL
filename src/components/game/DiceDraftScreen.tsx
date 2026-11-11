@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
-import { getPlayerPositions } from '@/lib/game/helpers';
+import { getPlayerPositions, isFreeAgent } from '@/lib/game/helpers';
 import { positions, type Player, type Position, type Team } from '@/lib/game/types';
 import { Card, TeamMark } from '@/components/game/Card';
 import { DraftPitch } from '@/components/game/TeamSetup';
@@ -176,7 +176,7 @@ export function DiceDraftScreen({
               <span className="eyebrow">{rolled ? 'O DADO SORTEOU' : 'SORTEIE O CLUBE'}</span>
               {rolled ? (
                 <div style={{ marginTop: 6 }}>
-                  <TeamMark team={rolled} />
+                  {isFreeAgent(rolled) ? <div className="team-mark"><span>Jogadores sem clube</span></div> : <TeamMark team={rolled} />}
                 </div>
               ) : (
                 <p style={{ margin: '6px 0 10px', opacity: 0.8 }}>
@@ -212,7 +212,7 @@ export function DiceDraftScreen({
                 <div style={{ marginTop: 10, fontSize: 12, opacity: 0.7, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
                   {legend.map((item) => (
                     <span key={item.team.id}>
-                      {item.faces.join(', ')} → {item.team.abbreviation}
+                      {item.faces.join(', ')} → {isFreeAgent(item.team) ? 'Sem clube' : item.team.abbreviation}
                     </span>
                   ))}
                 </div>
