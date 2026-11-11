@@ -1,10 +1,13 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { BarChart3, Crown, RefreshCw, Zap } from 'lucide-react';
 import { type Shootout } from '@/components/PenaltyShootout';
 import { slotOf } from '@/lib/game/helpers';
 import { type GoalRecord, type MatchEvent, type MatchStats, type Player, type Team } from '@/lib/game/types';
 import { Card, TeamMark } from '@/components/game/Card';
 import { EventIcon } from '@/components/game/MatchScreen';
+import { MatchMapPanel } from '@/components/game/MatchMapPanel';
+import type { MatchMapData } from '@/lib/game/matchMap';
+import { ReplayPlayer, type ClipData } from '@/components/game/ReplayPlayer';
 
 const resultsCss = `
 .rs { position: relative; isolation: isolate; --acc: #F5B800; }
@@ -73,6 +76,8 @@ export function ResultsScreen({
   stats,
   goalLog,
   highlights,
+  clips,
+  matchMap,
   shootout,
   onAgain,
   againLabel,
@@ -87,6 +92,8 @@ export function ResultsScreen({
   stats: MatchStats;
   goalLog: GoalRecord[];
   highlights: MatchEvent[];
+  clips?: Record<number, ClipData>;
+  matchMap?: MatchMapData | null;
   shootout: Shootout | null;
   onAgain: () => void;
   againLabel?: string;
@@ -274,7 +281,8 @@ export function ResultsScreen({
           <RatingList players={botTeam} ratings={ratings.bot} />
         </section>
       </div>
-      <MatchHighlights club={club} opponent={opponent} highlights={highlights} />
+      <MatchHighlights club={club} opponent={opponent} highlights={highlights} clips={clips} />
+      <MatchMapPanel club={club} opponent={opponent} data={matchMap ?? null} />
       {(rematch.left || (rematch.enabled && rematchCount > 0)) && (
         <p style={{ textAlign: 'center', margin: '0 0 10px', fontSize: 14, fontWeight: 700, color: rematch.left ? '#ffb3b3' : '#F5B800' }}>
           {rematch.left
@@ -381,11 +389,41 @@ export function pickHighlights(events: MatchEvent[]): { event: MatchEvent; tag: 
     .map((event) => ({ event, tag: tagOf(event), score: worth(event) }));
 }
 
-export function MatchHighlights({ club, opponent, highlights }: { club: Team; opponent: Team; highlights: MatchEvent[] }) {
+export function MatchHighlights({
+  club,
+  opponent,
+  highlights,
+  clips = {},
+}: {
+  club: Team;
+  opponent: Team;
+  highlights: MatchEvent[];
+  clips?: Record<number, ClipData>;
+}) {
   const items = useMemo(() => pickHighlights(highlights), [highlights]);
+  const playable = useMemo(() => items.filter((item) => clips[item.event.id]), [items, clips]);
+  // Índice do lance que está tocando (null = parado); `all` encadeia os lances em sequência
+  const [current, setCurrent] = useState<number | null>(null);
+  const [all, setAll] = useState(false);
   if (!items.length) return null;
+  const now = current !== null ? playable[current] : null;
+  const clip = now ? clips[now.event.id] : null;
+  const playId = (id: number, chain: boolean) => {
+    const index = playable.findIndex((item) => item.event.id === id);
+    if (index < 0) return;
+    setAll(chain);
+    setCurrent(index);
+  };
+  const next = () => {
+    if (all && current !== null && current + 1 < playable.length) setCurrent(current + 1);
+    else {
+      setAll(false);
+      setCurrent(null);
+    }
+  };
   return (
     <section className="result-panel" style={{ margin: '0 auto 18px', maxWidth: 1100 }}>
+      <style>{highlightsCss}</style>
       <div className="section-title">
         <div>
           <span className="eyebrow">RESUMO DA PARTIDA</span>
@@ -393,26 +431,81 @@ export function MatchHighlights({ club, opponent, highlights }: { club: Team; op
         </div>
         <Zap color="#f5b800" />
       </div>
-      {items.map(({ event, tag }) => (
-        <div
-          key={event.id}
-          className={`event-row ${event.type === 'gol' ? 'goal-event' : ''}`}
-          style={{ alignItems: 'center' }}
-        >
-          <strong>{event.minute}'</strong>
-          <span className={`event-icon ${event.type}`}>
-            <EventIcon type={event.type} />
-          </span>
-          <p>
-            <small style={{ opacity: 0.7 }}>{event.team === 'user' ? club.abbreviation : opponent.abbreviation} · </small>
-            {event.text}
-          </p>
-          <b style={{ whiteSpace: 'nowrap', fontSize: 11 }}>{tag}</b>
+      {playable.length > 0 && (
+        <div className="hl-tv">
+          {clip && now ? (
+            <>
+              <div className="hl-top">
+                <span className="hl-badge">
+                  <i /> {now.event.minute}' · {now.tag}
+                </span>
+                <b>{clip.label}</b>
+                <small>
+                  {current! + 1}/{playable.length}
+                </small>
+              </div>
+              <ReplayPlayer key={`${now.event.id}-${current}`} data={clip} club={club} opponent={opponent} speed={0.8} onEnd={next} />
+              <div className="hl-ctrl">
+                <button type="button" onClick={() => setCurrent((index) => (index !== null && index > 0 ? index - 1 : index))} disabled={current === 0}>
+                  ◀ Anterior
+                </button>
+                <button type="button" onClick={() => { setAll(false); setCurrent(null); }}>
+                  ■ Parar
+                </button>
+                <button type="button" onClick={next}>
+                  Próximo ▶
+                </button>
+              </div>
+            </>
+          ) : (
+            <button type="button" className="hl-start cta-slant" onClick={() => playId(playable[0].event.id, true)}>
+              ▶ Assistir melhores momentos
+              <small>{playable.length} lances em câmera lenta</small>
+            </button>
+          )}
         </div>
-      ))}
+      )}
+      {items.map(({ event, tag }) => {
+        const has = !!clips[event.id];
+        const live = now?.event.id === event.id;
+        return (
+          <div
+            key={event.id}
+            className={`event-row ${event.type === 'gol' ? 'goal-event' : ''} ${has ? 'hl-row' : ''} ${live ? 'hl-live' : ''}`}
+            style={{ alignItems: 'center', cursor: has ? 'pointer' : undefined }}
+            onClick={has ? () => playId(event.id, false) : undefined}
+          >
+            <strong>{event.minute}'</strong>
+            <span className={`event-icon ${event.type}`}>
+              <EventIcon type={event.type} />
+            </span>
+            <p>
+              <small style={{ opacity: 0.7 }}>{event.team === 'user' ? club.abbreviation : opponent.abbreviation} · </small>
+              {event.text}
+            </p>
+            <b style={{ whiteSpace: 'nowrap', fontSize: 11 }}>{has ? '▶ ' : ''}{tag}</b>
+          </div>
+        );
+      })}
     </section>
   );
 }
+
+const highlightsCss = `
+.hl-tv { margin: 4px 0 14px; border-radius: 14px; overflow: hidden; border: 2px solid #F5B800; background: #000; max-width: 760px; margin-left: auto; margin-right: auto; box-shadow: 0 16px 50px rgba(0,0,0,.6), 0 0 30px rgba(245,184,0,.25); }
+.hl-top { display: flex; align-items: center; gap: 10px; padding: 6px 12px; background: linear-gradient(90deg, rgba(0,0,0,.95), rgba(25,18,0,.9)); color: #fff; font-size: 12px; }
+.hl-top b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hl-badge { display: inline-flex; align-items: center; gap: 6px; font-family: 'Bebas Neue', sans-serif; font-size: 16px; letter-spacing: .1em; color: #F5B800; white-space: nowrap; }
+.hl-badge i { width: 8px; height: 8px; border-radius: 50%; background: #ef4444; animation: hlRec 1s steps(2) infinite; }
+.hl-ctrl { display: flex; gap: 8px; justify-content: center; padding: 8px; background: rgba(0,0,0,.85); }
+.hl-ctrl button { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.18); color: #fff; border-radius: 99px; padding: 6px 14px; font-size: 12px; font-weight: 700; cursor: pointer; }
+.hl-ctrl button:disabled { opacity: .35; cursor: default; }
+.hl-start { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 100%; border: 0; padding: 22px 12px; font-family: 'Bebas Neue', sans-serif; font-size: 26px; letter-spacing: .08em; cursor: pointer; border-radius: 0; }
+.hl-start small { font-family: inherit; font-size: 12px; letter-spacing: .06em; opacity: .75; }
+.hl-row:hover { background: rgba(245,184,0,.08); }
+.hl-live { background: rgba(245,184,0,.16) !important; box-shadow: inset 3px 0 0 #F5B800; }
+@keyframes hlRec { 50% { opacity: .15; } }
+`;
 
 export type PlayerRating = { rating: number; goals: number; assists: number };
 
