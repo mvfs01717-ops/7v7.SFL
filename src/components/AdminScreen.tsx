@@ -4,6 +4,7 @@ import {
   ArrowLeft, Check, Download, Edit3, Plus, Search, ShieldAlert, Trash2, Upload, Users, X,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { isFreeAgent } from '@/lib/game/helpers';
 
 type Position = 'GK' | 'LB' | 'RB' | 'CM' | 'LF' | 'RF' | 'CF';
 type Team = {
@@ -274,6 +275,10 @@ export default function AdminScreen({
   }
 
   async function removeTeam(item: Team) {
+    if (isFreeAgent(item)) {
+      say('O time Free Agent é fixo (jogadores sem time) e não pode ser excluído.', true);
+      return;
+    }
     const count = players.filter((player) => player.team_id === item.id).length;
     const warn = count ? ` Ele tem ${count} jogadores cadastrados.` : '';
     if (!window.confirm(`Excluir o time ${item.name}?${warn}`)) return;
@@ -337,7 +342,10 @@ export default function AdminScreen({
       const alts = iAlt >= 0 ? (cells[iAlt] ?? '').split(/[|;/ ]+/).map((v) => v.trim().toUpperCase()).filter(Boolean) : [];
       const teamKey = (cells[iTeam] ?? '').trim().toLowerCase();
       const found = teams.find(
-        (item) => item.abbreviation.toLowerCase() === teamKey || item.name.toLowerCase() === teamKey,
+        (item) =>
+          item.abbreviation.toLowerCase() === teamKey ||
+          item.name.toLowerCase() === teamKey ||
+          (isFreeAgent(item) && ['free agent', 'free agents', 'fa', 'sem time', 'sem clube', 'agente livre'].includes(teamKey)),
       );
       let why = '';
       if (!name) why = 'sem nome';
@@ -429,7 +437,7 @@ export default function AdminScreen({
                 <button onClick={() => setTeamDraft({ ...item })}>
                   <Edit3 size={14} />
                 </button>
-                <button onClick={() => void removeTeam(item)}>
+                <button onClick={() => void removeTeam(item)} disabled={isFreeAgent(item)} title={isFreeAgent(item) ? 'Time fixo' : 'Excluir'}>
                   <Trash2 size={14} />
                 </button>
               </span>
@@ -905,7 +913,7 @@ function PlayerForm({
             >
               {teams.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.name}
+                  {isFreeAgent(item) ? 'Free Agent (sem time)' : item.name}
                 </option>
               ))}
             </select>
