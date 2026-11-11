@@ -1,6 +1,6 @@
 export type Position = 'GK' | 'LB' | 'RB' | 'CM' | 'LF' | 'RF' | 'CF';
 
-export type Screen = 'home' | 'club' | 'draft' | 'match' | 'results' | 'leaderboard' | 'squad' | 'admin' | 'lobby' | 'tournament' | 'profile';
+export type Screen = 'home' | 'club' | 'draft' | 'match' | 'results' | 'leaderboard' | 'squad' | 'admin' | 'lobby' | 'tournament' | 'profile' | 'friends';
 
 export type Team = { id: string; name: string; abbreviation: string; primary_color: string; secondary_color: string };
 
