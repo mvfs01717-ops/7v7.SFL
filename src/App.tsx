@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AdminScreen from '@/components/AdminScreen';
 import { type Shootout } from '@/components/PenaltyShootout';
+import StadiumBackdrop, { type BackdropCamera } from '@/components/game/StadiumBackdrop';
 import { globalCss } from '@/lib/game/globalCss';
 import { HALFTIME_MS, HT_BREAK_MS, HT_RETURN_MS, HT_RETURN_NO_SUBS_MS, LINEUP_REVEAL_MS, MINUTE_MS, PENALTY_PREP_MS, SHOOTOUT_CHANCE, average, forceDrawPlan, getPlayerPositions, pickByRoll, pickShooter, slotOf, type PlanEntry } from '@/lib/game/helpers';
 import { BENCH_SLOTS, emptyStats, positions, slotPositionsOf, type BenchSlot, type DraftSlot, type GoalRecord, type MatchEvent, type MatchStats, type Player, type Position, type Screen, type Team } from '@/lib/game/types';
@@ -18,6 +19,10 @@ import { LobbyScreen } from '@/components/game/LobbyScreen';
 import { LoginModal } from '@/components/game/LoginModal';
 import { MatchScreen } from '@/components/game/MatchScreen';
 import { ResultsScreen } from '@/components/game/ResultsScreen';
+import { InviteToast } from '@/components/game/FriendsPanel';
+import { useFriends } from '@/lib/friends';
+import type { ClipData } from '@/components/game/ReplayPlayer';
+import type { MatchMapData } from '@/lib/game/matchMap';
 import { RivalReveal, TeamReveal } from '@/components/game/Reveals';
 import { Squad } from '@/components/game/SquadScreen';
 import { BenchPicker, PositionEditor, TacticPicker } from '@/components/game/TeamSetup';
@@ -42,6 +47,7 @@ function App() {
   // Animação com o overall de ataque e defesa do time, mostrada quando o time fica pronto
   const [reveal, setReveal] = useState<{ squad: Partial<Record<Position, Player>>; bench: Player[]; tactic: Tactic; next: () => void } | null>(null);
   // Animação da escalação do rival, mostrada antes de a partida começar
+  const matchMapRef = useRef<MatchMapData | null>(null);
   const [lineupReveal, setLineupReveal] = useState<{ squad: Player[]; bench?: Player[]; team?: Team; name?: string; tactic?: Tactic } | null>(null);
   // Escolha da tática depois do draft: `next` continua o fluxo com a tática escolhida
   // Escolha do banco de reservas (só contra o bot): candidatos sorteados entre quem sobrou, e a escolha feita
@@ -65,12 +71,14 @@ function App() {
   const [leftBot, setLeftBot] = useState<Player[]>([]);
   const [subsLog, setSubsLog] = useState<{ user: string[]; bot: string[] }>({ user: [], bot: [] });
   // O campo soma o esforço de cada jogador (`effort`) e lê o quanto cada um está lento por cansaço (`slow`)
-  const workRef = useRef<{ effort: Record<string, number>; slow: Record<string, number> }>({ effort: {}, slow: {} });
+  const workRef = useRef<{ effort: Record<string, number>; slow: Record<string, number>; stamina?: Record<string, number> }>({ effort: {}, slow: {} });
   const [score, setScore] = useState({ user: 0, bot: 0 });
   const [stats, setStats] = useState<MatchStats>(emptyStats);
   const [goalLog, setGoalLog] = useState<GoalRecord[]>([]);
   // Todos os lances da partida (menos posse de bola), para o resumo "Melhores momentos" da tela final
   const [highlights, setHighlights] = useState<MatchEvent[]>([]);
+  const [clips, setClips] = useState<Record<number, ClipData>>({});
+  const handleClip = useCallback((eventId: number, clip: ClipData) => setClips((current) => ({ ...current, [eventId]: clip })), []);
   const [shootout, setShootout] = useState<Shootout | null>(null);
   // Botão de teste: força a próxima partida contra o bot a terminar empatada (vai para os pênaltis)
   const [forceShootout, setForceShootout] = useState(false);
@@ -86,6 +94,9 @@ function App() {
   const [authMessage, setAuthMessage] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
+  const friends = useFriends(userId, nickname);
+  // Convite aceito: a tela do multiplayer procura a sala sozinha
+  const [inviteCode, setInviteCode] = useState<string | null>(null);
   // Multiplayer
   const [room, setRoom] = useState<Room | null>(null);
   const [mpBusy, setMpBusy] = useState(false);
@@ -1033,6 +1044,7 @@ function App() {
     setSubsLog({ user: [], bot: [] });
     workRef.current = { effort: {}, slow: {} };
     setLineupReveal(rivalInfo ? { squad: botPlayers, bench: extras?.botBench, ...rivalInfo } : null);
+    matchMapRef.current = null;
     setUserTeam(chosen);
     setBotTeam(botPlayers);
     setMinute(0);
@@ -1047,6 +1059,7 @@ function App() {
     setStats(emptyStats);
     setGoalLog([]);
     setHighlights([]);
+    setClips({});
     setShootout(null);
     setPenaltyPhase(false);
     setShownScore({ user: 0, bot: 0 });
@@ -1127,6 +1140,7 @@ function App() {
   // Cansaço (só contra o bot): jogador exausto fica mais lento no campo
   if (!spectating && screen === 'match') {
     const slowMap: Record<string, number> = {};
+    const staminaMap: Record<string, number> = {};
     (['user', 'bot'] as const).forEach((side) => {
       (side === 'user' ? userTeam : botTeam).forEach((player) => {
         const key = `${side}-${slotOf(player)}`;
@@ -1138,9 +1152,11 @@ function App() {
           (player.carried ?? 0) + effortLoss(workRef.current.effort[key] ?? 0),
         );
         slowMap[key] = slowdown(stamina);
+        staminaMap[key] = stamina;
       });
     });
     workRef.current.slow = slowMap;
+    workRef.current.stamina = staminaMap;
   }
   const penaltyPrep =
     screen === 'match' &&
@@ -1626,8 +1642,14 @@ function App() {
     navigate(tournamentRef.current ? 'tournament' : 'lobby', true);
   }
 
+  // Acento do fundo: multiplayer (lobby, torneio, qualquer sala) violeta; jogo contra o bot verde; menus dourado
+  const theme = screen === 'lobby' || screen === 'tournament' || !!room || spectating ? 'mp' : screen === 'draft' || screen === 'match' || screen === 'results' ? 'draft' : 'home';
+  // Câmera do fundo do estádio: cada tela olha para um lugar (Home: campo; multiplayer: arquibancada...)
+  const camera: BackdropCamera =
+    screen === 'home' ? 'wide' : screen === 'club' ? 'left' : screen === 'lobby' || screen === 'tournament' ? 'stands' : screen === 'leaderboard' || screen === 'profile' || screen === 'squad' ? 'right' : null;
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-theme={theme}>
+      <StadiumBackdrop camera={camera} />
       <style>{globalCss}</style>
       <style>{cardCss}</style>
       <Header
@@ -1692,6 +1714,9 @@ function App() {
           userId={userId}
           chatMessages={chatMessages}
           onSendChat={sendChat}
+          friends={friends}
+          inviteCode={inviteCode}
+          onInviteUsed={() => setInviteCode(null)}
         />
       )}
 
@@ -1854,6 +1879,8 @@ function App() {
           events={events}
           shownGoalIds={shownGoalIds}
           onGoal={handleGoal}
+          onClip={handleClip}
+          mapRef={matchMapRef}
           onSkip={skipMatch}
           stats={stats}
           penaltyPhase={penaltyPhase}
@@ -1886,6 +1913,8 @@ function App() {
           stats={stats}
           goalLog={goalLog}
           highlights={highlights}
+          clips={clips}
+          matchMap={matchMapRef.current}
           shootout={shootout}
           againLabel={inTournamentMatch ? 'Voltar ao torneio' : undefined}
           onAgain={() => {
@@ -1916,6 +1945,18 @@ function App() {
       {screen === 'squad' && <Squad players={players} teams={teams} onBack={reset} />}
       {screen === 'admin' && (
         <AdminScreen players={players} teams={teams} onBack={reset} onReload={loadData} />
+      )}
+
+      {friends.invite && !!userId && screen !== 'match' && screen !== 'draft' && (
+        <InviteToast
+          invite={friends.invite}
+          onDecline={friends.dismissInvite}
+          onAccept={() => {
+            setInviteCode(friends.invite?.code ?? null);
+            friends.dismissInvite();
+            navigate('lobby');
+          }}
+        />
       )}
 
       {showLogin && (
