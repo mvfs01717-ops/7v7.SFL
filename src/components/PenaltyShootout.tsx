@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { stadiumCss } from '@/lib/game/stadiumCss';
 import { fetchRoom, patchRoom, type NetChoice, type NetKick } from '@/lib/multiplayer';
 
 // Disputa de pênaltis interativa (estilo FIFA):
@@ -41,6 +42,47 @@ const NET_MS = 12000; // tempo que cada jogador tem para escolher
 const NET_AUTO_MS = 19000; // o anfitrião escolhe pelo adversário que sumiu depois desse tempo
 
 // Cena em um SVG 400 x 270
+const pkCss = `
+.pk { padding: 20px 18px 18px; margin: 0 0 16px; display: grid; gap: 14px; overflow: hidden; }
+.pk-head { text-align: center; }
+.pk-head .eyebrow { display: inline-block; font-size: 11px; letter-spacing: 4px; color: #F5B800; padding: 4px 12px; border: 1px solid rgba(245,184,0,.4); border-radius: 99px; background: rgba(245,184,0,.08); }
+.pk-head h2 { margin: 8px 0 0; font-size: clamp(30px, 6vw, 46px); line-height: 1; font-style: italic; letter-spacing: .06em; }
+.pk-head h2 em { color: #F5B800; font-style: italic; text-shadow: 0 0 24px rgba(245,184,0,.45); }
+.pk-board { display: grid; gap: 8px; padding: 10px 12px; border-radius: 12px; background: rgba(0,0,0,.38); border: 1px solid rgba(255,255,255,.08); }
+.pk-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 6px 8px; border-radius: 8px; border-left: 4px solid var(--c, #F5B800); transition: background .3s, box-shadow .3s; }
+.pk-row.on { background: linear-gradient(90deg, rgba(245,184,0,.16), transparent); box-shadow: inset 0 0 0 1px rgba(245,184,0,.25); }
+.pk-abbr { font-family: 'Bebas Neue', sans-serif; font-size: 24px; letter-spacing: .08em; min-width: 52px; }
+.pk-dots { display: flex; gap: 6px; flex-wrap: wrap; }
+.pk-dot { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 900; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12); color: rgba(255,255,255,.3); }
+.pk-dot.g { background: radial-gradient(circle at 35% 30%, #4ade80, #16a34a); color: #04210f; border-color: #86efac; box-shadow: 0 0 12px rgba(34,197,94,.55); }
+.pk-dot.m { background: radial-gradient(circle at 35% 30%, #f87171, #b91c1c); color: #2a0505; border-color: #fca5a5; }
+.pk-dot.n { border-color: rgba(245,184,0,.7); animation: pkPulse 1s ease-in-out infinite; }
+.pk-score { font-family: 'Bebas Neue', sans-serif; font-size: 40px; line-height: 1; min-width: 34px; text-align: right; font-style: italic; }
+.pk-msg { margin: 0; text-align: center; font-weight: 800; font-size: 17px; letter-spacing: .02em; padding: 8px 14px; border-radius: 99px; background: rgba(255,255,255,.06); justify-self: center; }
+.pk-msg.me { color: #1a1200; background: linear-gradient(180deg, #ffe27a, #F5B800); box-shadow: 0 0 24px rgba(245,184,0,.35); }
+.pk-msg.def { color: #fff; background: linear-gradient(180deg, #3b82f6, #1d4ed8); box-shadow: 0 0 24px rgba(59,130,246,.35); }
+.pk-stage { position: relative; max-width: 760px; width: 100%; margin: 0 auto; border-radius: 16px; overflow: hidden; border: 1px solid rgba(245,184,0,.3); box-shadow: 0 24px 60px rgba(0,0,0,.55), 0 0 0 4px rgba(0,0,0,.25); }
+.pk-stage svg { display: block; width: 100%; height: auto; }
+.pk-flash { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; font-family: 'Bebas Neue','Oswald',sans-serif; font-style: italic; font-size: clamp(40px, 11vw, 78px); letter-spacing: 4px; text-align: center; text-shadow: 0 4px 24px rgba(0,0,0,.9); animation: pkPop .55s cubic-bezier(.2,1.4,.4,1) both; }
+.pk-flash.good { color: #4ade80; text-shadow: 0 0 30px rgba(34,197,94,.8), 0 4px 18px rgba(0,0,0,.9); }
+.pk-flash.bad { color: #f87171; }
+.pk-power { display: grid; gap: 12px; justify-items: center; }
+.pk-bar { position: relative; width: 100%; max-width: 760px; height: 26px; border-radius: 13px; overflow: hidden; border: 2px solid rgba(255,255,255,.25); box-shadow: 0 0 0 4px rgba(0,0,0,.35), inset 0 2px 6px rgba(0,0,0,.5);
+  background: linear-gradient(90deg,#ef4444 0 35%,#facc15 35% 62%,#22c55e 62% 92%,#ef4444 92% 100%); }
+.pk-bar::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(255,255,255,.35), transparent 55%); pointer-events: none; }
+.pk-cursor { position: absolute; top: -2px; bottom: -2px; left: 0; width: 6px; margin-left: -3px; background: #fff; border-radius: 3px; box-shadow: 0 0 12px #fff, 0 0 4px #000; z-index: 2; }
+.pk-hint { margin: 0; text-align: center; font-size: 14px; color: rgba(255,255,255,.75); }
+.pk-timer { margin: 0; justify-self: center; font-family: 'Bebas Neue',sans-serif; font-size: 26px; letter-spacing: .1em; padding: 2px 16px; border-radius: 99px; background: rgba(0,0,0,.4); border: 1px solid currentColor; }
+.pk-btn { padding: 14px 40px; font-family: 'Bebas Neue',sans-serif; font-size: 22px; cursor: pointer; touch-action: manipulation; }
+.pk-ghost { background: transparent; color: rgba(255,255,255,.8); border: 1px solid rgba(255,255,255,.25); border-radius: 99px; padding: 9px 22px; cursor: pointer; font-size: 14px; }
+.pk-ghost:hover { border-color: #F5B800; color: #F5B800; }
+.pk-end { display: flex; justify-content: center; }
+.pk-gone { display: grid; gap: 8px; justify-items: center; color: #f87171; font-weight: 700; }
+@keyframes pkPulse { 50% { box-shadow: 0 0 0 4px rgba(245,184,0,.25); } }
+@keyframes pkPop { 0% { transform: scale(.4); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+@media (max-width: 600px) { .pk { padding: 14px 10px; } .pk-dot { width: 22px; height: 22px; font-size: 11px; } .pk-score { font-size: 32px; } .pk-abbr { font-size: 20px; min-width: 42px; } }
+`;
+
 const VW = 400;
 const VH = 270;
 const GL = 70; // trave esquerda
@@ -610,33 +652,22 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
   const slots = Math.max(5, Math.ceil(kicks.length / 2));
   const mark = (side: Side, index: number) => {
     const kick = kicks.filter((item) => item.side === side)[index];
+    const isNext = !kick && phase !== 'done' && turn === side && kicks.filter((item) => item.side === side).length === index;
     return (
       <span
         key={index}
         title={kick ? nameOf(kick) : ''}
-        style={{
-          width: 28,
-          height: 28,
-          borderRadius: '50%',
-          display: 'grid',
-          placeItems: 'center',
-          fontSize: 14,
-          fontWeight: 800,
-          background: !kick ? 'rgba(255,255,255,.06)' : kick.scored ? '#22c55e' : '#ef4444',
-          color: kick ? '#0B1016' : 'rgba(255,255,255,.35)',
-        }}
+        className={`pk-dot ${kick ? (kick.scored ? 'g' : 'm') : ''} ${isNext ? 'n' : ''}`}
       >
         {!kick ? '•' : kick.scored ? '✓' : '✕'}
       </span>
     );
   };
   const row = (team: PenaltyTeam, side: Side) => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-      <b style={{ minWidth: 46 }}>{team.abbreviation}</b>
-      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', flex: 1 }}>
-        {Array.from({ length: slots }).map((_, index) => mark(side, index))}
-      </div>
-      <strong style={{ fontSize: 26, minWidth: 26, textAlign: 'right' }}>{st.goals[side]}</strong>
+    <div className={`pk-row ${phase !== 'done' && turn === side ? 'on' : ''}`} style={{ ['--c' as string]: team.primary_color }}>
+      <b className="pk-abbr">{team.abbreviation}</b>
+      <div className="pk-dots">{Array.from({ length: slots }).map((_, index) => mark(side, index))}</div>
+      <strong className="pk-score">{st.goals[side]}</strong>
     </div>
   );
 
@@ -665,33 +696,29 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
               ? 'Você está assistindo a disputa.'
               : '';
 
+  const myTurnToKick = !spectator && turn === 'user' && phase !== 'done';
+  const keeperTurn = !spectator && turn !== 'user' && phase !== 'done';
   return (
-    <section
-      style={{
-        margin: '0 0 16px',
-        padding: '16px 14px',
-        borderRadius: 14,
-        border: '1px solid rgba(245,184,0,.5)',
-        background: 'rgba(0,0,0,.35)',
-        display: 'grid',
-        gap: 12,
-      }}
-    >
-      <div style={{ textAlign: 'center' }}>
+    <section className="pk glass-card">
+      <style>{stadiumCss}</style>
+      <style>{pkCss}</style>
+      <div className="pk-head">
         <span className="eyebrow">EMPATE NO TEMPO NORMAL</span>
-        <h2 style={{ margin: '4px 0 0' }}>
+        <h2>
           DISPUTA DE <em>PÊNALTIS</em>
         </h2>
       </div>
-      {row(club, 'user')}
-      {row(opponent, 'bot')}
-      <p style={{ margin: 0, textAlign: 'center', fontWeight: 700 }}>{headline}</p>
+      <div className="pk-board">
+        {row(club, 'user')}
+        {row(opponent, 'bot')}
+      </div>
+      <p className={`pk-msg ${myTurnToKick ? 'me' : keeperTurn ? 'def' : ''}`}>{headline}</p>
 
-      <div style={{ position: 'relative', maxWidth: 720, width: '100%', margin: '0 auto' }}>
+      <div className="pk-stage">
         <svg
           ref={svgRef}
           viewBox={`0 0 ${VW} ${VH}`}
-          style={{ display: 'block', width: '100%', height: 'auto', borderRadius: 12, cursor: phase === 'aim' ? 'crosshair' : 'default' }}
+          style={{ cursor: phase === 'aim' ? 'crosshair' : 'default', touchAction: 'manipulation' }}
           role="img"
           aria-label="Gol da cobrança de pênalti"
           onPointerMove={(event) => onScenePointer(event, false)}
@@ -699,69 +726,99 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
         >
           <defs>
             <linearGradient id="penSky" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor="#060b14" />
-              <stop offset="1" stopColor="#16243a" />
+              <stop offset="0" stopColor="#03060d" />
+              <stop offset="1" stopColor="#1a2a46" />
             </linearGradient>
             <linearGradient id="penGrass" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor="#14532d" />
-              <stop offset="1" stopColor="#1f7a3f" />
+              <stop offset="0" stopColor="#0f4a28" />
+              <stop offset="1" stopColor="#23904a" />
             </linearGradient>
+            <linearGradient id="penPost" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stopColor="#c9ccd1" />
+              <stop offset=".5" stopColor="#ffffff" />
+              <stop offset="1" stopColor="#b4b8be" />
+            </linearGradient>
+            <radialGradient id="penLight" cx=".5" cy=".5" r=".5">
+              <stop offset="0" stopColor="rgba(255,246,200,.55)" />
+              <stop offset="1" stopColor="rgba(255,246,200,0)" />
+            </radialGradient>
+            <radialGradient id="penSpot" cx=".5" cy=".55" r=".6">
+              <stop offset="0" stopColor="rgba(255,255,255,.18)" />
+              <stop offset="1" stopColor="rgba(255,255,255,0)" />
+            </radialGradient>
+            <radialGradient id="penVig" cx=".5" cy=".5" r=".75">
+              <stop offset=".6" stopColor="rgba(0,0,0,0)" />
+              <stop offset="1" stopColor="rgba(0,0,0,.55)" />
+            </radialGradient>
             <pattern id="penNet" width="8" height="8" patternUnits="userSpaceOnUse">
-              <path d="M8 0H0V8" stroke="rgba(255,255,255,.3)" strokeWidth="0.8" fill="none" />
+              <path d="M8 0H0V8" stroke="rgba(255,255,255,.34)" strokeWidth="0.8" fill="none" />
             </pattern>
             <pattern id="penCrowd" width="10" height="9" patternUnits="userSpaceOnUse">
-              <circle cx="3" cy="3" r="2" fill="rgba(245,184,0,.35)" />
-              <circle cx="8" cy="6" r="2" fill="rgba(255,255,255,.22)" />
+              <circle cx="3" cy="3" r="2" fill="rgba(245,184,0,.32)" />
+              <circle cx="8" cy="6" r="2" fill="rgba(255,255,255,.2)" />
+              <circle cx="6" cy="1" r="1.2" fill="rgba(59,130,246,.3)" />
             </pattern>
           </defs>
           <rect width={VW} height={GB} fill="url(#penSky)" />
-          <rect width={VW} height={GT - 8} fill="url(#penCrowd)" opacity="0.7" />
+          <rect width={VW} height={GT - 8} fill="url(#penCrowd)" opacity="0.75" />
+          <rect y={GT - 10} width={VW} height={4} fill="rgba(0,0,0,.45)" />
+          <circle cx="40" cy="6" r="60" fill="url(#penLight)" />
+          <circle cx="360" cy="6" r="60" fill="url(#penLight)" />
           <rect y={GB} width={VW} height={VH - GB} fill="url(#penGrass)" />
-          {[0, 1, 2, 3].map((i) => (
-            <rect key={i} y={GB + i * 25} width={VW} height={12} fill="rgba(0,0,0,.08)" />
+          {[0, 1, 2, 3, 4].map((i) => (
+            <rect key={i} y={GB + i * 21} width={VW} height={10} fill="rgba(0,0,0,.09)" />
           ))}
-          <g stroke="rgba(255,255,255,.55)" strokeWidth="1.6" fill="none">
+          <g stroke="rgba(255,255,255,.6)" strokeWidth="1.6" fill="none">
             <line x1="0" y1={GB} x2={VW} y2={GB} />
             <line x1="46" y1={GB} x2="8" y2={VH} />
             <line x1="354" y1={GB} x2="392" y2={VH} />
             <line x1="29" y1="214" x2="371" y2="214" />
+            <path d="M150 214 A52 36 0 0 0 250 214" opacity=".55" />
           </g>
+          <ellipse cx={SPOT.x} cy="215" rx="150" ry="55" fill="url(#penSpot)" />
           <circle cx={SPOT.x} cy={SPOT.y} r="2.5" fill="#fff" />
 
-          <rect x={GL} y={GT} width={GW} height={GH} fill="rgba(10,16,26,.55)" />
+          <rect x={GL} y={GT} width={GW} height={GH} fill="rgba(6,10,18,.62)" />
           <rect x={GL} y={GT} width={GW} height={GH} fill="url(#penNet)" />
           <rect ref={netRef} x={GL} y={GT} width={GW} height={GH} fill="#ffffff" style={{ opacity: 0, transition: 'opacity .4s' }} />
 
           <g ref={keeperRef} transform={`translate(${IDLE.x} ${IDLE.y})`}>
-            <line x1="-8" y1="-16" x2="-21" y2="-30" stroke="#22c55e" strokeWidth="5" strokeLinecap="round" />
-            <line x1="8" y1="-16" x2="21" y2="-30" stroke="#22c55e" strokeWidth="5" strokeLinecap="round" />
-            <circle cx="-21" cy="-31" r="4" fill="#ffffff" />
-            <circle cx="21" cy="-31" r="4" fill="#ffffff" />
-            <rect x="-7" y="2" width="5" height="20" rx="2" fill="#334155" />
-            <rect x="2" y="2" width="5" height="20" rx="2" fill="#334155" />
+            <ellipse cy="24" rx="16" ry="3" fill="rgba(0,0,0,.35)" />
+            <line x1="-8" y1="-16" x2="-21" y2="-30" stroke="#16a34a" strokeWidth="5" strokeLinecap="round" />
+            <line x1="8" y1="-16" x2="21" y2="-30" stroke="#16a34a" strokeWidth="5" strokeLinecap="round" />
+            <circle cx="-21" cy="-31" r="4.5" fill="#fde047" stroke="#a16207" strokeWidth="1" />
+            <circle cx="21" cy="-31" r="4.5" fill="#fde047" stroke="#a16207" strokeWidth="1" />
+            <rect x="-7" y="2" width="5" height="20" rx="2" fill="#1e293b" />
+            <rect x="2" y="2" width="5" height="20" rx="2" fill="#1e293b" />
             <rect x="-9" y="-22" width="18" height="26" rx="4" fill="#22c55e" />
+            <rect x="-9" y="-22" width="18" height="9" rx="4" fill="rgba(255,255,255,.22)" />
             <circle cx="0" cy="-29" r="6" fill="#f1c9a0" />
+            <path d="M-6 -30 Q0 -38 6 -30 Q0 -33 -6 -30Z" fill="#2b1b10" />
           </g>
 
-          <g stroke="#f4f4f0" strokeWidth="6" strokeLinecap="square" fill="none">
+          <g stroke="url(#penPost)" strokeWidth="6" strokeLinecap="square" fill="none">
             <line x1={GL} y1={GB} x2={GL} y2={GT} />
             <line x1={GL + GW} y1={GB} x2={GL + GW} y2={GT} />
             <line x1={GL - 3} y1={GT} x2={GL + GW + 3} y2={GT} />
           </g>
 
           <g ref={ballRef} transform={`translate(${SPOT.x} ${SPOT.y})`}>
-            <ellipse cy="7" rx="7" ry="2.5" fill="rgba(0,0,0,.35)" />
+            <ellipse cy="7" rx="7" ry="2.5" fill="rgba(0,0,0,.4)" />
             <circle r="7" fill="#ffffff" stroke="#0b1016" strokeWidth="1.2" />
             <polygon points="0,-3.2 3,-1 1.9,2.6 -1.9,2.6 -3,-1" fill="#0b1016" />
+            <circle cx="-2.4" cy="-2.6" r="1.8" fill="rgba(255,255,255,.9)" />
           </g>
+
+          <rect width={VW} height={VH} fill="url(#penVig)" pointerEvents="none" />
 
           {(phase === 'aim' || phase === 'power') && (
             <g transform={`translate(${toSvg(aim).x.toFixed(1)} ${toSvg(aim).y.toFixed(1)})`} pointerEvents="none">
-              <circle r="10" fill="rgba(245,184,0,.15)" stroke="#F5B800" strokeWidth="2" />
-              <line x1="-15" y1="0" x2="-6" y2="0" stroke="#F5B800" strokeWidth="2" />
-              <line x1="6" y1="0" x2="15" y2="0" stroke="#F5B800" strokeWidth="2" />
-              <line x1="0" y1="-15" x2="0" y2="-6" stroke="#F5B800" strokeWidth="2" />
-              <line x1="0" y1="6" x2="0" y2="15" stroke="#F5B800" strokeWidth="2" />
+              <circle r="11" fill="rgba(245,184,0,.18)" stroke="#F5B800" strokeWidth="2" />
+              <circle r="2" fill="#F5B800" />
+              <line x1="-17" y1="0" x2="-7" y2="0" stroke="#F5B800" strokeWidth="2" />
+              <line x1="7" y1="0" x2="17" y2="0" stroke="#F5B800" strokeWidth="2" />
+              <line x1="0" y1="-17" x2="0" y2="-7" stroke="#F5B800" strokeWidth="2" />
+              <line x1="0" y1="7" x2="0" y2="17" stroke="#F5B800" strokeWidth="2" />
             </g>
           )}
 
@@ -773,9 +830,10 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
                   y={GT}
                   width={GW / 3}
                   height={GH}
-                  fill={hover === c ? 'rgba(245,184,0,.32)' : 'rgba(255,255,255,.07)'}
-                  stroke="rgba(255,255,255,.45)"
+                  fill={hover === c ? 'rgba(245,184,0,.34)' : 'rgba(255,255,255,.07)'}
+                  stroke="rgba(255,255,255,.5)"
                   strokeWidth="1"
+                  strokeDasharray="4 3"
                   style={{ cursor: 'pointer' }}
                   onPointerEnter={() => setHover(c)}
                   onPointerLeave={() => setHover(-1)}
@@ -790,7 +848,7 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
                   textAnchor="middle"
                   fontSize="10"
                   fontWeight="700"
-                  fill="rgba(255,255,255,.8)"
+                  fill="rgba(255,255,255,.9)"
                   pointerEvents="none"
                 >
                   {c === 0 ? '◀ ' : ''}
@@ -802,76 +860,48 @@ export default function PenaltyShootout({ club, opponent, userTeam, botTeam, onF
         </svg>
 
         {flash && (
-          <div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              pointerEvents: 'none',
-              fontFamily: "'Bebas Neue', 'Oswald', sans-serif",
-              fontSize: 'clamp(30px, 8vw, 52px)',
-              letterSpacing: 2,
-              textAlign: 'center',
-              color: flash.good ? '#22c55e' : '#f87171',
-              textShadow: '0 2px 14px rgba(0,0,0,.9)',
-            }}
-          >
+          <div key={flash.text} className={`pk-flash ${flash.good ? 'good' : 'bad'}`}>
             {flash.text}
           </div>
         )}
       </div>
 
       {phase === 'power' && (
-        <div style={{ display: 'grid', gap: 10, justifyItems: 'center' }}>
-          <div
-            style={{
-              position: 'relative',
-              width: '100%',
-              maxWidth: 720,
-              height: 20,
-              borderRadius: 10,
-              background: 'linear-gradient(90deg,#ef4444 0 35%,#facc15 35% 62%,#22c55e 62% 92%,#ef4444 92% 100%)',
-              overflow: 'hidden',
-            }}
-          >
-            <div
-              ref={barRef}
-              style={{ position: 'absolute', top: 0, bottom: 0, left: '0%', width: 5, marginLeft: -2, background: '#fff', boxShadow: '0 0 8px #000' }}
-            />
+        <div className="pk-power">
+          <div className="pk-bar">
+            <div ref={barRef} className="pk-cursor" />
           </div>
-          <button className="gold-button large" onPointerDown={() => shootUser()}>
-            ⚽ CHUTAR!
+          <button className="cta-slant pk-btn" onPointerDown={() => shootUser()}>
+            ⚽ Chutar!
           </button>
         </div>
       )}
 
-      {hint && <p style={{ margin: 0, textAlign: 'center', opacity: 0.8, fontSize: 14 }}>{hint}</p>}
+      {hint && <p className="pk-hint">{hint}</p>}
       {net && left !== null && (
-        <p style={{ margin: 0, textAlign: 'center', fontWeight: 800, color: left <= 3 ? '#f87171' : '#F5B800' }}>
+        <p className="pk-timer" style={{ color: left <= 3 ? '#f87171' : '#F5B800' }}>
           ⏱ {left}s
         </p>
       )}
       {netGone && phase !== 'done' && (
-        <div style={{ display: 'grid', gap: 8, justifyItems: 'center' }}>
-          <p style={{ margin: 0, color: '#f87171', fontWeight: 700 }}>O adversário saiu da sala.</p>
-          <button className="outline-button" onClick={() => onAbort?.()}>
+        <div className="pk-gone">
+          <p style={{ margin: 0 }}>O adversário saiu da sala.</p>
+          <button className="pk-ghost" onClick={() => onAbort?.()}>
             Voltar ao início
           </button>
         </div>
       )}
 
       {phase === 'done' && result && (
-        <div style={{ display: 'flex', justifyContent: 'center' }}>
-          <button className="gold-button large" onClick={() => onFinish(result)}>
+        <div className="pk-end">
+          <button className="cta-slant pk-btn" onClick={() => onFinish(result)}>
             Ver resultado
           </button>
         </div>
       )}
       {!net && phase !== 'done' && phase !== 'flying' && (
-        <div style={{ display: 'flex', justifyContent: 'center' }}>
-          <button className="outline-button" onClick={autoRest}>
+        <div className="pk-end">
+          <button className="pk-ghost" onClick={autoRest}>
             Simular o resto automaticamente
           </button>
         </div>
