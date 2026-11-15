@@ -149,10 +149,10 @@ const homeCss = `
 .hm-vignette { position: absolute; inset: 0; background: radial-gradient(90% 90% at 50% 45%, transparent 40%, rgba(0,0,0,.65)); pointer-events: none; }
 
 .hm-wrap > * { min-width: 0; }
-.hm-wrap { display: grid; grid-template-columns: 292px 1fr; gap: 28px; max-width: 1180px; margin: 0 auto; padding: 28px 20px 40px; align-items: stretch; }
+.hm-wrap { display: grid; grid-template-columns: clamp(292px, 21vw, 380px) 1fr; gap: clamp(28px, 2.4vw, 48px); max-width: min(1680px, 100%); margin: 0 auto; padding: clamp(28px, 3vw, 48px) clamp(20px, 4vw, 72px) 48px; align-items: stretch; }
 .hm-side { display: grid; gap: 8px; align-content: start; animation: hmSlide .6s cubic-bezier(.2,.8,.2,1) both; }
 @keyframes hmSlide { from { opacity: 0; transform: translateX(-26px); } to { opacity: 1; transform: none; } }
-.hm-item { position: relative; display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 6px 16px 6px 16px; border: 1px solid rgba(255,255,255,.1);
+.hm-item { position: relative; display: flex; align-items: center; gap: 14px; padding: clamp(10px, 1.1vh, 16px) 16px; border-radius: 6px 16px 6px 16px; border: 1px solid rgba(255,255,255,.1);
   background: linear-gradient(100deg, rgba(255,255,255,.07), rgba(255,255,255,.02)); color: #fff; text-align: left; cursor: pointer; backdrop-filter: blur(6px);
   transition: transform .25s cubic-bezier(.2,.8,.2,1), background .25s, border-color .25s, box-shadow .25s; animation: hmSlide .6s cubic-bezier(.2,.8,.2,1) both; }
 .hm-item:nth-child(2) { animation-delay: .05s; } .hm-item:nth-child(3) { animation-delay: .1s; } .hm-item:nth-child(4) { animation-delay: .15s; }
@@ -163,14 +163,14 @@ const homeCss = `
 @keyframes hmSweep { to { transform: translateX(100%); } }
 .hm-item::after { content: '›'; position: absolute; right: 14px; top: 50%; transform: translate(-8px, -52%); font-size: 26px; font-weight: 900; color: #F5B800; opacity: 0; transition: opacity .25s, transform .25s; }
 .hm-item.on::after, .hm-item:hover::after { opacity: 1; transform: translate(0, -52%); }
-.hm-ico { flex: none; position: relative; width: 44px; height: 44px; display: grid; place-items: center; border-radius: 12px; color: #fff;
+.hm-ico { flex: none; position: relative; width: clamp(42px, 2.5vw, 48px); height: clamp(42px, 2.5vw, 48px); display: grid; place-items: center; border-radius: 12px; color: #fff;
   background: linear-gradient(160deg, rgba(255,255,255,.16), rgba(255,255,255,.04)); border: 1px solid rgba(255,255,255,.16); box-shadow: inset 0 1px 0 rgba(255,255,255,.2), 0 6px 14px rgba(0,0,0,.35);
   transition: transform .3s cubic-bezier(.2,1.4,.4,1), background .25s, color .25s, box-shadow .25s; }
 .hm-item.on .hm-ico, .hm-item:hover .hm-ico { color: #1a1200; background: linear-gradient(160deg, #ffe27a, #F5B800 60%, #d99a00); border-color: #ffe27a; transform: scale(1.1) rotate(-6deg);
   box-shadow: 0 0 22px rgba(245,184,0,.6), 0 6px 14px rgba(0,0,0,.4); }
 .hm-item svg { flex: none; opacity: .95; }
-.hm-item b { display: block; font-size: 15px; letter-spacing: 1.6px; font-weight: 900; text-transform: uppercase; }
-.hm-item small { display: block; font-size: 11px; opacity: .6; margin-top: 2px; }
+.hm-item b { display: block; font-size: clamp(15px, 1.05vw, 18px); letter-spacing: 1.6px; font-weight: 900; text-transform: uppercase; }
+.hm-item small { display: block; font-size: clamp(11px, .8vw, 13px); opacity: .6; margin-top: 2px; }
 .hm-item:hover { transform: translateX(6px); }
 .hm-item.on, .hm-item:focus-visible { transform: translateX(10px); outline: none; border-color: #F5B800; overflow: hidden;
   background: linear-gradient(100deg, rgba(245,184,0,.3), rgba(245,184,0,.06)); box-shadow: 0 0 0 1.5px #F5B800, 0 12px 30px rgba(0,0,0,.5), 0 0 26px rgba(245,184,0,.28), inset 4px 0 0 #F5B800; }
@@ -186,7 +186,7 @@ const homeCss = `
 .hm-dot { position: absolute; top: 9px; right: 9px; width: 10px; height: 10px; border-radius: 50%; background: #ef4444; box-shadow: 0 0 0 0 rgba(239,68,68,.7); animation: hmPing 1.6s infinite; }
 @keyframes hmPing { 70% { box-shadow: 0 0 0 10px rgba(239,68,68,0); } 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); } }
 
-.hm-banner { position: relative; min-height: 460px; border-radius: 22px; overflow: hidden; padding: 44px 48px; display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr); gap: 56px; align-items: center;
+.hm-banner { position: relative; min-height: clamp(460px, calc(100vh - 170px), 820px); border-radius: 22px; overflow: hidden; padding: clamp(44px, 4vw, 72px) clamp(48px, 5vw, 96px); display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr); gap: 56px; align-items: center;
   border: 1px solid rgba(255,255,255,.14); background: linear-gradient(120deg, rgba(10,16,32,.78), rgba(245,184,0,.1)); backdrop-filter: blur(4px);
   box-shadow: 0 30px 70px rgba(0,0,0,.55); animation: hmRise .7s cubic-bezier(.2,.8,.2,1) both; perspective: 900px; }
 @keyframes hmRise { from { opacity: 0; transform: translateY(24px) scale(.98); } to { opacity: 1; transform: none; } }
@@ -196,9 +196,9 @@ const homeCss = `
 .hm-copy > * { animation: hmFade .45s ease both; }
 @keyframes hmFade { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 .hm-eyebrow { font-size: 12px; font-weight: 900; letter-spacing: 3px; color: #F5B800; }
-.hm-title { margin: 8px 0 10px; font-size: clamp(44px, 6vw, 76px); line-height: .92; font-weight: 900; font-style: italic; letter-spacing: -1px; text-transform: uppercase; }
+.hm-title { margin: 8px 0 10px; font-size: clamp(44px, 6.2vw, 120px); line-height: .92; font-weight: 900; font-style: italic; letter-spacing: -1px; text-transform: uppercase; }
 .hm-title em { color: #F5B800; font-style: italic; }
-.hm-text { max-width: 400px; margin: 0 0 34px; font-size: 16px; line-height: 1.6; opacity: .82; }
+.hm-text { max-width: clamp(400px, 30vw, 560px); margin: 0 0 34px; font-size: clamp(16px, 1.15vw, 20px); line-height: 1.6; opacity: .82; }
 .hm-cta-wrap { display: inline-block; position: relative; filter: drop-shadow(0 0 16px rgba(245,184,0,.5)) drop-shadow(0 14px 18px rgba(0,0,0,.5)); animation: hmFade .45s ease both, hmGlow 2.4s 1s ease-in-out infinite; }
 .hm-cta { position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: 14px; padding: 22px 48px 22px 44px; border: 0; cursor: pointer; font-weight: 900; font-size: 24px; letter-spacing: 2.5px; white-space: nowrap; text-transform: uppercase;
   color: #1a1200; background: linear-gradient(180deg, #fff0a8, #F5B800 55%, #d99a00); clip-path: polygon(18px 0, 100% 0, calc(100% - 18px) 100%, 0 100%);
@@ -214,10 +214,10 @@ const homeCss = `
 .hm-hint { margin-top: 14px; font-size: 13px; opacity: .75; }
 .hm-hint button { background: none; border: 0; color: #F5B800; font-weight: 800; cursor: pointer; padding: 0; text-decoration: underline; }
 
-.hm-hero { position: relative; z-index: 1; display: grid; place-items: center; min-height: 360px; padding: 0 0 36px; }
+.hm-hero { position: relative; z-index: 1; display: grid; place-items: center; min-height: clamp(360px, 40vh, 600px); padding: 0 0 36px; }
 .hm-halo { position: absolute; width: 78%; aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle, rgba(245,184,0,.5), transparent 68%); filter: blur(8px); animation: hmHalo 4s ease-in-out infinite alternate; }
 @keyframes hmHalo { from { transform: scale(.9); opacity: .6; } to { transform: scale(1.08); opacity: 1; } }
-.hm-tilt { position: relative; width: min(100%, 250px); transform-style: preserve-3d; transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); transition: transform .15s ease-out; }
+.hm-tilt { position: relative; width: min(100%, clamp(250px, 20vw, 400px)); transform-style: preserve-3d; transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); transition: transform .15s ease-out; }
 .hm-float { position: relative; animation: hmFloat 5.2s ease-in-out infinite; transform-style: preserve-3d; }
 @keyframes hmFloat { 0%, 100% { transform: translateY(0) rotate(-.6deg); } 50% { transform: translateY(-14px) rotate(.6deg); } }
 .hm-float > :first-child { filter: drop-shadow(0 10px 10px rgba(0,0,0,.5)) drop-shadow(0 0 20px rgba(245,184,0,.3)); }
