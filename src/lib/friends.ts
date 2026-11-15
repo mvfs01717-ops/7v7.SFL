@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { pushInvite } from '@/lib/push';
 
 // Lista de amigos: pedidos, online e convites para jogar.
 // - Amizades ficam na tabela `friendships` (ver supabase/migrations/20261109200000_friends.sql), sempre via funções RPC.
@@ -122,6 +123,17 @@ export function useFriends(userId: string | null, nickname: string): FriendsApi 
     };
   }, [userId, refresh]);
 
+  // Abriu o app tocando na notificação (?invite=CODIGO): mostra o convite como se tivesse chegado agora
+  useEffect(() => {
+    if (!userId) return;
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('invite');
+    if (!code) return;
+    const mode = params.get('mode') === 'dice' ? 'dice' : 'classic';
+    setInvite({ fromId: 'push', fromNick: params.get('from') || 'Um amigo', code, mode, at: Date.now() });
+    window.history.replaceState(window.history.state, '', window.location.pathname);
+  }, [userId]);
+
   // O convite some sozinho depois de um tempo
   useEffect(() => {
     if (!invite) return undefined;
@@ -157,7 +169,9 @@ export function useFriends(userId: string | null, nickname: string): FriendsApi 
 
   const sendInvite: FriendsApi['sendInvite'] = async (friendId, code, mode) => {
     if (!userId) return false;
-    return ping(friendId, 'invite', { fromId: userId, fromNick: nickRef.current, code, mode, at: Date.now() });
+    // Dois caminhos ao mesmo tempo: aviso direto (amigo com o site aberto) e notificação push (site fechado)
+    const [live, pushed] = await Promise.all([ping(friendId, 'invite', { fromId: userId, fromNick: nickRef.current, code, mode, at: Date.now() }), pushInvite(friendId, code, mode)]);
+    return live || pushed;
   };
 
   return { rows, online, invite, loading, refresh, addFriend, accept, remove, sendInvite, dismissInvite: () => setInvite(null) };

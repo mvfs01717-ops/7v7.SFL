@@ -8,6 +8,7 @@ import { EventIcon } from '@/components/game/MatchScreen';
 import { MatchMapPanel } from '@/components/game/MatchMapPanel';
 import type { MatchMapData } from '@/lib/game/matchMap';
 import { ReplayPlayer, type ClipData } from '@/components/game/ReplayPlayer';
+import { ShareCardButton, goalsForCard, pickBestPlay } from '@/components/game/ShareCard';
 
 const resultsCss = `
 .rs { position: relative; isolation: isolate; --acc: #F5B800; }
@@ -292,6 +293,18 @@ export function ResultsScreen({
               : `O rival quer jogar de novo · ${rematchCount}/2`}
         </p>
       )}
+      <div style={{ display: 'flex', justifyContent: 'center', margin: '4px 0 14px' }}>
+        <ShareCardButton
+          club={club}
+          opponent={opponent}
+          score={score}
+          userWon={userWon}
+          draw={isDraw}
+          shootout={shootout ? { user: shootout.userGoals, bot: shootout.botGoals } : null}
+          goals={goalsForCard(goalLog, userTeam, botTeam)}
+          best={pickBestPlay(pickHighlights(highlights), clips)}
+        />
+      </div>
       <div className="result-actions">
         <style>{'@keyframes rm-spin { to { transform: rotate(360deg); } }'}</style>
         <button

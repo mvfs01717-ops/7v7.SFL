@@ -18,4 +18,8 @@ body { overscroll-behavior-x: none; }
   .hero p { font-size: 15px; }
   .hero { padding-bottom: 8px; }
 }
+
+/* Modo otimizado (Configurações): sem desfoque de fundo e sem brilho deslizante nas cartas, para aliviar celulares fracos */
+.app-shell[data-lite="1"] *, .app-shell[data-lite="1"] *::before, .app-shell[data-lite="1"] *::after { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+.app-shell[data-lite="1"] .tilt-glare { display: none !important; }
 `;

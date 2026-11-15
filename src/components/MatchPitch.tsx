@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createMatchMap, recordMapPass, recordMapSample, type MatchMapData } from '@/lib/game/matchMap';
+import type { Ambience } from '@/lib/game/ambience';
+import { mixHex, stadiumFor } from '@/lib/game/stadium';
+import { useLite } from '@/lib/settings';
+import { useCosmetics } from '@/lib/cosmetics';
 import { ReplayPlayer, type ClipData } from '@/components/game/ReplayPlayer';
 
 type Side = 'user' | 'bot';
@@ -19,12 +23,24 @@ type Crowd = {
   mood: { user: 'idle' | 'hype' | 'sad' | 'tense'; bot: 'idle' | 'hype' | 'sad' | 'tense' };
   bubbles: { user: { text: string; mood: string; key: number } | null; bot: { text: string; mood: string; key: number } | null };
   noise: number;
+  burst?: { side: Side; key: number } | null;
+  wave?: { side: Side | 'all'; key: number } | null;
 };
 type Props = {
+  // 0 a 1: encharcamento do gramado na chuva (cresce com o tempo molhado): poças maiores e mais, marcas de escorregão mais fortes e duradouras
+  wet?: number;
+  // 0 a 1: quanto as listras do corte do gramado já se apagaram (cresce com o desgaste do jogo)
+  grassFade?: number;
   // Estado da torcida (arquibancadas em volta do campo)
   crowd?: Crowd;
+  // Horário e clima: muda luz, sombras e, na chuva, poças, gotas e bola mais pesada
+  ambience?: Ambience;
+  // Quem joga em casa: define o estádio (gramado, mosaico, cobertura) e a torcida cheia; o visitante tem setor menor
+  home?: Side;
   // Chamado com a gravação de cada lance importante (gol, defesa, chute perigoso) para os melhores momentos
   onClip?: (eventId: number, clip: ClipData) => void;
+  // Posições ao vivo (jogadores, bola e altura da bola) para as câmeras 3D da partida
+  liveRef?: { current: LiveSnap | null };
   // Mapa da partida: o campo grava nesta ref as posições e os passes (mapa de calor e rede de passes do resultado)
   mapRef?: { current: MatchMapData | null };
   club: PitchTeam;
@@ -233,19 +249,90 @@ const crowdCss = `
 .pc-rp-bar div { height: 100%; width: 0; background: #F5B800; }
 @keyframes pcRec { 50% { opacity: .15; } }
 @keyframes pcRpIn { 0% { transform: translateY(20px) scale(.9); opacity: 0; } 100% { transform: none; opacity: 1; } }
+@keyframes pcOla { 0%,100% { transform: none; } 35% { transform: translateY(-9px) scaleY(1.12); } }
+.pc-ola .pc-fan { animation: pcOla 1.1s ease-in-out both !important; animation-delay: calc(var(--fx) * 1.5s) !important; }
+.pc-ola .pc-arms { opacity: 1; }
+.pc-ola.pc-ola-user .pc-half.pc-half-bot .pc-fan, .pc-ola.pc-ola-bot .pc-half.pc-half-user .pc-fan { animation: none !important; }
+.pc-half.hype .pc-fan { animation-delay: calc(var(--fx) * .12s) !important; }
+.pc-fan { animation-duration: calc(var(--dur, 1.2s) * var(--beat, 1)); }
+.pc-conf { transform-box: fill-box; transform-origin: 50% 50%; opacity: 0; animation: pcConf var(--cd, 1.8s) cubic-bezier(.2,.7,.4,1) var(--cl, 0s) both; }
+@keyframes pcConf { 0% { opacity: 1; transform: translate(0,0) rotate(0); } 100% { opacity: 0; transform: translate(var(--cx), var(--cy)) rotate(var(--cr)); } }
+.pc-flare { opacity: 0; animation: pcFlare 2.2s ease-out both; }
+@keyframes pcFlare { 0% { opacity: .9; } 100% { opacity: 0; } }
+.pc-lite .pc-fan, .pc-lite .pc-glow, .pc-lite .pc-flood, .pc-lite .pc-flag { animation: none !important; }
+.pc-flood { animation: pcFlood 7s ease-in-out infinite alternate; }
+@keyframes pcFlood { from { opacity: .82; } to { opacity: 1; } }
+.pc-net-hit { animation: pcNet 1s cubic-bezier(.2,.8,.3,1) both; }
+@keyframes pcNet { 0% { transform: scaleX(1) skewY(0); } 18% { transform: scaleX(1.85) skewY(7deg); } 38% { transform: scaleX(1.25) skewY(-5deg); } 60% { transform: scaleX(1.5) skewY(3deg); } 80% { transform: scaleX(1.12) skewY(-1.5deg); } 100% { transform: scaleX(1) skewY(0); } }
+.pc-dust { opacity: 0; transform-box: fill-box; transform-origin: 50% 50%; }
+@keyframes pcRain { from { transform: translate(0, -70px); } to { transform: translate(-22px, 560px); } }
+.pc-drop { animation: pcRain var(--rd, .7s) linear var(--rl, 0s) infinite; }
+@keyframes pcStrike { 0%, 93% { opacity: 0; } 94% { opacity: .38; } 95% { opacity: 0; } 96% { opacity: .24; } 97%, 100% { opacity: 0; } }
+.pc-strike { opacity: 0; animation: pcStrike 17s linear infinite; }
 @keyframes pcBob { 50% { transform: translateY(-1.4px); } }
 @keyframes pcJump { 50% { transform: translateY(-6px); } }
 @keyframes pcLean { 50% { transform: translateY(-3px) rotate(-3deg); } }
 @keyframes pcWave { 50% { transform: skewY(-9deg) rotate(5deg); } }
 @keyframes pcFlash { to { opacity: .22; } }
 @keyframes pcPop { 0% { transform: scale(.6) translateY(-6px); opacity: 0; } 100% { transform: none; opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .pc-replay, .pc-fan, .pc-flag, .pc-bub, .pc-glow { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { .pc-replay, .pc-fan, .pc-flag, .pc-bub, .pc-glow, .pc-conf, .pc-flood, .pc-net-hit, .pc-drop, .pc-strike { animation: none !important; } }
 `;
 
 function toPoint(side: Side, f: number, g: number): Point {
   const ff = side === 'user' ? f : 1 - f;
   const gg = side === 'user' ? g : 1 - g;
   return { x: FX0 + ff * (FX1 - FX0), y: FY0 + gg * (FY1 - FY0) };
+}
+
+// Uniformes das bolinhas: cada time ganha um desenho (listras, faixas, metades, diagonal ou liso) escolhido pela sigla,
+// então os dois times não parecem só "vermelho e branco". O goleiro usa uma cor própria que não se confunde com os dois times.
+type KitKind = 'stripes' | 'hoops' | 'halves' | 'sash' | 'solid';
+const KIT_KINDS: KitKind[] = ['stripes', 'hoops', 'halves', 'sash', 'solid'];
+function kitKind(abbr: string): KitKind {
+  let h = 0;
+  for (let i = 0; i < abbr.length; i += 1) h = (h * 31 + abbr.charCodeAt(i)) >>> 0;
+  return KIT_KINDS[h % KIT_KINDS.length];
+}
+function rgbOf(hex: string): [number, number, number] {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return [128, 128, 128];
+  const n = parseInt(m[1], 16);
+  return [n >> 16, (n >> 8) & 255, n & 255];
+}
+function colorGap(a: string, b: string) {
+  const [r1, g1, b1] = rgbOf(a);
+  const [r2, g2, b2] = rgbOf(b);
+  return Math.hypot(r1 - r2, g1 - g2, b1 - b2);
+}
+function keeperColor(a: string, b: string) {
+  const options = ['#f2c90f', '#2fd67f', '#ff8a1f', '#c04dff', '#19c3e6'];
+  return options.reduce((best, c) => (Math.min(colorGap(c, a), colorGap(c, b)) > Math.min(colorGap(best, a), colorGap(best, b)) ? c : best), options[0]);
+}
+function KitPattern({ kind, color }: { kind: KitKind; color: string }) {
+  switch (kind) {
+    case 'stripes':
+      return (
+        <>
+          {[-10, -2, 6].map((x) => (
+            <rect key={x} x={x} y={-13} width={4} height={26} fill={color} opacity={0.92} />
+          ))}
+        </>
+      );
+    case 'hoops':
+      return (
+        <>
+          {[-10, -2, 6].map((y) => (
+            <rect key={y} x={-13} y={y} width={26} height={4} fill={color} opacity={0.92} />
+          ))}
+        </>
+      );
+    case 'halves':
+      return <rect x={0} y={-13} width={13} height={26} fill={color} opacity={0.92} />;
+    case 'sash':
+      return <polygon points="-13,-4 -4,-13 13,4 4,13" fill={color} opacity={0.92} />;
+    default:
+      return <path d="M-6 -12.3 Q0 -6 6 -12.3" fill="none" stroke={color} strokeWidth={2.2} strokeLinecap="round" />;
+  }
 }
 
 function textOn(hex: string) {
@@ -335,44 +422,112 @@ const BALL_EDGES = Array.from({ length: 5 }, (_, i) => {
 
 // Desgaste do gramado: o campo é dividido em quadradinhos de 20 px; cada segundo que um jogador passa num quadradinho
 // deixa a terra aparecer um pouco mais. Gols, meio-campo e corredores dos lados ficam gastos no fim do jogo.
-const WEAR_CELL = 20;
+const WEAR_CELL = 16;
 const WEAR_COLS = Math.ceil((FX1 - FX0) / WEAR_CELL);
 const WEAR_ROWS = Math.ceil((FY1 - FY0) / WEAR_CELL);
-const WEAR_PER_SEC = 0.06; // opacidade ganha por segundo de pisada
-const WEAR_MAX = 0.58;
+const WEAR_PER_SEC = 0.07; // desgaste ganho por segundo de pisada
 const WEAR_FULL_TOTAL = 1000; // pisadas totais (em segundos de jogador) para o campo chegar no "jogo inteiro"
+// Cada quadradinho tem um jeito próprio (posição, tamanho, giro e "resistência" do gramado) para o desgaste não parecer uma grade.
+// Primeiro o gramado afina e amarela; só depois, nos pontos mais fracos, a terra aparece em manchas.
+const wrand = (i: number, k: number) => {
+  const v = Math.sin(i * 12.9898 + k * 78.233) * 43758.5453;
+  return v - Math.floor(v);
+};
+const WEAR_CELLS = Array.from({ length: WEAR_COLS * WEAR_ROWS }, (_, i) => {
+  const col = i % WEAR_COLS;
+  const row = Math.floor(i / WEAR_COLS);
+  const patch = 0.5 + 0.5 * Math.sin(col * 0.55 + Math.sin(row * 0.7) * 1.6) * Math.cos(row * 0.62 + Math.cos(col * 0.4) * 1.4);
+  const px = FX0 + col * WEAR_CELL + WEAR_CELL / 2;
+  const py = FY0 + row * WEAR_CELL + WEAR_CELL / 2;
+  const g = (dx: number, dy: number, sx: number, sy: number) => Math.exp(-((dx / sx) ** 2) - ((dy / sy) ** 2));
+  // Onde o gramado realmente sofre: perto dos gols e no meio. Os cantos e as pontas do campo quase não gastam.
+  const goalmouth = Math.max(g(px - FX0, py - MID_Y, 95, 80), g(px - FX1, py - MID_Y, 95, 80));
+  const centre = g(px - MID_X, py - MID_Y, 85, 70);
+  const corner = Math.max(g(px - FX0, py - FY0, 80, 60), g(px - FX1, py - FY0, 80, 60), g(px - FX0, py - FY1, 80, 60), g(px - FX1, py - FY1, 80, 60));
+  const touch = Math.max(0, (0.3 + 0.9 * goalmouth + 0.55 * centre) * (1 - 0.9 * corner));
+  return {
+    touch,
+    cx: FX0 + col * WEAR_CELL + WEAR_CELL / 2 + (wrand(i, 1) - 0.5) * WEAR_CELL * 0.7,
+    cy: FY0 + row * WEAR_CELL + WEAR_CELL / 2 + (wrand(i, 2) - 0.5) * WEAR_CELL * 0.7,
+    rx: WEAR_CELL * (0.6 + wrand(i, 3) * 0.55),
+    ry: WEAR_CELL * (0.5 + wrand(i, 4) * 0.45),
+    rot: wrand(i, 5) * 180,
+    thr: 0.2 + patch * 0.3 + wrand(i, 6) * 0.2,
+  };
+});
 
-export default function MatchPitch({ crowd, onClip, mapRef, club, opponent, userTeam, botTeam, events, onGoal, restartKey, workRef, endHalfRef, deadBallRef }: Props) {
+const MARK_POOL = 56;
+const DUST_POOL = 18;
+
+export type LiveSnap = {
+  ball: [number, number, number]; // x, y, altura
+  pts: number[]; // x1,y1,x2,y2,... na mesma ordem de `sides`
+  sides: Side[];
+  letters: string[];
+  keys: string[];
+  holder: number; // índice de quem está com a bola (-1 = ninguém)
+  frozen: boolean; // intervalo/pausa
+};
+
+export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = 'user', ambience, crowd, onClip, mapRef, club, opponent, userTeam, botTeam, events, onGoal, restartKey, workRef, endHalfRef, deadBallRef }: Props) {
+  // Modo otimizado (Configurações): menos efeitos para o campo rodar leve em celulares
+  const lite = useLite();
+  const { ball: ballSkin } = useCosmetics();
+  const liteRef = useRef(lite);
+  liteRef.current = lite;
+  const soft = lite ? undefined : 'url(#pc-soft)';
   const workRefLocal = useRef(workRef);
   workRefLocal.current = workRef;
   const onGoalRef = useRef(onGoal);
   onGoalRef.current = onGoal;
   const clipTimers = useRef<number[]>([]);
+  const liveRefRef = useRef(liveRef);
+  liveRefRef.current = liveRef;
   const mapRefRef = useRef(mapRef);
   mapRefRef.current = mapRef;
   const lastMapAt = useRef(0);
-  const wear = useRef({ heat: new Float32Array(WEAR_COLS * WEAR_ROWS), shown: new Float32Array(WEAR_COLS * WEAR_ROWS), total: 0, at: 0 });
+  const wear = useRef({ heat: new Float32Array(WEAR_COLS * WEAR_ROWS), shown: new Float32Array(WEAR_COLS * WEAR_ROWS), shownB: new Float32Array(WEAR_COLS * WEAR_ROWS), total: 0, at: 0 });
   const wearNodes = useRef<(SVGEllipseElement | null)[]>([]);
+  const wearDirt = useRef<(SVGEllipseElement | null)[]>([]);
   const wearLines = useRef<SVGGElement | null>(null);
   const wearSpots = useRef<SVGGElement | null>(null);
   // Os 700+ elementos do desgaste só são criados uma vez (o React não precisa conferir de novo a cada atualização)
   const wearCells = useMemo(
-    () =>
-      Array.from({ length: WEAR_COLS * WEAR_ROWS }, (_, i) => (
-        <ellipse
-          key={i}
-          ref={(el: SVGEllipseElement | null) => {
-            wearNodes.current[i] = el;
-          }}
-          cx={FX0 + (i % WEAR_COLS) * WEAR_CELL + WEAR_CELL / 2}
-          cy={FY0 + Math.floor(i / WEAR_COLS) * WEAR_CELL + WEAR_CELL / 2}
-          rx={WEAR_CELL * 0.95}
-          ry={WEAR_CELL * 0.85}
-          fill="url(#pc-wear)"
-          opacity={0}
-        />
-      )),
-    [],
+    () => lite ? null : (
+      <>
+        {WEAR_CELLS.map((c, i) => (
+          <ellipse
+            key={`t${i}`}
+            ref={(el: SVGEllipseElement | null) => {
+              wearNodes.current[i] = el;
+            }}
+            cx={c.cx}
+            cy={c.cy}
+            rx={c.rx}
+            ry={c.ry}
+            transform={`rotate(${c.rot.toFixed(0)} ${c.cx.toFixed(1)} ${c.cy.toFixed(1)})`}
+            fill="url(#pc-thin)"
+            opacity={0}
+          />
+        ))}
+        {WEAR_CELLS.map((c, i) => (
+          <ellipse
+            key={`d${i}`}
+            ref={(el: SVGEllipseElement | null) => {
+              wearDirt.current[i] = el;
+            }}
+            cx={c.cx}
+            cy={c.cy}
+            rx={c.rx * 0.8}
+            ry={c.ry * 0.8}
+            transform={`rotate(${c.rot.toFixed(0)} ${c.cx.toFixed(1)} ${c.cy.toFixed(1)})`}
+            fill="url(#pc-wear)"
+            opacity={0}
+          />
+        ))}
+      </>
+    ),
+    [lite],
   );
   const onClipRef = useRef(onClip);
   onClipRef.current = onClip;
@@ -429,10 +584,64 @@ export default function MatchPitch({ crowd, onClip, mapRef, club, opponent, user
   const nameNode = useRef<SVGTextElement | null>(null);
   const liftNode = useRef<SVGGElement | null>(null);
   const spinNode = useRef<SVGGElement | null>(null);
+  const ballShadow = useRef<SVGEllipseElement | null>(null);
+  const bounce = useRef({ start: 0, h: 0 });
+  // Marcas de chuteira e poeira: elementos reaproveitados (pool) para não criar nada durante o jogo
+  const markNodes = useRef<(SVGPathElement | null)[]>([]);
+  const markData = useRef<{ born: number; base: number }[]>(Array.from({ length: MARK_POOL }, () => ({ born: 0, base: 0 })));
+  const markNext = useRef(0);
+  const markFade = useRef(0);
+  const dustNodes = useRef<(SVGCircleElement | null)[]>([]);
+  const dustData = useRef<{ born: number; x: number; y: number; dx: number; dy: number; on: boolean }[]>(
+    Array.from({ length: DUST_POOL }, () => ({ born: 0, x: 0, y: 0, dx: 0, dy: 0, on: false })),
+  );
+  const dustNext = useRef(0);
+  const motion = useRef<Record<string, { x: number; y: number; vx: number; vy: number; hx: number; hy: number; hAt: number; cool: number }>>({});
+  const slideRef = useRef<Record<string, { until: number; fx: number; fy: number }>>({});
   const spin = useRef({ angle: 0, x: MID_X, y: MID_Y });
   const trailNodes = useRef<(SVGCircleElement | null)[]>([]);
   const trailPts = useRef<Point[]>([]);
   const netNodes = useRef<Record<Side, SVGRectElement | null>>({ user: null, bot: null });
+  const homeTeam = home === 'user' ? club : opponent;
+  const arena = useMemo(() => stadiumFor(homeTeam), [homeTeam.abbreviation, homeTeam.name]);
+  const amb: Ambience = ambience ?? { time: 'night', weather: 'clear' };
+  const rain = amb.weather === 'rain';
+  const rainRef = useRef(rain);
+  rainRef.current = rain;
+  const wetRef = useRef(wet);
+  wetRef.current = wet;
+  // Poças fixas (mesmas em todos os aparelhos da sala): espalhadas pelo campo, longe das linhas de fundo
+  const puddles = useMemo(
+    () =>
+      Array.from({ length: 12 }, (_, i) => ({
+        x: FX0 + 90 + wrand(i, 21) * (FX1 - FX0 - 180),
+        y: FY0 + 40 + wrand(i, 22) * (FY1 - FY0 - 80),
+        rx: 14 + wrand(i, 23) * 20,
+        ry: 5 + wrand(i, 24) * 7,
+      })),
+    [],
+  );
+  const puddlesRef = useRef(puddles);
+  puddlesRef.current = puddles;
+  const [olaOn, setOlaOn] = useState<null | 'user' | 'bot' | 'all'>(null);
+  const [burstOn, setBurstOn] = useState<{ side: Side; key: number } | null>(null);
+  const waveKey = crowd?.wave?.key;
+  const burstKey = crowd?.burst?.key;
+  useEffect(() => {
+    if (!crowd?.wave) return undefined;
+    setOlaOn(crowd.wave.side);
+    const t = window.setTimeout(() => setOlaOn(null), 2900);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waveKey]);
+  useEffect(() => {
+    if (!crowd?.burst) return undefined;
+    setBurstOn(crowd.burst);
+    const t = window.setTimeout(() => setBurstOn(null), 3200);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [burstKey]);
+  const netMesh = useRef<Record<Side, SVGGElement | null>>({ user: null, bot: null });
   const [caption, setCaption] = useState('Bola rolando');
   const [goalText, setGoalText] = useState('');
   const [replay, setReplay] = useState<ReplayData | null>(null);
@@ -446,6 +655,14 @@ export default function MatchPitch({ crowd, onClip, mapRef, club, opponent, user
     if (!node) return;
     node.setAttribute('fill', 'rgba(255,255,255,.65)');
     window.setTimeout(() => node.setAttribute('fill', 'rgba(255,255,255,.12)'), 750);
+    // A rede estufa com o impacto da bola e balança até acalmar
+    const mesh = netMesh.current[side];
+    if (mesh) {
+      mesh.classList.remove('pc-net-hit');
+      void (mesh as unknown as HTMLElement).getBoundingClientRect();
+      mesh.classList.add('pc-net-hit');
+    }
+    // Poeira de comemoração/torcida cuida do resto; aqui só o gol
   }
 
   // Grava o lance (últimos ~6,8 s) um instante depois de acontecer e entrega para os melhores momentos
@@ -1122,6 +1339,8 @@ export default function MatchPitch({ crowd, onClip, mapRef, club, opponent, user
             dur: 380,
             caption: ev.text,
             after: () => {
+              // Avisa o resto da tela (som, trave balançando, tremor de câmera)
+              window.dispatchEvent(new CustomEvent('pitch-post', { detail: { x: goalX, y: side < 0 ? GOAL_TOP : GOAL_BOTTOM } }));
               captureClip(ev.id, 'quase', ev.text, actorKey, 400);
               st.queue.unshift({
                 kind: 'move',
@@ -1287,7 +1506,7 @@ export default function MatchPitch({ crowd, onClip, mapRef, club, opponent, user
         }
       } else if (st.active && st.active.step.kind !== 'carry') {
         const { step, from, start, lead, dest } = st.active;
-        const p = Math.min(1, (now - start) / step.dur);
+        const p = Math.min(1, (now - start) / (step.dur * (rainRef.current ? 1.15 : 1)));
         const e = step.kind === 'shot' ? p : 1 - Math.pow(1 - p, 2);
         let tx = from.x;
         let ty = from.y;
@@ -1315,8 +1534,10 @@ export default function MatchPitch({ crowd, onClip, mapRef, club, opponent, user
           st.ballX += (-cdy / clen) * off;
           st.ballY += (cdx / clen) * off;
         }
-        lift = (step.arc ?? 0) * Math.sin(Math.PI * p);
+        lift = (step.arc ?? 0) * (rainRef.current ? 0.8 : 1) * Math.sin(Math.PI * p);
         if (p >= 1) {
+          // Bolas que vieram por cima quicam duas ou três vezes, cada vez menos
+          if ((step.arc ?? 0) >= 12) bounce.current = { start: now, h: Math.min(16, (step.arc ?? 0) * (rainRef.current ? 0.12 : 0.32)) };
           st.active = null;
           if (dest) {
             st.holder = dest;
@@ -1362,6 +1583,7 @@ export default function MatchPitch({ crowd, onClip, mapRef, club, opponent, user
             const dirH = dirOf(h.side);
             const slide = Math.random() < 0.25;
             st.tackleAt = now + 1000;
+            if (slide) slideRef.current[dfn.key] = { until: now + 360, fx: dfn.x, fy: dfn.y };
             // Desarme cansa: quem dá o bote gasta mais, quem perde a bola também
             const ledger = workRefLocal.current?.current.effort;
             if (ledger) {
@@ -1763,7 +1985,131 @@ export default function MatchPitch({ crowd, onClip, mapRef, club, opponent, user
         nodes.current[s.key]?.setAttribute('transform', `translate(${s.x.toFixed(1)} ${s.y.toFixed(1)})`);
       });
 
+      // Marcas de chuteira e poeira: curvas fechadas e carrinhos arranham o gramado; onde ele já está gasto, sobe poeira
+      if (!liteRef.current) {
+        const live = !(endHalfRef && endHalfRef.current) && !(deadBallRef && deadBallRef.current);
+        const worn = (px: number, py: number) => {
+          const cx = Math.floor((px - FX0) / WEAR_CELL);
+          const cy = Math.floor((py - FY0) / WEAR_CELL);
+          if (cx < 0 || cy < 0 || cx >= WEAR_COLS || cy >= WEAR_ROWS) return 0;
+          const ix = cy * WEAR_COLS + cx;
+          return wear.current.heat[ix] * WEAR_PER_SEC * WEAR_CELLS[ix].touch;
+        };
+        const puff = (px: number, py: number, vx: number, vy: number, count: number) => {
+          const soaked = rainRef.current && puddlesRef.current.some((q, qi) => (qi < 8 || wetRef.current > 0.55) && Math.abs(q.x - px) < q.rx * (1 + wetRef.current * 0.6) + 8 && Math.abs(q.y - py) < q.ry * (1 + wetRef.current * 0.6) + 10);
+          if (worn(px, py) < 0.18 && !soaked) return;
+          for (let k = 0; k < count; k += 1) {
+            const d = dustData.current[dustNext.current % DUST_POOL];
+            dustNext.current += 1;
+            d.on = true;
+            d.born = now + k * 40;
+            d.x = px + (Math.random() - 0.5) * 8;
+            d.y = py + 8 + (Math.random() - 0.5) * 4;
+            d.dx = -vx * 0.01 + (Math.random() - 0.5) * 1.4;
+            d.dy = -vy * 0.006 + (Math.random() - 0.5) * 0.8;
+          }
+        };
+        const mark = (d: string, width: number, base: number) => {
+          const i = markNext.current % MARK_POOL;
+          markNext.current += 1;
+          const node = markNodes.current[i];
+          if (!node) return;
+          node.setAttribute('d', d);
+          const soak = rainRef.current ? wetRef.current : 0;
+          node.setAttribute('stroke-width', (width * (1 + soak * 0.55)).toFixed(1));
+          markData.current[i] = { born: now, base: Math.min(0.95, base * (1 + soak * 0.9)) };
+        };
+        const mo = motion.current;
+        for (const x of all) {
+          let m = mo[x.key];
+          if (!m) m = mo[x.key] = { x: x.x, y: x.y, vx: 0, vy: 0, hx: 0, hy: 0, hAt: now, cool: 0 };
+          if (dt > 0) {
+            let ivx = ((x.x - m.x) / dt) * 1000;
+            let ivy = ((x.y - m.y) / dt) * 1000;
+            if (Math.hypot(ivx, ivy) > 700) {
+              ivx = 0;
+              ivy = 0; // teleporte (reposicionamento), não corrida
+            }
+            m.vx += (ivx - m.vx) * 0.25;
+            m.vy += (ivy - m.vy) * 0.25;
+          }
+          m.x = x.x;
+          m.y = x.y;
+          if (live && now - m.hAt >= 160) {
+            const sp = Math.hypot(m.vx, m.vy);
+            const hsp = Math.hypot(m.hx, m.hy);
+            if (sp > 85 && hsp > 85 && now > m.cool && (m.vx * m.hx + m.vy * m.hy) / (sp * hsp) < 0.25) {
+              const bx = x.x - (m.hx / hsp) * 10;
+              const by = x.y - (m.hy / hsp) * 10;
+              const ex = x.x + (m.vx / sp) * 7;
+              const ey = x.y + (m.vy / sp) * 7;
+              mark(`M${bx.toFixed(1)} ${(by + 10).toFixed(1)} Q${x.x.toFixed(1)} ${(x.y + 12).toFixed(1)} ${ex.toFixed(1)} ${(ey + 10).toFixed(1)}`, 2.4, 0.42);
+              puff(x.x, x.y, m.vx, m.vy, 2);
+              m.cool = now + 700;
+            }
+            m.hx = m.vx;
+            m.hy = m.vy;
+            m.hAt = now;
+          }
+          const sl = slideRef.current[x.key];
+          if (sl && now >= sl.until) {
+            delete slideRef.current[x.key];
+            mark(`M${sl.fx.toFixed(1)} ${(sl.fy + 11).toFixed(1)} L${x.x.toFixed(1)} ${(x.y + 11).toFixed(1)}`, 4.6, 0.5);
+            puff(sl.fx, sl.fy, 0, 0, 2);
+            puff(x.x, x.y, m.vx, m.vy, 3);
+          }
+        }
+        // Atualiza o desenho: as marcas desbotam em ~45 s e a poeira sobe e some em ~0,9 s
+        if (now - markFade.current >= 250) {
+          markFade.current = now;
+          markData.current.forEach((d, i) => {
+            if (!d.base) return;
+            const age = now - d.born;
+            const life = 45000 + (rainRef.current ? wetRef.current * 30000 : 0);
+            const op = age > life ? 0 : d.base * (1 - age / life);
+            markNodes.current[i]?.setAttribute('opacity', op.toFixed(3));
+            if (!op) d.base = 0;
+          });
+        }
+        dustData.current.forEach((d, i) => {
+          const node = dustNodes.current[i];
+          if (!node || !d.on) return;
+          const a = (now - d.born) / 900;
+          if (a < 0) return;
+          if (a >= 1) {
+            d.on = false;
+            node.setAttribute('display', 'none');
+            return;
+          }
+          node.setAttribute('display', 'inline');
+          node.setAttribute('cx', (d.x + d.dx * a * 10).toFixed(1));
+          node.setAttribute('cy', (d.y + d.dy * a * 10 - a * 6).toFixed(1));
+          node.setAttribute('r', (3 + a * 8).toFixed(1));
+          node.setAttribute('opacity', (0.42 * (1 - a) * (1 - a * 0.3)).toFixed(3));
+        });
+      }
       // Bola, anel dourado e nome de quem está com a bola
+      if (lift === 0 && bounce.current.h > 0) {
+        const t = (now - bounce.current.start) / 1000;
+        const hops = [0.34, 0.21, 0.13];
+        let acc = 0;
+        let value = 0;
+        let alive = false;
+        for (let i = 0; i < hops.length; i += 1) {
+          if (t < acc + hops[i]) {
+            const u = (t - acc) / hops[i];
+            value = bounce.current.h * Math.pow(0.36, i) * 4 * u * (1 - u);
+            alive = true;
+            break;
+          }
+          acc += hops[i];
+        }
+        if (alive) lift = value;
+        else bounce.current.h = 0;
+      }
+      // A sombra fica no chão: quanto mais alta a bola, menor, mais clara e mais deslocada
+      ballShadow.current?.setAttribute('transform', `translate(${(lift * 0.45).toFixed(1)} 0) scale(${Math.max(0.55, 1 - lift / 55).toFixed(2)} 1)`);
+      ballShadow.current?.setAttribute('opacity', Math.max(0.35, 1 - lift / 40).toFixed(2));
       ballNode.current?.setAttribute('transform', `translate(${st.ballX.toFixed(1)} ${st.ballY.toFixed(1)})`);
       // A bola gira conforme rola: o ângulo avança com a distância percorrida (~8° por pixel) para o lado em que ela anda
       const sp = spin.current;
@@ -1803,15 +2149,46 @@ export default function MatchPitch({ crowd, onClip, mapRef, club, opponent, user
         const w = wear.current;
         w.at = now;
         for (let i = 0; i < w.heat.length; i += 1) {
-          const value = Math.min(WEAR_MAX, w.heat[i] * WEAR_PER_SEC);
-          if (Math.abs(value - w.shown[i]) < 0.012) continue;
-          w.shown[i] = value;
-          wearNodes.current[i]?.setAttribute('opacity', value.toFixed(3));
+          const wearLevel = w.heat[i] * WEAR_PER_SEC * WEAR_CELLS[i].touch;
+          const thin = Math.min(0.5, wearLevel * 0.8);
+          const dirt = Math.max(0, Math.min(0.55, (wearLevel - WEAR_CELLS[i].thr) * 0.9));
+          if (Math.abs(thin - w.shown[i]) >= 0.012) {
+            w.shown[i] = thin;
+            wearNodes.current[i]?.setAttribute('opacity', thin.toFixed(3));
+          }
+          if (Math.abs(dirt - w.shownB[i]) >= 0.012) {
+            w.shownB[i] = dirt;
+            wearDirt.current[i]?.setAttribute('opacity', dirt.toFixed(3));
+          }
         }
         const progress = Math.min(1, w.total / WEAR_FULL_TOTAL);
         // As linhas brancas desbotam e as marcas de pênalti/meio ganham terra
         wearLines.current?.setAttribute('opacity', (1 - 0.3 * progress).toFixed(3));
         wearSpots.current?.setAttribute('opacity', (progress * 0.75).toFixed(3));
+      }
+      // Câmeras 3D da partida: entrega as posições deste quadro (reaproveita o mesmo objeto, sem criar lixo)
+      if (liveRefRef.current) {
+        let snap = liveRefRef.current.current;
+        if (!snap || snap.sides.length !== all.length) {
+          snap = liveRefRef.current.current = {
+            ball: [0, 0, 0],
+            pts: new Array<number>(all.length * 2).fill(0),
+            sides: all.map((x) => x.side),
+            letters: slotsRef.current.map((x) => x.name.slice(0, 1).toUpperCase()),
+            keys: all.map((x) => x.key),
+            holder: -1,
+            frozen: false,
+          };
+        }
+        snap.ball[0] = st.ballX;
+        snap.ball[1] = st.ballY;
+        snap.ball[2] = lift;
+        for (let n = 0; n < all.length; n += 1) {
+          snap.pts[n * 2] = all[n].x;
+          snap.pts[n * 2 + 1] = all[n].y;
+        }
+        snap.holder = st.holder ? snap.keys.indexOf(st.holder) : -1;
+        snap.frozen = !!(endHalfRef && endHalfRef.current);
       }
       // Grava a jogada (≈25 quadros por segundo, últimos 7 s) para o replay do gol
       const rc = rec.current;
@@ -1887,7 +2264,7 @@ export default function MatchPitch({ crowd, onClip, mapRef, club, opponent, user
     () => buildFans({ user: club.primary_color, bot: opponent.primary_color }, { user: club.secondary_color, bot: opponent.secondary_color }),
     [club.primary_color, club.secondary_color, opponent.primary_color, opponent.secondary_color],
   );
-  const half = (side: Side) => `pc-half ${crowd?.mood[side] ?? 'idle'}`;
+  const half = (side: Side) => `pc-half pc-half-${side} ${crowd?.mood[side] ?? 'idle'}`;
   const standGeo = (top: boolean) => ({ y: top ? -STAND : H, h: STAND });
   return (
     <section
@@ -1902,12 +2279,37 @@ export default function MatchPitch({ crowd, onClip, mapRef, club, opponent, user
       }}
     >
       <style>{crowdCss}</style>
-      <svg viewBox={`0 ${-STAND} ${W} ${H + STAND * 2}`} style={{ display: 'block', width: '100%', height: 'auto' }} role="img" aria-label="Campo da partida">
+      <svg viewBox={`0 ${-STAND} ${W} ${H + STAND * 2}`} className={`${olaOn ? `pc-ola pc-ola-${olaOn}` : ''} ${lite ? 'pc-lite' : ''}`.trim() || undefined} style={{ display: 'block', width: '100%', height: 'auto', ['--beat' as string]: (1.35 - ((crowd?.noise ?? 55) / 100) * 0.75).toFixed(2) }} role="img" aria-label="Campo da partida">
         <defs>
+          <pattern id="pc-mesh" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <path d="M0 0 H4 M0 0 V4" stroke="#ffffff" strokeWidth={0.5} opacity={0.55} fill="none" />
+          </pattern>
+          <filter id="pc-soft" x="-30%" y="-80%" width="160%" height="260%">
+            <feGaussianBlur stdDeviation="1.6" />
+          </filter>
+          <filter id="pc-blur8" x="-100%" y="-100%" width="300%" height="300%">
+            <feGaussianBlur stdDeviation="8" />
+          </filter>
+          <linearGradient id="pc-flood-x" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#000" stopOpacity={0.3} />
+            <stop offset="30%" stopColor="#000" stopOpacity={0.06} />
+            <stop offset="50%" stopColor="#fff" stopOpacity={0.1} />
+            <stop offset="70%" stopColor="#000" stopOpacity={0.06} />
+            <stop offset="100%" stopColor="#000" stopOpacity={0.3} />
+          </linearGradient>
+          <radialGradient id="pc-flood-c" cx="50%" cy="48%" r="60%">
+            <stop offset="0%" stopColor="#fffbe6" stopOpacity={0.14} />
+            <stop offset="100%" stopColor="#fffbe6" stopOpacity={0} />
+          </radialGradient>
+          <radialGradient id="pc-thin">
+            <stop offset="0%" stopColor="#8a9a3c" stopOpacity={0.85} />
+            <stop offset="60%" stopColor="#7b8a36" stopOpacity={0.45} />
+            <stop offset="100%" stopColor="#6f7d33" stopOpacity={0} />
+          </radialGradient>
           <radialGradient id="pc-wear">
-            <stop offset="0%" stopColor="#6e5428" stopOpacity={1} />
-            <stop offset="55%" stopColor="#5a4421" stopOpacity={0.6} />
-            <stop offset="100%" stopColor="#4a3a1e" stopOpacity={0} />
+            <stop offset="0%" stopColor="#5a4729" stopOpacity={0.95} />
+            <stop offset="55%" stopColor="#4c3d24" stopOpacity={0.55} />
+            <stop offset="100%" stopColor="#43361f" stopOpacity={0} />
           </radialGradient>
           <pattern id="pc-grain" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(18)">
             <rect width="6" height="6" fill="none" />
@@ -1931,6 +2333,34 @@ export default function MatchPitch({ crowd, onClip, mapRef, club, opponent, user
             <stop offset="0%" stopColor="#0a0f1a" />
             <stop offset="100%" stopColor="#1b263b" />
           </linearGradient>
+          <pattern id="pc-seat" width="24" height="16" patternUnits="userSpaceOnUse">
+            <rect width="24" height="16" fill={homeTeam.primary_color} />
+            {arena.seats === 'stripes' && <rect x="12" width="12" height="16" fill={homeTeam.secondary_color} />}
+            {arena.seats === 'chevron' && <path d="M0 4 L12 12 L24 4 L24 8 L12 16 L0 8 Z" fill={homeTeam.secondary_color} />}
+            {arena.seats === 'blocks' && <rect x="12" y="8" width="12" height="8" fill="#000" opacity={0.35} />}
+            {arena.seats === 'blocks' && <rect x="0" y="0" width="12" height="8" fill="#000" opacity={0.35} />}
+            {arena.seats === 'checker' && <rect x="0" y="0" width="6" height="8" fill={homeTeam.secondary_color} />}
+            {arena.seats === 'checker' && <rect x="12" y="0" width="6" height="8" fill={homeTeam.secondary_color} />}
+            {arena.seats === 'checker' && <rect x="6" y="8" width="6" height="8" fill={homeTeam.secondary_color} />}
+            {arena.seats === 'checker' && <rect x="18" y="8" width="6" height="8" fill={homeTeam.secondary_color} />}
+          </pattern>
+          <pattern id="pc-mow-d" width="64" height="64" patternUnits="userSpaceOnUse" patternTransform={`rotate(45) translate(${FX0} ${FY0})`}>
+            <rect width="64" height="64" fill={arena.grassA} />
+            <rect width="32" height="32" fill={arena.grassB} />
+            <rect x="32" y="32" width="32" height="32" fill={arena.grassB} />
+          </pattern>
+          <linearGradient id="pc-roof-shade" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#000" stopOpacity={0.55} />
+            <stop offset="100%" stopColor="#000" stopOpacity={0} />
+          </linearGradient>
+          <clipPath id="tok-clip">
+            <circle r={12.3} />
+          </clipPath>
+          <linearGradient id="tok-shade" x1="0" y1="0" x2="0.55" y2="1">
+            <stop offset="0%" stopColor="#fff" stopOpacity={0.12} />
+            <stop offset="50%" stopColor="#000" stopOpacity={0} />
+            <stop offset="100%" stopColor="#000" stopOpacity={0.42} />
+          </linearGradient>
           <radialGradient id="kit-gloss" cx="35%" cy="28%" r="70%">
             <stop offset="0%" stopColor="#fff" stopOpacity={0.5} />
             <stop offset="55%" stopColor="#fff" stopOpacity={0} />
@@ -1940,6 +2370,28 @@ export default function MatchPitch({ crowd, onClip, mapRef, club, opponent, user
         {[true, false].map((top) => {
           const g = standGeo(top);
           return <rect key={`tier-${top}`} x={0} y={g.y} width={W} height={g.h} fill={top ? 'url(#pc-tier)' : 'url(#pc-tier-b)'} />;
+        })}
+        {/* mosaico do time da casa, setor visitante mais escuro e cobertura do estádio */}
+        {[true, false].map((top) => {
+          const g = standGeo(top);
+          const x0 = home === 'user' ? 0 : MID_X;
+          const x1 = home === 'user' ? MID_X : 0;
+          return (
+            <g key={`seats-${top}`} style={{ pointerEvents: 'none' }}>
+              <rect x={x0} y={g.y} width={MID_X} height={g.h} fill="url(#pc-seat)" opacity={0.5} />
+              <rect x={x1} y={g.y} width={MID_X} height={g.h} fill="#000" opacity={0.22} />
+              {arena.roof && (
+                <>
+                  <rect x={0} y={top ? g.y : g.y + g.h - 28} width={W} height={28} fill={top ? 'url(#pc-roof-shade)' : 'url(#pc-roof-shade)'} transform={top ? undefined : `rotate(180 ${W / 2} ${g.y + g.h - 14})`} />
+                  <rect x={0} y={top ? g.y : g.y + g.h - 7} width={W} height={7} fill="#0b0f16" />
+                  <rect x={0} y={top ? g.y + 6 : g.y + g.h - 9} width={W} height={2} fill={homeTeam.primary_color} opacity={0.9} />
+                  {Array.from({ length: 14 }).map((_, i) => (
+                    <circle key={i} cx={26 + i * 52.5} cy={top ? g.y + 3.5 : g.y + g.h - 3.5} r={2} fill={amb.time === 'night' ? '#fff6c8' : '#9aa3b2'} opacity={amb.time === 'night' ? 0.95 : 0.6} />
+                  ))}
+                </>
+              )}
+            </g>
+          );
         })}
         {/* placas de publicidade na borda do campo */}
         {[true, false].map((top) => (
@@ -1966,9 +2418,9 @@ export default function MatchPitch({ crowd, onClip, mapRef, club, opponent, user
                 <rect key={`glow-${top}`} className="pc-glow" x={side === 'user' ? 0 : MID_X} y={top ? -STAND : H} width={MID_X} height={STAND} fill={team.primary_color} />
               ))}
               {fans
-                .filter((f) => f.side === side)
+                .filter((f, idx) => f.side === side && (side === home || idx % 2 === 0) && (!lite || idx % 2 === 1 || side !== home))
                 .map((f, i) => (
-                  <g key={i} className="pc-fan" style={{ animationDelay: `${f.delay}s`, animationDuration: `${f.dur}s` }}>
+                  <g key={i} className="pc-fan" style={{ animationDelay: `${f.delay}s`, ['--dur' as string]: `${f.dur}s`, ['--fx' as string]: (f.x / W).toFixed(3) }}>
                     <rect x={f.x - 4.6} y={f.y + 3} width={9.2} height={10} rx={3} fill={f.body} stroke="rgba(0,0,0,.35)" strokeWidth={0.4} />
                     <circle cx={f.x} cy={f.y} r={4} fill={f.skin} />
                     <path className="pc-arms" d={`M${f.x - 4.4} ${f.y + 7} l-3 -8 M${f.x + 4.4} ${f.y + 7} l3 -8`} stroke={f.skin} strokeWidth={1.8} strokeLinecap="round" />
@@ -1986,11 +2438,69 @@ export default function MatchPitch({ crowd, onClip, mapRef, club, opponent, user
             </g>
           );
         })}
-        {Array.from({ length: 10 }).map((_, i) => (
-          <rect key={i} x={FX0 + i * 70} y={FY0} width={70} height={FY1 - FY0} fill={i % 2 ? '#14562f' : '#0f4425'} />
-        ))}
+        {burstOn && (
+          <g key={burstOn.key} style={{ pointerEvents: 'none' }}>
+            {[true, false].map((top) =>
+              Array.from({ length: lite ? 10 : 30 }).map((_, i) => {
+                const team = burstOn.side === 'user' ? club : opponent;
+                const r = (k: number) => wrand(i + (top ? 0 : 50), k + burstOn.key);
+                const x0 = (burstOn.side === 'user' ? 0 : MID_X) + 20 + r(1) * (MID_X - 40);
+                const y0 = top ? -STAND + 8 + r(2) * (STAND - 18) : H + 8 + r(2) * (STAND - 18);
+                const colors = [team.primary_color, team.secondary_color, '#ffffff', '#F5B800'];
+                return (
+                  <rect
+                    key={`${top}-${i}`}
+                    className="pc-conf"
+                    x={x0}
+                    y={y0}
+                    width={2.4 + r(3) * 2}
+                    height={4 + r(4) * 3}
+                    fill={colors[Math.floor(r(5) * colors.length)]}
+                    style={{
+                      ['--cx' as string]: `${((r(6) - 0.5) * 70).toFixed(0)}px`,
+                      ['--cy' as string]: `${(top ? 14 + r(7) * 50 : -14 - r(7) * 50).toFixed(0)}px`,
+                      ['--cr' as string]: `${((r(8) - 0.5) * 900).toFixed(0)}deg`,
+                      ['--cd' as string]: `${(1.5 + r(9) * 1.3).toFixed(2)}s`,
+                      ['--cl' as string]: `${(r(10) * 0.35).toFixed(2)}s`,
+                    }}
+                  />
+                );
+              }),
+            )}
+            {[0.18, 0.5, 0.82].map((f, i) => {
+              const fx = (burstOn.side === 'user' ? 0 : MID_X) + MID_X * f;
+              return [true, false].map((top) => (
+                <circle key={`fl-${i}-${top}`} className="pc-flare" cx={fx} cy={top ? -STAND * 0.45 : H + STAND * 0.45} r={26} fill="#ff5a2e" opacity={0} filter="url(#pc-blur8)" style={{ animationDelay: `${i * 0.12}s` }} />
+              ));
+            })}
+          </g>
+        )}
+        {arena.mow === 'diamond' ? (
+          <rect x={FX0} y={FY0} width={FX1 - FX0} height={FY1 - FY0} fill="url(#pc-mow-d)" />
+        ) : arena.mow === 'bands' ? (
+          Array.from({ length: 8 }).map((_, i) => (
+            <rect key={i} x={FX0} y={FY0 + (i * (FY1 - FY0)) / 8} width={FX1 - FX0} height={(FY1 - FY0) / 8 + 0.5} fill={i % 2 ? arena.grassB : arena.grassA} />
+          ))
+        ) : arena.mow === 'checker' ? (
+          Array.from({ length: 60 }).map((_, i) => {
+            const cx = i % 10;
+            const cy = Math.floor(i / 10);
+            return <rect key={i} x={FX0 + cx * 70} y={FY0 + (cy * (FY1 - FY0)) / 6} width={70.5} height={(FY1 - FY0) / 6 + 0.5} fill={(cx + cy) % 2 ? arena.grassB : arena.grassA} />;
+          })
+        ) : (
+          Array.from({ length: arena.mow === 'wide' ? 6 : 10 }).map((_, i) => {
+            const n = arena.mow === 'wide' ? 6 : 10;
+            const w = (FX1 - FX0) / n;
+            return <rect key={i} x={FX0 + i * w} y={FY0} width={w + 0.5} height={FY1 - FY0} fill={i % 2 ? arena.grassB : arena.grassA} />;
+          })
+        )}
+        {grassFade > 0.01 && <rect x={FX0} y={FY0} width={FX1 - FX0} height={FY1 - FY0} fill={mixHex(arena.grassA, arena.grassB)} opacity={Math.min(0.7, grassFade)} />}
         <rect x={FX0} y={FY0} width={FX1 - FX0} height={FY1 - FY0} fill="url(#pc-grain)" />
         <rect x={FX0} y={FY0} width={FX1 - FX0} height={FY1 - FY0} fill="url(#pitch-light)" />
+        <g className="pc-flood" style={{ pointerEvents: 'none', ...(amb.time === 'night' ? {} : { display: 'none' }) }}>
+          <rect x={FX0} y={FY0} width={FX1 - FX0} height={FY1 - FY0} fill="url(#pc-flood-x)" />
+          <rect x={FX0} y={FY0} width={FX1 - FX0} height={FY1 - FY0} fill="url(#pc-flood-c)" />
+        </g>
         <g style={{ pointerEvents: 'none' }}>{wearCells}</g>
         <g ref={wearSpots} opacity={0} style={{ pointerEvents: 'none' }}>
           {[FX0 + 66, FX1 - 66, MID_X].map((cx) => (
@@ -2000,6 +2510,11 @@ export default function MatchPitch({ crowd, onClip, mapRef, club, opponent, user
             <ellipse key={`gm-${gx}`} cx={gx + (gx === FX0 ? 20 : -20)} cy={MID_Y} rx={22} ry={34} fill="#6f5429" opacity={0.35} />
           ))}
         </g>
+        {!lite && <g style={{ pointerEvents: 'none' }} fill="none" stroke="#d6eaa0" strokeLinecap="round">
+          {Array.from({ length: MARK_POOL }).map((_, i) => (
+            <path key={i} ref={(el: SVGPathElement | null) => { markNodes.current[i] = el; }} d="M0 0" opacity={0} />
+          ))}
+        </g>}
         <g ref={wearLines} fill="none" stroke={lineColor} strokeWidth={2}>
           <rect x={FX0} y={FY0} width={FX1 - FX0} height={FY1 - FY0} />
           <line x1={MID_X} y1={FY0} x2={MID_X} y2={FY1} />
@@ -2012,20 +2527,81 @@ export default function MatchPitch({ crowd, onClip, mapRef, club, opponent, user
         <circle cx={MID_X} cy={MID_Y} r={3} fill={lineColor} />
         <circle cx={FX0 + 66} cy={MID_Y} r={2.2} fill={lineColor} />
         <circle cx={FX1 - 66} cy={MID_Y} r={2.2} fill={lineColor} />
+        {puddles.length > 0 && rain && (
+          <g style={{ pointerEvents: 'none' }}>
+            {puddles.map((q, i) => {
+              if (i >= 8 && wet <= 0.55) return null;
+              const g = 1 + wet * 0.6;
+              const rx = q.rx * g;
+              const ry = q.ry * g;
+              return (
+                <g key={i}>
+                  <ellipse cx={q.x} cy={q.y} rx={rx} ry={ry} fill={`rgba(50,84,112,${(0.45 + wet * 0.35).toFixed(2)})`} />
+                  <ellipse cx={q.x - rx * 0.25} cy={q.y - ry * 0.3} rx={rx * 0.55} ry={ry * 0.35} fill={`rgba(225,240,252,${(0.28 + wet * 0.3).toFixed(2)})`} />
+                  <ellipse cx={q.x} cy={q.y} rx={rx} ry={ry} fill="none" stroke={`rgba(205,228,247,${(0.4 + wet * 0.4).toFixed(2)})`} strokeWidth={0.8 + wet * 0.8} />
+                </g>
+              );
+            })}
+          </g>
+        )}
+        <rect
+          x={0}
+          y={-STAND}
+          width={W}
+          height={H + STAND * 2}
+          fill={amb.time === 'night' ? '#0a1a5a' : amb.time === 'afternoon' ? '#ff9a3c' : '#fff6d0'}
+          opacity={amb.time === 'night' ? 0.1 : amb.time === 'afternoon' ? 0.15 : 0.06}
+          style={{ pointerEvents: 'none' }}
+        />
+        {rain && <rect x={0} y={-STAND} width={W} height={H + STAND * 2} fill="#0b1d2a" opacity={0.2} style={{ pointerEvents: 'none' }} />}
         <rect x={0} y={-STAND} width={W} height={H + STAND * 2} fill="url(#pitch-vig)" style={{ pointerEvents: 'none' }} />
-        <rect ref={(el: SVGRectElement | null) => { netNodes.current.bot = el; }} x={FX0 - 14} y={GOAL_TOP} width={14} height={GOAL_BOTTOM - GOAL_TOP} fill="rgba(255,255,255,.12)" stroke={lineColor} strokeWidth={2} />
-        <rect ref={(el: SVGRectElement | null) => { netNodes.current.user = el; }} x={FX1} y={GOAL_TOP} width={14} height={GOAL_BOTTOM - GOAL_TOP} fill="rgba(255,255,255,.12)" stroke={lineColor} strokeWidth={2} />
+        <g ref={(el: SVGGElement | null) => { netMesh.current.bot = el; }} style={{ transformBox: 'fill-box', transformOrigin: '100% 50%', pointerEvents: 'none' }}>
+          <rect ref={(el: SVGRectElement | null) => { netNodes.current.bot = el; }} x={FX0 - 14} y={GOAL_TOP} width={14} height={GOAL_BOTTOM - GOAL_TOP} fill="rgba(255,255,255,.12)" stroke={lineColor} strokeWidth={2} />
+          <rect x={FX0 - 14} y={GOAL_TOP} width={14} height={GOAL_BOTTOM - GOAL_TOP} fill="url(#pc-mesh)" />
+        </g>
+        <g ref={(el: SVGGElement | null) => { netMesh.current.user = el; }} style={{ transformBox: 'fill-box', transformOrigin: '0% 50%', pointerEvents: 'none' }}>
+          <rect ref={(el: SVGRectElement | null) => { netNodes.current.user = el; }} x={FX1} y={GOAL_TOP} width={14} height={GOAL_BOTTOM - GOAL_TOP} fill="rgba(255,255,255,.12)" stroke={lineColor} strokeWidth={2} />
+          <rect x={FX1} y={GOAL_TOP} width={14} height={GOAL_BOTTOM - GOAL_TOP} fill="url(#pc-mesh)" />
+        </g>
 
         {slots.map((s) => {
           const team = s.side === 'user' ? club : opponent;
           return (
             <g key={s.key} ref={(el: SVGGElement | null) => { nodes.current[s.key] = el; }} transform={`translate(${s.x.toFixed(1)} ${s.y.toFixed(1)})`}>
-              <ellipse cy={13} rx={11} ry={4} fill="rgba(0,0,0,.35)" />
-              <circle r={14} fill={team.primary_color} stroke={team.secondary_color} strokeWidth={3} />
-              <circle r={12.5} fill="url(#kit-gloss)" style={{ pointerEvents: 'none' }} />
-              <text textAnchor="middle" dy={4.5} fontSize={13} fontWeight={700} fill={textOn(team.primary_color)} style={{ pointerEvents: 'none' }}>
-                {s.name.slice(0, 1).toUpperCase()}
-              </text>
+              {amb.time === 'night' && <ellipse cx={-9} cy={11} rx={13} ry={4.2} fill="rgba(0,0,0,.14)" filter={soft} />}
+              {amb.time === 'night' && <ellipse cx={6} cy={12.5} rx={14} ry={4.6} fill="rgba(0,0,0,.34)" filter={soft} transform="rotate(8 6 12.5)" />}
+              {amb.time === 'day' && <ellipse cx={1} cy={13} rx={11} ry={3.6} fill={rain ? 'rgba(0,0,0,.14)' : 'rgba(0,0,0,.3)'} filter={soft} />}
+              {amb.time === 'afternoon' && <ellipse cx={15} cy={12} rx={23} ry={3.8} fill={rain ? 'rgba(0,0,0,.14)' : 'rgba(0,0,0,.3)'} filter={soft} transform="rotate(5 15 12)" />}
+              {(() => {
+                const keeper = s.pos === 'GK';
+                const base = keeper ? keeperColor(club.primary_color, opponent.primary_color) : team.primary_color;
+                const ink = textOn(base);
+                return (
+                  <>
+                    <circle r={14.6} fill={keeper ? '#101418' : team.secondary_color} stroke="rgba(0,0,0,.45)" strokeWidth={0.9} />
+                    <g clipPath="url(#tok-clip)">
+                      <rect x={-13} y={-13} width={26} height={26} fill={base} />
+                      {keeper ? <rect x={-13} y={5} width={26} height={8} fill="#101418" opacity={0.28} /> : <KitPattern kind={kitKind(team.abbreviation)} color={team.secondary_color} />}
+                      <rect x={-13} y={-13} width={26} height={26} fill="url(#tok-shade)" style={{ pointerEvents: 'none' }} />
+                    </g>
+                    <circle r={12.3} fill="none" stroke="rgba(0,0,0,.28)" strokeWidth={0.8} />
+                    <circle r={12.5} fill="url(#kit-gloss)" style={{ pointerEvents: 'none' }} />
+                    <text
+                      textAnchor="middle"
+                      dy={4.6}
+                      fontSize={13}
+                      fontWeight={800}
+                      fill={ink}
+                      stroke={ink === '#ffffff' ? 'rgba(0,0,0,.6)' : 'rgba(255,255,255,.7)'}
+                      strokeWidth={2.6}
+                      strokeLinejoin="round"
+                      style={{ pointerEvents: 'none', paintOrder: 'stroke' }}
+                    >
+                      {s.name.slice(0, 1).toUpperCase()}
+                    </text>
+                  </>
+                );
+              })()}
               <g
                 ref={(el: SVGGElement | null) => {
                   staminaBars.current[s.key] = { ...(staminaBars.current[s.key] ?? { fill: null }), box: el };
@@ -2051,6 +2627,11 @@ export default function MatchPitch({ crowd, onClip, mapRef, club, opponent, user
           );
         })}
 
+        {!lite && <g style={{ pointerEvents: 'none' }} fill={rain ? '#dcecf7' : '#cdb98f'} filter={soft}>
+          {Array.from({ length: DUST_POOL }).map((_, i) => (
+            <circle key={i} ref={(el: SVGCircleElement | null) => { dustNodes.current[i] = el; }} r={4} cx={0} cy={0} display="none" opacity={0} />
+          ))}
+        </g>}
         <g ref={ringNode} style={{ display: 'none' }}>
           <circle r={20} fill="none" stroke="#F5B800" strokeWidth={2.5} />
         </g>
@@ -2058,27 +2639,44 @@ export default function MatchPitch({ crowd, onClip, mapRef, club, opponent, user
           <circle key={`trail-${i}`} ref={(el: SVGCircleElement | null) => { trailNodes.current[i] = el; }} r={5.5 - i * 0.6} fill="#ffffff" opacity={0} />
         ))}
         <g ref={ballNode} transform={`translate(${MID_X} ${MID_Y})`}>
-          <ellipse cy={6} rx={6.5} ry={2.6} fill="rgba(0,0,0,.4)" />
+          <ellipse ref={ballShadow} cx={amb.time === 'afternoon' ? 5 : 1.5} cy={6.5} rx={6.5} ry={2.6} fill="rgba(0,0,0,.42)" filter={soft} />
           <g ref={liftNode}>
             <defs>
               <clipPath id="ball-clip">
                 <circle r={BALL_R} />
               </clipPath>
             </defs>
-            <circle r={BALL_R} fill="#ffffff" />
+            <circle r={BALL_R} fill={ballSkin.base} />
             <g ref={spinNode} clipPath="url(#ball-clip)">
-              <polygon points={BALL_CENTER} fill="#15181c" />
+              <polygon points={BALL_CENTER} fill={ballSkin.ink} />
               {BALL_SEAMS.map((l, i) => (
-                <line key={i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke="#15181c" strokeWidth={0.9} />
+                <line key={i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke={ballSkin.ink} strokeWidth={0.9} />
               ))}
               {BALL_EDGES.map((points, i) => (
-                <polygon key={i} points={points} fill="#15181c" />
+                <polygon key={i} points={points} fill={ballSkin.ink} />
               ))}
             </g>
-            <circle r={BALL_R} fill="none" stroke="#15181c" strokeWidth={1.2} />
+            <circle r={BALL_R} fill="none" stroke={ballSkin.ink} strokeWidth={1.2} />
             
           </g>
         </g>
+        {rain && (
+          <g style={{ pointerEvents: 'none' }} stroke="#d6e8f5" strokeWidth={1} strokeLinecap="round">
+            {Array.from({ length: lite ? 28 : 80 }).map((_, i) => (
+              <line
+                key={i}
+                className="pc-drop"
+                x1={wrand(i, 31) * (W + 40)}
+                y1={-STAND}
+                x2={wrand(i, 31) * (W + 40) - 3}
+                y2={-STAND + 11 + wrand(i, 32) * 6}
+                opacity={0.2 + wrand(i, 33) * 0.3}
+                style={{ ['--rd' as string]: `${(0.55 + wrand(i, 34) * 0.4).toFixed(2)}s`, ['--rl' as string]: `${(-wrand(i, 35) * 1).toFixed(2)}s` }}
+              />
+            ))}
+          </g>
+        )}
+        {rain && !lite && <rect className="pc-strike" x={0} y={-STAND} width={W} height={H + STAND * 2} fill="#eaf3ff" style={{ pointerEvents: 'none' }} />}
         <text
           ref={nameNode}
           textAnchor="middle"

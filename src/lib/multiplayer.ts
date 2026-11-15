@@ -17,6 +17,12 @@ export type PlanItem = {
   // Quem finalizou e quem defendeu (nomes). Só nos lances de finalização, defesa e gol.
   shooter?: string;
   keeper?: string;
+  // Bola parada com jogada ensaiada (gravada pelo anfitrião): tipo e jogada escolhida, para o texto do lance ser igual nos dois lados
+  spk?: 'escanteio' | 'falta';
+  spo?: 'cruzamento' | 'curto' | 'direto';
+  // Só no item "meta": versão das mudanças ao vivo (troca de estilo, grito, bola parada) e ids já aplicados pelo anfitrião
+  dv?: number;
+  ap?: string;
 };
 // Disputa de pênaltis do multiplayer. Cada jogador grava SÓ na própria coluna (sem sobrescrever o outro):
 //  - shootout_host:  { choices, kicks }  (o anfitrião também resolve cada cobrança e grava o resultado em `kicks`)
@@ -56,23 +62,31 @@ export type Room = {
 };
 // Tática escolhida antes da partida. Fica guardada junto do time na sala (chave `_t` de host_squad/guest_squad),
 // então não precisa de coluna nova no banco.
-export type Tactic = 'ofensiva' | 'equilibrada' | 'defensiva';
-export const TACTICS: Tactic[] = ['ofensiva', 'equilibrada', 'defensiva'];
+export type Tactic = 'ofensiva' | 'equilibrada' | 'defensiva' | 'contra' | 'posse' | 'pressao';
+export const TACTICS: Tactic[] = ['ofensiva', 'equilibrada', 'defensiva', 'contra', 'posse', 'pressao'];
 export const TACTIC_INFO: Record<Tactic, { label: string; icon: string; text: string }> = {
   ofensiva: { label: 'Ofensiva', icon: '⚔️', text: 'Cria mais chances de gol, mas deixa o rival criar mais também.' },
   equilibrada: { label: 'Equilibrada', icon: '⚖️', text: 'Sem riscos: o jogo segue o equilíbrio normal dos times.' },
   defensiva: { label: 'Defensiva', icon: '🛡️', text: 'Cria menos chances, mas também segura mais o rival.' },
+  contra: { label: 'Contra-ataque', icon: '⚡', text: 'Poucas chances, mas muito perigosas: cada chute vale mais. Cede um pouco de espaço.' },
+  posse: { label: 'Posse de bola', icon: '🎯', text: 'Toca e controla o jogo: o rival chuta bem menos e você cansa menos. Chutes menos incisivos.' },
+  pressao: { label: 'Pressão alta', icon: '🔥', text: 'Sufoca a saída do rival e cria mais, mas o time cansa bem mais rápido.' },
 };
 export function tacticOf(squad: Squad | null | undefined): Tactic {
   const value = squad?._t;
-  return value === 'ofensiva' || value === 'defensiva' ? value : 'equilibrada';
+  return value === 'ofensiva' || value === 'defensiva' || value === 'contra' || value === 'posse' || value === 'pressao' ? value : 'equilibrada';
 }
 // Quantos chutes a tática muda: `own` nos chutes do próprio time, `conceded` nos chutes que o rival ganha contra ela
-const TACTIC_SHOTS: Record<Tactic, { own: number; conceded: number }> = {
+export const TACTIC_SHOTS: Record<Tactic, { own: number; conceded: number }> = {
   ofensiva: { own: 2, conceded: 2 },
   equilibrada: { own: 0, conceded: 0 },
   defensiva: { own: -2.5, conceded: -2 },
+  contra: { own: -1.5, conceded: 0.5 },
+  posse: { own: 0.5, conceded: -2 },
+  pressao: { own: 1.5, conceded: 0.5 },
 };
+// Bônus (ou perda) na chance de o chute no gol virar gol, conforme o estilo de quem chuta
+export const TACTIC_QUALITY: Record<Tactic, number> = { ofensiva: 0, equilibrada: 0, defensiva: 0, contra: 0.06, posse: -0.025, pressao: 0.01 };
 
 // `slot` é a posição em que o jogador foi escalado no draft (pode ser diferente da posição de origem)
 type Lite = {
@@ -175,6 +189,17 @@ export async function fetchRoom(id: string): Promise<Room | null> {
   return (data as Room | null) ?? null;
 }
 
+// Como fetchRoom, mas diz se a consulta deu certo (sem internet não é o mesmo que "sala apagada")
+export async function pingRoom(id: string): Promise<{ ok: boolean; room: Room | null }> {
+  try {
+    const { data, error } = await supabase.from('rooms').select('*').eq('id', id).maybeSingle();
+    if (error) return { ok: false, room: null };
+    return { ok: true, room: (data as Room | null) ?? null };
+  } catch {
+    return { ok: false, room: null };
+  }
+}
+
 // A partida dura ~81 s (90 min x 900 ms). Passou de 3 min, ficou esquecida no banco e não está mais rolando.
 const MATCH_MAX_AGE_MS = 3 * 60 * 1000;
 
@@ -211,8 +236,49 @@ export async function listLiveRooms(): Promise<Room[]> {
 }
 
 export async function patchRoom(id: string, patch: Partial<Room>) {
-  const { error } = await supabase.from('rooms').update(patch).eq('id', id);
-  return error ? error.message : '';
+  // Se a internet cair por alguns segundos, tenta de novo em vez de perder a jogada (o envio é idempotente)
+  let last = '';
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      const { error } = await supabase.from('rooms').update(patch).eq('id', id);
+      if (!error) return '';
+      last = error.message;
+      // erro de regra/permissão não melhora tentando de novo: só repete falha de rede
+      if (!/fetch|network|timeout|failed|load/i.test(last)) return last;
+    } catch (cause) {
+      last = cause instanceof Error ? cause.message : 'Falha de rede';
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 1200 * (attempt + 1)));
+  }
+  return last;
+}
+
+// Sala em andamento deste aparelho: se a página recarregar ou o celular fechar o app, dá para voltar à mesma partida
+const ACTIVE_ROOM_KEY = '7v7-active-room';
+export function saveActiveRoom(id: string) {
+  try {
+    localStorage.setItem(ACTIVE_ROOM_KEY, JSON.stringify({ id, at: Date.now() }));
+  } catch {
+    /* sem armazenamento: só não oferece voltar */
+  }
+}
+export function clearActiveRoom() {
+  try {
+    localStorage.removeItem(ACTIVE_ROOM_KEY);
+  } catch {
+    /* sem armazenamento */
+  }
+}
+export function loadActiveRoom(): string | null {
+  try {
+    const raw = localStorage.getItem(ACTIVE_ROOM_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as { id?: string; at?: number };
+    if (!data.id || !data.at || Date.now() - data.at > 30 * 60 * 1000) return null;
+    return data.id;
+  } catch {
+    return null;
+  }
 }
 
 const clampNum = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
@@ -256,7 +322,7 @@ function pickShooter(squad: Lite[]): Lite | undefined {
 const keeperOf = (squad: Lite[]) => squad.find((player) => posOf(player) === 'GK');
 
 // Número aleatório de gols (distribuição de Poisson): média `lambda`
-function poisson(lambda: number) {
+export function poisson(lambda: number) {
   const limit = Math.exp(-lambda);
   let k = 0;
   let p = 1;
@@ -352,7 +418,7 @@ export function generatePlan(
     const onTarget = Math.random() < clampNum(0.6 + (skill - 78) * 0.002, 0.4, 0.8);
     if (!onTarget) return { side, shooter, keeper, outcome: 'fora' };
     // No gol: atacante melhor que o goleiro marca mais; goleiro melhor que o atacante defende mais
-    const pGoal = clampNum(0.36 + (skill - keeperSkill) * DUEL_PER_POINT, 0.1, 0.75);
+    const pGoal = clampNum(0.36 + (skill - keeperSkill) * DUEL_PER_POINT + TACTIC_QUALITY[side === 'host' ? hostTactic : guestTactic], 0.1, 0.75);
     return { side, shooter, keeper, outcome: Math.random() < pGoal ? 'gol' : 'defesa' };
   };
   // A tática mexe na quantidade de chutes: a própria (cria mais/menos) e a do rival (cede mais/menos)
@@ -484,7 +550,7 @@ export function subsOf(squad: Squad | null | undefined): { slot: string; inId: s
 export const encodeSubs = (picks: { slot: string; inId: string }[]) =>
   JSON.stringify(picks.slice(0, SUBS_MAX).map((pick) => ({ s: pick.slot, i: pick.inId })));
 const DRAIN_PER_MINUTE: Record<string, number> = { GK: 0.05, CF: 0.22, LF: 0.26, RF: 0.26, CM: 0.32, LB: 0.24, RB: 0.24 };
-const TACTIC_DRAIN: Record<Tactic, number> = { ofensiva: 1.2, equilibrada: 1, defensiva: 0.88 };
+const TACTIC_DRAIN: Record<Tactic, number> = { ofensiva: 1.2, equilibrada: 1, defensiva: 0.88, contra: 0.95, posse: 0.9, pressao: 1.35 };
 const TIRED_FROM = 75;
 const FATIGUE_PER_POINT = 0.18;
 export const OUT_OF_POSITION_PENALTY = 5;
@@ -496,9 +562,16 @@ export const slowdown = (stamina: number) => clampNum((70 - stamina) / 200, 0, 0
 
 // Fôlego (0 a 100) de quem está em campo na `position`, no minuto `minute`, tendo entrado no minuto `since`.
 // `effortPoints`: pontos de fôlego já gastos pelo esforço em campo.
+// Minuto em que o gramado fica molhado nesta partida (vem da sala, igual nos dois lados): em chuva o time cansa mais
+let wetFromMinute = Infinity;
+export const setWetFrom = (minute: number) => {
+  wetFromMinute = minute;
+};
+export const WET_EXTRA_DRAIN = 0.15;
 export function staminaAt(position: string, minute: number, tactic: Tactic = 'equilibrada', since = 0, effortPoints = 0): number {
   const played = Math.max(0, minute - since);
-  return clampNum(100 - (DRAIN_PER_MINUTE[position] ?? 0.26) * TACTIC_DRAIN[tactic] * played - effortPoints, 5, 100);
+  const wetPlayed = Math.max(0, minute - Math.max(since, wetFromMinute));
+  return clampNum(100 - (DRAIN_PER_MINUTE[position] ?? 0.26) * TACTIC_DRAIN[tactic] * (played + WET_EXTRA_DRAIN * wetPlayed) - effortPoints, 5, 100);
 }
 // Overall que o jogador realmente rende com esse fôlego (e fora de posição, se for o caso)
 export function effectiveOverall(overall: number, stamina: number, outOfPosition = false): number {

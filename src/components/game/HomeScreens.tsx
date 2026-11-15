@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { stadiumCss } from '@/lib/game/stadiumCss';
-import { ArrowLeft, ArrowRight, CircleUserRound, Database, Menu, Play, Shield, Swords, Trophy, Users, X, Zap } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CircleUserRound, Database, Download, Menu, Settings, Play, Shield, Swords, Trophy, Users, X, Zap } from 'lucide-react';
 import { positionNames, type Player, type Team } from '@/lib/game/types';
 import { Badge, Card, LogoMark, SHIELD_CLIP } from '@/components/game/Card';
 
@@ -22,6 +22,8 @@ const headerCss = `
 .hd .profile-button { gap: 10px; padding: 5px 14px 5px 5px; border-radius: 999px; border: 1px solid rgba(245,184,0,.45);
   background: linear-gradient(100deg, rgba(245,184,0,.18), rgba(255,255,255,.03)); color: #fff; font-size: 13px; font-weight: 800; letter-spacing: .5px; cursor: pointer; }
 .hd .profile-button:hover { border-color: #F5B800; box-shadow: 0 0 18px rgba(245,184,0,.3); color: #fff; }
+.hd .gear { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 12px; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.05); color: #fff; cursor: pointer; }
+.hd .gear:hover { border-color: #F5B800; color: #F5B800; }
 .hd .pv { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-weight: 900; font-size: 14px; color: #1a1200; text-transform: uppercase;
   background: radial-gradient(circle at 30% 25%, #ffe27a, #c48a00); }
 .hd .pn { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -31,7 +33,7 @@ const headerCss = `
 .hd .m-menu button { display: flex; align-items: center; gap: 12px; padding: 13px 14px; border: 0; border-radius: 10px; background: transparent; color: #fff; font-weight: 800; letter-spacing: 1px; font-size: 13px; text-transform: uppercase; text-align: left; cursor: pointer; }
 .hd .m-menu button.on, .hd .m-menu button:hover { background: rgba(245,184,0,.14); color: #F5B800; }
 @media (min-width: 851px) { .hd .m-menu { display: none; } .hd .mobile-menu { display: none; } }
-@media (max-width: 850px) { .hd nav { display: none; } .hd .mobile-menu { display: grid; margin-left: 0; } .hd .profile-button { margin-left: auto; } }
+@media (max-width: 850px) { .hd nav { display: none; } .hd .mobile-menu { display: grid; margin-left: 0; } .hd .gear { margin-left: auto; } .hd .profile-button { margin-left: 0; } }
 @media (max-width: 560px) { .topbar.hd { height: 58px; gap: 10px; padding: 0 12px; } .hd .brand b { font-size: 22px; } .hd .brand small { display: none; }
   .hd .profile-button { padding: 4px 10px 4px 4px; font-size: 12px; } .hd .pv { width: 28px; height: 28px; } .hd .pn { max-width: 80px; } }
 `;
@@ -46,6 +48,7 @@ export function Header({
   onProfile,
   onFriends,
   onLogin,
+  onSettings,
   loggedIn,
   active,
 }: {
@@ -58,6 +61,7 @@ export function Header({
   onProfile: () => void;
   onFriends: () => void;
   onLogin: () => void;
+  onSettings?: () => void;
   loggedIn: boolean;
   active: string;
 }) {
@@ -90,6 +94,11 @@ export function Header({
           </button>
         ))}
       </nav>
+      {onSettings && (
+        <button className="gear" aria-label="Configurações" title="Configurações" onClick={onSettings}>
+          <Settings size={18} />
+        </button>
+      )}
       <button className="profile-button" onClick={loggedIn ? onProfile : onLogin}>
         <span className="pv">{(nickname || '?').slice(0, 1)}</span>
         <span className="pn">{loggedIn ? nickname : 'Entrar'}</span>
@@ -159,6 +168,11 @@ const homeCss = `
 .hm-item:has(.hm-badge)::after { display: none; }
 .hm-badge { margin-left: auto; padding: 3px 8px; border-radius: 999px; font-size: 10px; font-weight: 900; letter-spacing: .8px; background: #ef4444; color: #fff; white-space: nowrap; }
 .hm-badge.gold { background: #F5B800; color: #1a1200; }
+.hm-ios { position: fixed; inset: 0; z-index: 400; background: rgba(3,6,12,.8); backdrop-filter: blur(6px); display: grid; place-items: center; padding: 16px; }
+.hm-ios > div { width: min(420px, 100%); background: #0f1622; border: 1px solid rgba(245,184,0,.5); border-radius: 16px; padding: 22px; box-shadow: 0 24px 70px rgba(0,0,0,.6); }
+.hm-ios h3 { margin: 0 0 12px; font-size: 20px; font-weight: 900; color: #F5B800; }
+.hm-ios ol { margin: 0 0 16px; padding-left: 20px; display: grid; gap: 9px; line-height: 1.4; color: rgba(255,255,255,.9); }
+.hm-ios button { width: 100%; padding: 12px; border: 0; border-radius: 999px; background: #F5B800; color: #1a1200; font-weight: 900; cursor: pointer; }
 .hm-dot { position: absolute; top: 9px; right: 9px; width: 10px; height: 10px; border-radius: 50%; background: #ef4444; box-shadow: 0 0 0 0 rgba(239,68,68,.7); animation: hmPing 1.6s infinite; }
 @keyframes hmPing { 70% { box-shadow: 0 0 0 10px rgba(239,68,68,0); } 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); } }
 
@@ -293,6 +307,9 @@ export function Home({
   nickname,
   featured,
   liveRooms = 0,
+  offline = false,
+  install,
+  onSettings,
 }: {
   isAdmin: boolean;
   onAdmin: () => void;
@@ -310,8 +327,13 @@ export function Home({
   nickname: string;
   featured: Player[];
   liveRooms?: number;
+  // Sem internet: só o que roda no aparelho (draft contra o bot e elenco) fica ativo
+  onSettings?: () => void;
+  offline?: boolean;
+  install?: { canInstall: boolean; needsIosSteps: boolean; install: () => Promise<void> };
 }) {
   const [sel, setSel] = useState<HomeKey>('play');
+  const [iosHelp, setIosHelp] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [idx, setIdx] = useState(0);
   const current = featured.length ? featured[idx % featured.length] : null;
@@ -349,6 +371,17 @@ export function Home({
       dot: !loggedIn,
       title: <>SUA<br /><em>CARREIRA.</em></>, text: 'Nível, vitórias, derrotas e o seu histórico de partidas.' },
   ];
+  if (offline) {
+    for (const item of items) {
+      if (item.key === 'multi' || item.key === 'friends' || item.key === 'tour' || item.key === 'rank' || item.key === 'profile') {
+        item.sub = 'Precisa de internet';
+        item.badge = '📡';
+        item.dot = false;
+        item.run = () => undefined;
+        item.cta = 'Indisponível offline';
+      }
+    }
+  }
   const cur = items.find((i) => i.key === sel) ?? items[0];
 
   const go = (run: () => void) => {
@@ -405,6 +438,25 @@ export function Home({
               {!item.badge && item.dot && <i className="hm-dot" />}
             </button>
           ))}
+          {install && (install.canInstall || install.needsIosSteps) && (
+            <button className="hm-item" onClick={() => (install.canInstall ? void install.install() : setIosHelp(true))}>
+              <span className="hm-ico"><Download size={22} /></span>
+              <span>
+                <b>Instalar app</b>
+                <small>Ícone na tela inicial</small>
+              </span>
+              <span className="hm-badge gold">GRÁTIS</span>
+            </button>
+          )}
+          {onSettings && (
+            <button className="hm-item" onClick={onSettings}>
+              <span className="hm-ico"><Settings size={22} /></span>
+              <span>
+                <b>Configurações</b>
+                <small>Desempenho e notificações</small>
+              </span>
+            </button>
+          )}
           {isAdmin && (
             <button className="hm-item" onClick={onAdmin}>
               <span className="hm-ico"><Shield size={22} /></span>
@@ -474,6 +526,20 @@ export function Home({
           </div>
         </section>
       </div>
+      {iosHelp && (
+        <div className="hm-ios" role="dialog" aria-label="Como instalar no iPhone" onClick={() => setIosHelp(false)}>
+          <div onClick={(e) => e.stopPropagation()}>
+            <h3>Instalar no iPhone / iPad</h3>
+            <ol>
+              <li>Abra este site no <b>Safari</b>.</li>
+              <li>Toque no botão <b>Compartilhar</b> (o quadrado com a seta para cima).</li>
+              <li>Escolha <b>Adicionar à Tela de Início</b>.</li>
+              <li>Pronto: o 7v7 abre em tela cheia, e dá para jogar contra o bot sem internet.</li>
+            </ol>
+            <button onClick={() => setIosHelp(false)}>Entendi</button>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

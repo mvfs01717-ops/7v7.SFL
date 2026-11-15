@@ -1,5 +1,8 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CircleUserRound, Goal, RefreshCw, Shield, SkipForward, Zap } from 'lucide-react';
-import MatchPitch from '@/components/MatchPitch';
+import MatchPitch, { type LiveSnap } from '@/components/MatchPitch';
+import { StadiumFx } from '@/components/game/StadiumFx';
+import { LiveCam, LIVE_MODES, type LiveMode } from '@/components/game/LiveCam';
 import type { ClipData } from '@/components/game/ReplayPlayer';
 import type { MatchMapData } from '@/lib/game/matchMap';
 import { useCrowd } from '@/components/game/useCrowd';
@@ -7,10 +10,17 @@ import { useWatchers } from '@/lib/friends';
 import PenaltyShootout, { type Shootout } from '@/components/PenaltyShootout';
 import { slotOf } from '@/lib/game/helpers';
 import { type MatchEvent, type MatchStats, type Player, type Position, type Team } from '@/lib/game/types';
-import { SUBS_WINDOW_SEC, effortLoss, staminaAt, type ChatMessage, type Tactic } from '@/lib/multiplayer';
+import { SUBS_WINDOW_SEC, effortLoss, setWetFrom, staminaAt, type ChatMessage, type Tactic } from '@/lib/multiplayer';
 import { TeamMark } from '@/components/game/Card';
 import { ChatBox, ChatToast } from '@/components/game/Chat';
-import { HalftimeBreak, PenaltyPrep, SubstitutionPanel, staminaColor } from '@/components/game/Halftime';
+import { pickKits } from '@/lib/game/kit';
+import { CoachPanel } from '@/components/game/CoachPanel';
+import type { Shout } from '@/lib/game/coach';
+import { HalftimeBreak, PenaltyPrep, SetPiecePrep, SubstitutionPanel, staminaColor } from '@/components/game/Halftime';
+import type { SetKind, SetOption } from '@/lib/game/setpiece';
+import { ambienceLabel, pickAmbience, weatherAt, wetFromOf, type Ambience } from '@/lib/game/ambience';
+import { stadiumFor } from '@/lib/game/stadium';
+import { TvOverlay } from '@/components/game/TvOverlay';
 import { stadiumCss } from '@/lib/game/stadiumCss';
 
 const matchCss = `
@@ -44,13 +54,18 @@ const matchCss = `
 `;
 
 export function MatchScreen({
-  club,
-  opponent,
+  club: clubProp,
+  opponent: opponentProp,
   userTeam,
   botTeam,
   minute,
+  ambience: ambienceProp,
   extra,
   pause,
+  setPiece,
+  rivalNote,
+  onSetPiece,
+  coach,
   restartKey,
   penaltyPrep,
   score,
@@ -85,7 +100,11 @@ export function MatchScreen({
   botTeam: Player[];
   minute: number;
   extra: number;
-  pause: 'halftime' | 'break' | 'subs' | 'return' | null;
+  pause: 'halftime' | 'break' | 'subs' | 'return' | 'setpiece' | null;
+  setPiece?: { kind: SetKind; minute: number; floating?: boolean } | null;
+  rivalNote?: string;
+  onSetPiece?: (option: SetOption) => void;
+  coach?: { delayNote?: number; shoutsLeft: number; activeUntil: number; activeShout: Shout | null; onTactic: (t: Tactic) => void; onShout: (s: Shout) => void };
   restartKey: number;
   penaltyPrep: boolean;
   score: { user: number; bot: number };
@@ -109,12 +128,73 @@ export function MatchScreen({
   onSubs: (choices: { slot: Position; inId: string }[]) => void;
   multiplayer: boolean;
   net?: { roomId: string; role: 'host' | 'guest' | 'spectator' };
+  ambience?: Ambience;
   onAbort?: () => void;
   userId: string | null;
   chatMessages: ChatMessage[];
   onSendChat: (text: string) => boolean;
 }) {
   const watchers = useWatchers(net?.roomId, net?.role);
+  // Horário e clima da partida (no multiplayer vêm do código da sala, então todo mundo vê o mesmo)
+  // Quem joga em casa: no multiplayer é o anfitrião (o convidado vê o adversário como dono da casa); contra o bot é você
+  const homeSide: 'user' | 'bot' = net?.role === 'guest' ? 'bot' : 'user';
+  // Camisa reserva: se as cores se parecem demais, o visitante joga com outra camisa (só nesta tela de jogo)
+  const kits = useMemo(() => pickKits(clubProp, opponentProp, homeSide), [clubProp, opponentProp, homeSide]);
+  const club = kits.club;
+  const opponent = kits.opponent;
+  const [kitToast, setKitToast] = useState(!!kits.away);
+  useEffect(() => {
+    if (!kitToast) return undefined;
+    const id = window.setTimeout(() => setKitToast(false), 5000);
+    return () => window.clearTimeout(id);
+  }, [kitToast]);
+  const homeTeam = homeSide === 'user' ? club : opponent;
+  const baseAmbience = useMemo(() => ambienceProp ?? pickAmbience(net?.roomId), [ambienceProp, net?.roomId]);
+  // O gramado molhado muda o cansaço (igual nos dois lados): informa o minuto em que a chuva começa
+  setWetFrom(wetFromOf(baseAmbience));
+  const rainNow = weatherAt(baseAmbience, minute);
+  const ambience = useMemo<Ambience>(() => ({ ...baseAmbience, weather: rainNow }), [baseAmbience, rainNow]);
+  const [rainToast, setRainToast] = useState(false);
+  const wasRain = useRef(rainNow);
+  useEffect(() => {
+    if (!wasRain.current && rainNow === 'rain') {
+      setRainToast(true);
+      const id = window.setTimeout(() => setRainToast(false), 5000);
+      wasRain.current = true;
+      return () => window.clearTimeout(id);
+    }
+    wasRain.current = rainNow === 'rain';
+    return undefined;
+  }, [rainNow]);
+  // Câmeras ao vivo (3D): a escolha fica salva no aparelho
+  const liveRef = useRef<LiveSnap | null>(null);
+  const [cam, setCam] = useState<LiveMode>(() => {
+    try {
+      const v = localStorage.getItem('7v7-cam') as LiveMode | null;
+      return v && LIVE_MODES.some((m) => m.key === v) ? v : 'tatica';
+    } catch {
+      return 'tatica';
+    }
+  });
+  const pitchWrapRef = useRef<HTMLDivElement | null>(null);
+  const pickCam = (m: LiveMode) => {
+    setCam(m);
+    try {
+      localStorage.setItem('7v7-cam', m);
+    } catch {
+      /* sem armazenamento */
+    }
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+      const m = LIVE_MODES[Number(e.key) - 1];
+      if (m) pickCam(m.key);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const crowd = useCrowd({ club, opponent, events, shownGoalIds, score, minute, pause, active: !penaltyPhase && !penaltyPrep, squads: { user: userTeam, bot: botTeam } });
   // O lance do gol só aparece no feed depois que a bola entrou na animação
   const feed = events.filter((event) => event.type !== 'gol' || shownGoalIds.includes(event.id));
@@ -159,6 +239,8 @@ export function MatchScreen({
         <div className="match-meta">
           {net?.role === 'spectator' ? <span className="mt-spec">👁 VOCÊ ESTÁ ASSISTINDO</span> : <span>SIMULAÇÃO 7V7</span>}
           <span>90 MINUTOS</span>
+          <span>{stadiumFor(homeTeam).name.toUpperCase()}</span>
+          <span>{ambienceLabel(baseAmbience, minute).toUpperCase()}</span>
           {watchers > 0 && <span className="mt-eye">👁 {watchers} ASSISTINDO</span>}
         </div>
       </div>
@@ -175,7 +257,13 @@ export function MatchScreen({
         />
       ) : (
         <div style={{ position: 'relative', minHeight: pause === 'subs' ? 620 : undefined }}>
+          <div ref={pitchWrapRef} style={{ visibility: cam === 'tatica' ? 'visible' : 'hidden' }}>
           <MatchPitch
+            wet={Math.min(1, 0.3 + Math.max(0, minute - wetFromOf(baseAmbience)) / 65)}
+            grassFade={Math.min(1, Math.max(0, (minute - 35) / 55)) * 0.7}
+            liveRef={liveRef}
+            home={homeSide}
+            ambience={ambience}
             crowd={crowd}
             onClip={onClip}
             mapRef={mapRef}
@@ -190,6 +278,32 @@ export function MatchScreen({
             endHalfRef={endHalfRef}
             deadBallRef={deadBallRef}
           />
+          </div>
+          {cam === 'tatica' && <StadiumFx liveRef={liveRef} club={club} opponent={opponent} home={homeSide} ambience={ambience} burst={crowd.burst} score={score} wrapRef={pitchWrapRef} />}
+          {cam !== 'tatica' && <LiveCam grassFade={Math.min(1, Math.max(0, (minute - 35) / 55)) * 0.7} liveRef={liveRef} mode={cam} club={club} opponent={opponent} home={homeSide} ambience={ambience} burst={crowd.burst} score={score} />}
+          <div style={{ position: 'absolute', right: 8, bottom: 8, zIndex: 6, display: 'flex', gap: 2, padding: 3, borderRadius: 999, background: 'rgba(8,12,20,.8)' }}>
+            {LIVE_MODES.map((m, i) => (
+              <button
+                key={m.key}
+                onClick={() => pickCam(m.key)}
+                title={`Tecla ${i + 1}`}
+                style={{ border: 0, cursor: 'pointer', padding: '4px 9px', borderRadius: 999, font: '800 10px Inter, sans-serif', background: cam === m.key ? '#F5B800' : 'transparent', color: cam === m.key ? '#111' : '#fff' }}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          {kitToast && kits.away && (
+            <div role="status" style={{ position: 'absolute', left: '50%', top: 40, transform: 'translateX(-50%)', zIndex: 7, padding: '6px 14px', borderRadius: 999, background: 'rgba(8,12,20,.92)', border: '1px solid #F5B800', color: '#fff', font: '900 11px Inter, sans-serif', letterSpacing: '.5px' }}>
+              👕 {(kits.away === 'user' ? club : opponent).abbreviation} JOGA DE CAMISA RESERVA (CORES PARECIDAS)
+            </div>
+          )}
+          {rainToast && (
+            <div role="status" style={{ position: 'absolute', left: '50%', top: 70, transform: 'translateX(-50%)', zIndex: 7, padding: '7px 14px', borderRadius: 999, background: 'rgba(10,22,40,.92)', border: '1px solid #7fb8e8', color: '#fff', font: '900 12px Inter, sans-serif', letterSpacing: '.5px' }}>
+              🌧 COMEÇOU A CHOVER · BOLA PESADA E TIME CANSA MAIS
+            </div>
+          )}
+          <TvOverlay club={club} opponent={opponent} score={score} minute={minute} extra={extra} paused={!!pause} events={events} shownGoalIds={shownGoalIds} />
           {(pause === 'halftime' || pause === 'break' || pause === 'return') && (
             <HalftimeBreak
               phase={pause === 'halftime' ? 'full' : pause === 'break' ? 'out' : 'in'}
@@ -203,6 +317,13 @@ export function MatchScreen({
           )}
           {pause === 'subs' && (
             <SubstitutionPanel club={club} userTeam={userTeam} bench={bench} tactic={tactic} minute={minute} onConfirm={onSubs} limitSec={multiplayer ? SUBS_WINDOW_SEC : undefined} />
+          )}
+          {coach && !pause && !penaltyPhase && !penaltyPrep && minute < 90 && <CoachPanel tactic={tactic} minute={minute} shoutsLeft={coach.shoutsLeft} activeUntil={coach.activeUntil} activeShout={coach.activeShout} onTactic={coach.onTactic} onShout={coach.onShout} delayNote={coach.delayNote} />}
+          {(pause === 'setpiece' || setPiece?.floating) && setPiece && onSetPiece && <SetPiecePrep key={setPiece.minute} kind={setPiece.kind} minute={setPiece.minute} club={club} floating={!!setPiece.floating} onPick={onSetPiece} />}
+          {rivalNote && (
+            <div role="status" style={{ position: 'absolute', left: 8, top: 70, zIndex: 7, padding: '6px 12px', borderRadius: 10, background: 'rgba(8,12,20,.92)', border: '1px solid #ff6a4f', color: '#fff', font: '800 11px Inter, sans-serif' }}>
+              {rivalNote}
+            </div>
           )}
           {penaltyPrep && <PenaltyPrep club={club} opponent={opponent} score={score} />}
         </div>

@@ -2,6 +2,8 @@
 // Home olha o campo, Multiplayer sobe para a arquibancada, Escolha de clube vai para o lado esquerdo etc.
 // Só o fundo se move (nada é clicável). O resto do app continua igual.
 
+import { useLite } from '@/lib/settings';
+
 export type BackdropCamera = 'wide' | 'stands' | 'left' | 'right' | null;
 
 // z = zoom; tx/ty = deslocamento em % do tamanho da tela (já limitado para nunca mostrar a borda da imagem)
@@ -22,13 +24,15 @@ const css = `
   rgba(8, 20, 60, .16); }
 .bd-vig { position: absolute; inset: 0; background: radial-gradient(90% 90% at 50% 45%, transparent 40%, rgba(0, 0, 0, .62)); }
 @media (prefers-reduced-motion: reduce) { .bd-cam, .bd-shade { transition: none; } }
+.bd-lite .bd-cam, .bd-lite .bd-shade { transition: none; will-change: auto; }
 `;
 
 export default function StadiumBackdrop({ camera }: { camera: BackdropCamera }) {
   // Na tela anterior à última câmera o fundo some (draft, partida e admin têm o próprio fundo)
   const cam = CAMERAS[camera ?? 'wide'];
+  const lite = useLite();
   return (
-    <div className="bd" aria-hidden="true" style={{ opacity: camera ? 1 : 0 }}>
+    <div className={`bd ${lite ? 'bd-lite' : ''}`} aria-hidden="true" style={{ opacity: camera ? 1 : 0 }}>
       <style>{css}</style>
       <div className="bd-cam" style={{ ['--z' as string]: cam.z, ['--tx' as string]: `${cam.tx}%`, ['--ty' as string]: `${cam.ty}%` }} />
       <div className="bd-shade" style={{ ['--dim' as string]: cam.dim }} />

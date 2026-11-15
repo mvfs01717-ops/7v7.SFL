@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Card, cardCss } from '@/components/game/Card';
+import { Shirt3D } from '@/components/game/Shirt3D';
 import { DraftField, FIELD_SPOTS } from '@/components/game/DraftScreen';
 import { average, groupAverage, slotOf } from '@/lib/game/helpers';
 import { positionNames, type Player, type Position, type Team } from '@/lib/game/types';
@@ -201,6 +202,7 @@ export function LineupShow({
               </span>
             )}
           </div>
+          <Shirt3D team={team} squad={squad} />
           {bench.length > 0 && (
             <>
               <div style={{ marginTop: 16, fontSize: 18, fontWeight: 900, letterSpacing: '.06em' }}>RESERVAS</div>

@@ -3,6 +3,7 @@ import { PENALTY_PREP_MS, slotOf } from '@/lib/game/helpers';
 import { positions, type Player, type Position, type Team } from '@/lib/game/types';
 import { Card, cardCss } from '@/components/game/Card';
 import { FIELD_SPOTS, DraftField, draftCss } from '@/components/game/DraftScreen';
+import { SET_OPTIONS, SET_TITLE, type SetKind, type SetOption } from '@/lib/game/setpiece';
 import { SUBS_MAX, fitsSlot, staminaAt, substitutionGain, type FieldLite, type Tactic } from '@/lib/multiplayer';
 
 // ---- Intervalo e transição para os pênaltis: usam o mesmo campo do MatchPitch (SVG 740 x 440, time do usuário à esquerda) ----
@@ -490,6 +491,71 @@ export function PenaltyPrep({ club, opponent, score }: { club: Team; opponent: T
           </div>
           <small style={{ display: 'block', marginTop: 6, opacity: 0.7 }}>Preparando a disputa...</small>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Bola parada: o jogador escolhe a jogada ensaiada antes do escanteio ou da falta (só contra o bot)
+export function SetPiecePrep({ kind, minute, club, onPick, floating = false }: { kind: SetKind; minute: number; club: { abbreviation: string; primary_color: string }; onPick: (option: SetOption) => void; floating?: boolean }) {
+  const total = floating ? 8 : 12;
+  const [left, setLeft] = useState(total);
+  useEffect(() => {
+    const id = window.setInterval(() => setLeft((n) => n - 1), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  useEffect(() => {
+    if (left <= 0) onPick('cruzamento');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [left]);
+  const riskColor = { baixo: '#3ddc84', médio: '#F5B800', alto: '#ff6a4f' } as const;
+  if (floating) {
+    // Multiplayer: não pausa o jogo, aparece por cima do campo com tempo curto
+    return (
+      <div role="dialog" aria-label="Jogada ensaiada" style={{ position: 'absolute', left: '50%', bottom: 52, transform: 'translateX(-50%)', zIndex: 8, width: 'min(94%, 480px)', padding: 8, borderRadius: 14, background: 'rgba(4,8,16,.93)', border: '1px solid #F5B800', color: '#fff' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, font: '900 11px Inter, sans-serif', letterSpacing: '.8px' }}>
+          <span style={{ color: '#F5B800' }}>{SET_TITLE[kind]} · {minute}'</span>
+          <span>{Math.max(0, left)} s</span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+          {SET_OPTIONS[kind].map((o) => (
+            <button key={o.id} onClick={() => onPick(o.id)} title={o.text} style={{ cursor: 'pointer', padding: '8px 4px', borderRadius: 10, border: '1px solid rgba(255,255,255,.22)', background: 'rgba(255,255,255,.08)', color: '#fff', display: 'grid', justifyItems: 'center', gap: 2 }}>
+              <span style={{ fontSize: 20 }}>{o.icon}</span>
+              <b style={{ font: '900 11px Inter, sans-serif' }}>{o.label}</b>
+              <small style={{ font: '800 9px Inter, sans-serif', color: riskColor[o.risk], textTransform: 'uppercase' }}>risco {o.risk}</small>
+            </button>
+          ))}
+        </div>
+        <div style={{ marginTop: 6, height: 3, borderRadius: 3, background: 'rgba(255,255,255,.15)', overflow: 'hidden' }}>
+          <div style={{ width: `${(Math.max(0, left) / total) * 100}%`, height: '100%', background: '#F5B800', transition: 'width 1s linear' }} />
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div role="dialog" aria-label="Jogada ensaiada" style={{ position: 'absolute', inset: 0, zIndex: 8, display: 'grid', placeItems: 'center', background: 'rgba(4,8,16,.72)', borderRadius: 14, padding: 12 }}>
+      <div style={{ width: 'min(100%, 460px)', color: '#fff' }}>
+        <div style={{ textAlign: 'center', marginBottom: 10 }}>
+          <div style={{ font: '900 11px Inter, sans-serif', letterSpacing: '1.4px', color: '#F5B800' }}>{minute}' · {club.abbreviation}</div>
+          <div style={{ font: '900 22px Inter, sans-serif', letterSpacing: '.5px' }}>{SET_TITLE[kind]}</div>
+          <div style={{ font: '700 12px Inter, sans-serif', opacity: 0.8 }}>Escolha a jogada ensaiada</div>
+        </div>
+        <div style={{ display: 'grid', gap: 8 }}>
+          {SET_OPTIONS[kind].map((o) => (
+            <button key={o.id} onClick={() => onPick(o.id)} style={{ display: 'grid', gridTemplateColumns: '36px 1fr auto', alignItems: 'center', gap: 10, textAlign: 'left', cursor: 'pointer', padding: '11px 12px', borderRadius: 12, border: '1px solid rgba(255,255,255,.2)', background: 'rgba(255,255,255,.08)', color: '#fff' }}>
+              <span style={{ fontSize: 26 }}>{o.icon}</span>
+              <span>
+                <b style={{ display: 'block', font: '900 15px Inter, sans-serif' }}>{o.label}</b>
+                <small style={{ font: '600 12px/1.25 Inter, sans-serif', opacity: 0.8 }}>{o.text}</small>
+              </span>
+              <span style={{ font: '900 10px Inter, sans-serif', letterSpacing: '.6px', color: riskColor[o.risk], textTransform: 'uppercase' }}>risco {o.risk}</span>
+            </button>
+          ))}
+        </div>
+        <div style={{ marginTop: 10, height: 4, borderRadius: 4, background: 'rgba(255,255,255,.15)', overflow: 'hidden' }}>
+          <div style={{ width: `${(Math.max(0, left) / total) * 100}%`, height: '100%', background: '#F5B800', transition: 'width 1s linear' }} />
+        </div>
+        <div style={{ textAlign: 'center', marginTop: 4, font: '700 11px Inter, sans-serif', opacity: 0.7 }}>Sem escolha em {Math.max(0, left)} s, o time cruza na área</div>
       </div>
     </div>
   );

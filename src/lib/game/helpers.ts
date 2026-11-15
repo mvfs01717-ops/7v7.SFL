@@ -71,6 +71,9 @@ export type PlanEntry = {
   // Nomes sorteados pelo anfitrião em generatePlan (iguais para os dois lados e para quem assiste)
   shooter?: string;
   keeper?: string;
+  // Bola parada com jogada ensaiada (multiplayer): o texto do lance usa isto
+  spk?: 'escanteio' | 'falta';
+  spo?: 'cruzamento' | 'curto' | 'direto';
 };
 
 // Ajusta o plano da partida para terminar empatado: tira gols de quem ganharia

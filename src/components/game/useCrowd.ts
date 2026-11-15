@@ -8,7 +8,7 @@ import type { MatchEvent, Player, Team } from '@/lib/game/types';
 type Side = 'user' | 'bot';
 export type CrowdMood = 'idle' | 'hype' | 'sad' | 'tense';
 export type CrowdBubble = { text: string; mood: CrowdMood; key: number };
-export type CrowdState = { mood: { user: CrowdMood; bot: CrowdMood }; bubbles: { user: CrowdBubble | null; bot: CrowdBubble | null }; noise: number };
+export type CrowdState = { mood: { user: CrowdMood; bot: CrowdMood }; bubbles: { user: CrowdBubble | null; bot: CrowdBubble | null }; noise: number; burst: { side: Side; key: number } | null; wave: { side: Side | 'all'; key: number } | null };
 type Mood = CrowdMood;
 type Bubble = CrowdBubble;
 
@@ -83,7 +83,7 @@ export function useCrowd({
   shownGoalIds: number[];
   score: { user: number; bot: number };
   minute: number;
-  pause: 'halftime' | 'break' | 'subs' | 'return' | null;
+  pause: 'halftime' | 'break' | 'subs' | 'return' | 'setpiece' | null;
   active: boolean;
   // Escalação de cada time em campo: a torcida chama os jogadores pelo nome
   squads?: { user: Player[]; bot: Player[] };
@@ -95,6 +95,12 @@ export function useCrowd({
   const [bubbles, setBubbles] = useState<{ user: Bubble | null; bot: Bubble | null }>({ user: null, bot: null });
   const [mood, setMood] = useState<{ user: Mood; bot: Mood }>({ user: 'idle', bot: 'idle' });
   const [noise, setNoise] = useState(55);
+  const [burst, setBurst] = useState<{ side: Side; key: number } | null>(null);
+  const [wave, setWave] = useState<{ side: Side | 'all'; key: number } | null>(null);
+  const noiseRef = useRef(55);
+  noiseRef.current = noise;
+  const lastWave = useRef(0);
+  const waveTimer = useRef<number | undefined>(undefined);
   const seq = useRef(0);
   const processed = useRef<Set<number>>(new Set());
   const moodTimers = useRef<{ user?: number; bot?: number }>({});
@@ -139,6 +145,15 @@ export function useCrowd({
       say(attack, goalLine, 'hype', 4200);
       say(defend, keeper && Math.random() < 0.5 ? `Levanta a cabeça, ${firstName(keeper.name)}! Bora!` : pick(chants[defend].conceded), 'sad', 4200);
       setNoise(100);
+      // Explosão na arquibancada de quem fez o gol (fogos e papel picado) e, logo depois, a "ola" passa pela torcida
+      seq.current += 1;
+      setBurst({ side: attack, key: seq.current });
+      window.clearTimeout(waveTimer.current);
+      waveTimer.current = window.setTimeout(() => {
+        lastWave.current = Date.now();
+        seq.current += 1;
+        setWave({ side: attack, key: seq.current });
+      }, 1900);
     } else if (event.type === 'defesa') {
       say(attack, scorer && Math.random() < 0.6 ? `Quase, ${firstName(scorer.name)}! Era gol!` : pick(chants[attack].chance), 'tense');
       say(defend, keeper && Math.random() < 0.7 ? pick([`Que defesa, ${firstName(keeper.name)}!`, `Pega tudo, ${firstName(keeper.name)}!`, `${firstName(keeper.name)}! ${firstName(keeper.name)}!`]) : pick(chants[defend].kept), 'hype', 2400);
@@ -155,7 +170,8 @@ export function useCrowd({
   useEffect(() => {
     if (!active || pause) return undefined;
     let turn = 0;
-    const timer = window.setInterval(() => {
+    let timer = 0;
+    const loop = () => {
       const side: Side = turn % 2 === 0 ? 'user' : 'bot';
       turn += 1;
       const current = scoreRef.current;
@@ -170,8 +186,17 @@ export function useCrowd({
         say(side, playerChant(target, target.id === star.id), 'idle', 2600);
       } else say(side, pick(pool), 'idle', 2600);
       setNoise((value) => Math.max(38, value - 9));
-    }, 3600);
-    return () => window.clearInterval(timer);
+      // A "ola" aparece nos momentos de festa (jogo quente ou reta final), no máximo uma a cada 25 s
+      if (Date.now() - lastWave.current > 25000 && (noiseRef.current >= 72 || late) && Math.random() < 0.35) {
+        lastWave.current = Date.now();
+        seq.current += 1;
+        setWave({ side: 'all', key: seq.current });
+      }
+      // O ritmo dos cantos acompanha o jogo: com a partida quente (muito barulho) a torcida canta mais seguido
+      timer = window.setTimeout(loop, Math.max(2200, 5400 - noiseRef.current * 30));
+    };
+    timer = window.setTimeout(loop, 2500);
+    return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, pause, chants]);
 
@@ -191,8 +216,9 @@ export function useCrowd({
     () => () => {
       window.clearTimeout(moodTimers.current.user);
       window.clearTimeout(moodTimers.current.bot);
+      window.clearTimeout(waveTimer.current);
     },
     [],
   );
-  return { mood, bubbles: bubbles, noise } as CrowdState;
+  return { mood, bubbles: bubbles, noise, burst, wave } as CrowdState;
 }

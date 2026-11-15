@@ -5,8 +5,11 @@ import StadiumBackdrop, { type BackdropCamera } from '@/components/game/StadiumB
 import { globalCss } from '@/lib/game/globalCss';
 import { isFreeAgent, HALFTIME_MS, HT_BREAK_MS, HT_RETURN_MS, HT_RETURN_NO_SUBS_MS, LINEUP_REVEAL_MS, MINUTE_MS, PENALTY_PREP_MS, SHOOTOUT_CHANCE, average, forceDrawPlan, getPlayerPositions, pickByRoll, pickShooter, slotOf, type PlanEntry } from '@/lib/game/helpers';
 import { BENCH_SLOTS, emptyStats, positions, slotPositionsOf, type BenchSlot, type DraftSlot, type GoalRecord, type MatchEvent, type MatchStats, type Player, type Position, type Screen, type Team } from '@/lib/game/types';
-import { BENCH_KEYS, SUBS_MAX, SUBS_WINDOW_SEC, autoSubstitutions, encodeSubs, hasBench, subsDecided, subsOf, createRoom, effortLoss, fetchRoom, fitsSlot, generatePlan, isRoomLive, listLiveRooms, joinRoom, openRoomChat, patchRoom, recordResult, reshapeSecondHalf, slowdown, staminaAt, tacticOf, type ChatMessage, type FieldLite, type PlanItem, type Room, type Tactic } from '@/lib/multiplayer';
+import { BENCH_KEYS, SUBS_MAX, SUBS_WINDOW_SEC, autoSubstitutions, encodeSubs, hasBench, subsDecided, subsOf, createRoom, effortLoss, fetchRoom, pingRoom, fitsSlot, generatePlan, isRoomLive, listLiveRooms, joinRoom, openRoomChat, patchRoom, recordResult, reshapeSecondHalf, setWetFrom, saveActiveRoom, clearActiveRoom, loadActiveRoom, slowdown, staminaAt, tacticOf, TACTIC_INFO, type ChatMessage, type FieldLite, type PlanItem, type Room, type Tactic } from '@/lib/multiplayer';
 import { supabase } from '@/lib/supabase';
+import { SettingsPanel } from '@/components/game/SettingsPanel';
+import { useBattery, useLite, usePerfMode } from '@/lib/settings';
+import { loadDataCache, saveDataCache, useInstall, useOnline, useUpdateAvailable } from '@/lib/pwa';
 import { createTournament, currentSlot, decideWinner, fetchTournament, joinTournament, leaveTournament, setTournamentMatch, slotOfRoom, startTournament, type Slot, type Tournament } from '@/lib/tournament';
 import { cardCss } from '@/components/game/Card';
 import { DiceDraftScreen } from '@/components/game/DiceDraftScreen';
@@ -26,6 +29,12 @@ import type { ClipData } from '@/components/game/ReplayPlayer';
 import type { MatchMapData } from '@/lib/game/matchMap';
 import { RivalReveal, TeamReveal } from '@/components/game/Reveals';
 import { Squad } from '@/components/game/SquadScreen';
+import { addProgress } from '@/lib/cosmetics';
+import { pickAmbience, wetFromOf, type Ambience } from '@/lib/game/ambience';
+import { MP_DELAY, MP_LEAD, MP_SP_OPEN, decodeReqs, encodeReqs, mpSetPieces, retuneItems, seeded, shoutItems, type Req } from '@/lib/game/mpdyn';
+import { SHOUTS_PER_MATCH, SHOUT_MINUTES, SHOUT_STAMINA, SWITCH_COST, applyShout, retuneForTactic, type Shout } from '@/lib/game/coach';
+import { SHOUT_INFO } from '@/lib/game/coach';
+import { pickSetPieceMinutes, rollSetPiece, setPieceText, SET_OPTIONS, type SetKind, type SetOption } from '@/lib/game/setpiece';
 import { BenchPicker, PositionEditor, TacticPicker } from '@/components/game/TeamSetup';
 import { TournamentScreen } from '@/components/game/TournamentScreen';
 
@@ -65,7 +74,12 @@ function App() {
   // Acréscimos: minutos extras já corridos no fim do 1º (45+n) ou do 2º tempo (90+n)
   const [extra, setExtra] = useState(0);
   // 'halftime' enquanto a animação do intervalo está na tela
-  const [pause, setPause] = useState<'halftime' | 'break' | 'subs' | 'return' | null>(null);
+  const [pause, setPause] = useState<'halftime' | 'break' | 'subs' | 'return' | 'setpiece' | null>(null);
+  // Bolas paradas com jogada ensaiada (só contra o bot): minutos sorteados no apito inicial
+  const setPieces = useRef<{ user: number[]; bot: number[] } | null>(null);
+  // Técnico (só contra o bot): gritos restantes e o grito em vigor
+  const [coach, setCoach] = useState<{ shouts: number; until: number; shout: Shout | null }>({ shouts: SHOUTS_PER_MATCH, until: 0, shout: null });
+  const [setPiece, setSetPiece] = useState<{ kind: SetKind; minute: number; floating?: boolean } | null>(null);
   // Cansaço e substituições (só contra o bot): reservas, táticas da partida, quem saiu e o resumo das trocas
   const [userBench, setUserBench] = useState<Player[]>([]);
   const [botBench, setBotBench] = useState<Player[]>([]);
@@ -148,9 +162,39 @@ function App() {
   const [restartKey, setRestartKey] = useState(0);
   const shownRef = useRef<Set<number>>(new Set());
 
+  const online = useOnline();
+  const update = useUpdateAvailable();
+  // Tempo da partida contra o bot (sorteado no apito inicial, para o sorteio do jogo e a tela usarem o mesmo)
+  const [botAmb, setBotAmb] = useState<Ambience | undefined>(undefined);
+  const perfMode = usePerfMode();
+  const liteNow = useLite();
+  const battery = useBattery();
+  const [batteryNote, setBatteryNote] = useState(false);
+  const batteryWarned = useRef(false);
+  // Bateria baixa no modo automático: avisa uma vez que os efeitos foram reduzidos
+  useEffect(() => {
+    if (battery.low && perfMode === 'auto' && !batteryWarned.current) {
+      batteryWarned.current = true;
+      setBatteryNote(true);
+      const id = window.setTimeout(() => setBatteryNote(false), 6000);
+      return () => window.clearTimeout(id);
+    }
+    return undefined;
+  }, [battery.low, perfMode]);
+  const [showSettings, setShowSettings] = useState(false);
+  const install = useInstall();
+  // true quando os times e jogadores vieram da cópia guardada no aparelho (sem internet)
+  const [usingCache, setUsingCache] = useState(false);
+
   useEffect(() => {
     void loadData();
   }, []);
+
+  // Voltou a internet depois de abrir offline: baixa os dados atuais
+  useEffect(() => {
+    if (online && usingCache) void loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online]);
 
   // Descobre se quem está logado é admin (só então o botão do painel aparece)
   useEffect(() => {
@@ -176,10 +220,15 @@ function App() {
       setNickname(saved && saved.trim() ? saved.trim() : (user.email ?? 'Jogador').split('@')[0]);
     }
     void checkAdmin();
+    const onBack = () => void checkAdmin();
+    window.addEventListener('online', onBack);
     const { data: sub } = supabase.auth.onAuthStateChange(() => {
       setTimeout(() => void checkAdmin(), 0);
     });
-    return () => sub.subscription.unsubscribe();
+    return () => {
+      window.removeEventListener('online', onBack);
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
   // Cada tela entra no histórico do navegador, então o botão voltar do celular
@@ -216,17 +265,35 @@ function App() {
   async function loadData() {
     setLoading(true);
     setError('');
-    const [teamResponse, playerResponse] = await Promise.all([
-      supabase.from('teams').select('*').order('name'),
-      supabase.from('players').select('*').order('overall', { ascending: false }),
-    ]);
+    let teamResponse;
+    let playerResponse;
+    try {
+      [teamResponse, playerResponse] = await Promise.all([
+        supabase.from('teams').select('*').order('name'),
+        supabase.from('players').select('*').order('overall', { ascending: false }),
+      ]);
+    } catch {
+      teamResponse = { data: null, error: new Error('offline') };
+      playerResponse = { data: null, error: new Error('offline') };
+    }
     if (teamResponse.error || playerResponse.error) {
+      // Sem internet (ou banco fora do ar): usa a cópia da última vez que o app abriu online, para jogar contra o bot
+      const cached = loadDataCache<Team, Player>();
+      if (cached) {
+        setTeams(cached.teams);
+        setPlayers(cached.players.map((player) => ({ ...player, team: cached.teams.find((item) => item.id === player.team_id) })));
+        setUsingCache(true);
+        setLoading(false);
+        return;
+      }
       setError('Não foi possível carregar o elenco agora.');
       setLoading(false);
       return;
     }
     const loadedTeams = (teamResponse.data ?? []) as Team[];
     const loadedPlayers = (playerResponse.data ?? []) as Player[];
+    saveDataCache(loadedTeams, loadedPlayers);
+    setUsingCache(false);
     const withTeam = loadedPlayers.map((player) => ({
       ...player,
       team: loadedTeams.find((item) => item.id === player.team_id),
@@ -503,6 +570,8 @@ function App() {
   const spectateFrom = useRef<number | null>(null);
   const spectateClock = useRef<{ minute: number; extra: number; pause: boolean } | null>(null);
   const spectateWaitHt = useRef(false);
+  // true enquanto o app reconstrói uma partida já em andamento (espectador ou volta ao jogo): não conta gols de novo no progresso
+  const catchingUp = useRef(false);
   // Acréscimos de cada tempo: 1 minuto + 1 por gol do tempo (máx. 4 no 1º e 6 no 2º). Sai do plano, igual para todos.
   function stoppageFor(half: 1 | 2) {
     const goals = (planRef.current ?? []).filter(
@@ -536,6 +605,7 @@ function App() {
     if (screen !== 'match' || spectateFrom.current === null || !userTeam.length || !botTeam.length) return;
     const target = spectateFrom.current;
     spectateFrom.current = null;
+    catchingUp.current = true;
     (planRef.current ?? [])
       .filter((item) => item.minute <= target)
       .forEach((item) => {
@@ -543,6 +613,7 @@ function App() {
         // Gols que já aconteceram entram direto no placar, sem esperar a animação
         if (item.type === 'gol') handleGoal(eventSeq.current, item.side);
       });
+    catchingUp.current = false;
     setMinute(target);
     const clock = spectateClock.current;
     spectateClock.current = null;
@@ -557,6 +628,26 @@ function App() {
     if (screen !== 'match' && screen !== 'results') setSpectating(null);
   }, [screen]);
 
+  // Voltar à sala depois de recarregar a página / queda longa de internet
+  const [resumeRoom, setResumeRoom] = useState<Room | null>(null);
+  const resumeChecked = useRef(false);
+  function resumeMpRoom(target: Room) {
+    setResumeRoom(null);
+    if (target.status === 'playing' && target.plan && isRoomLive(target)) {
+      mpMatchRoom.current = target.id;
+      setRoom(target);
+      beginMpMatch(target);
+      setLineupReveal(null);
+      // Entra no minuto em que a partida está agora (mesma reconstrução de quem assiste ao vivo)
+      const startedAt = target.plan.find((item) => item.startedAt)?.startedAt;
+      const clock = startedAt ? liveClock(Date.now() - startedAt - LINEUP_REVEAL_MS) : { minute: 0, extra: 0, pause: false };
+      spectateFrom.current = clock.minute;
+      spectateClock.current = clock;
+      return;
+    }
+    setRoom(target);
+    if (target.status === 'waiting') navigate('lobby');
+  }
   function beginMpMatch(current: Room) {
     const role = current.host_id === userId ? 'host' : 'guest';
     const mine = squadPlayers(role === 'host' ? current.host_squad : current.guest_squad);
@@ -569,6 +660,8 @@ function App() {
       side: item.side === role ? 'user' : 'bot',
       shooter: item.shooter,
       keeper: item.keeper,
+      spk: item.spk,
+      spo: item.spo,
     }));
     const rivalTeam = teams.find((item) => item.id === (role === 'host' ? current.guest_team_id : current.host_team_id));
     const mySquad = role === 'host' ? current.host_squad : current.guest_squad;
@@ -610,17 +703,70 @@ function App() {
     };
   }, [room?.id, chatActive]);
 
+  // Guarda a sala atual neste aparelho enquanto a partida está viva; apaga quando ela acaba ou você sai de propósito
+  const hadRoom = useRef(false);
+  useEffect(() => {
+    if (room && (room.status === 'waiting' || room.status === 'drafting' || room.status === 'playing')) {
+      hadRoom.current = true;
+      saveActiveRoom(room.id);
+    } else if (hadRoom.current && (!room || room.status === 'finished' || room.status === 'cancelled')) {
+      hadRoom.current = false;
+      clearActiveRoom();
+    }
+  }, [room?.id, room?.status]);
+  // Ao abrir o app logado, procura uma sala sua que ainda está rolando e oferece voltar
+  useEffect(() => {
+    if (resumeChecked.current || !userId || !teams.length || room || spectating) return;
+    resumeChecked.current = true;
+    const id = loadActiveRoom();
+    if (!id) return;
+    void fetchRoom(id).then((found) => {
+      const mine = !!found && (found.host_id === userId || found.guest_id === userId);
+      const alive = !!found && (found.status === 'waiting' || found.status === 'drafting' || (found.status === 'playing' && isRoomLive(found)));
+      if (found && mine && alive) setResumeRoom(found);
+      else clearActiveRoom();
+    });
+  }, [userId, teams.length]);
+
+  const failsRef = useRef(0);
+  const [link, setLink] = useState<'ok' | 'lost' | 'back'>('ok');
   // Mantém a sala atualizada (tempo real + consulta a cada 2,5 s como reforço)
   useEffect(() => {
     if (!room?.id) return;
     const id = room.id;
     let alive = true;
     async function refresh() {
-      const next = await fetchRoom(id);
-      if (!alive || !next) return;
+      const res = await pingRoom(id);
+      if (!alive) return;
+      // Conexão com a sala: 2 falhas seguidas = caiu; a próxima que der certo = voltou
+      if (!res.ok) {
+        failsRef.current += 1;
+        if (failsRef.current >= 2) setLink('lost');
+        return;
+      }
+      failsRef.current = 0;
+      setLink((cur) => {
+        if (cur === 'lost') {
+          window.setTimeout(() => setLink((c) => (c === 'back' ? 'ok' : c)), 2600);
+          return 'back';
+        }
+        return cur;
+      });
+      const next = res.room;
+      if (!next) return;
       setRoom((current) => (current && JSON.stringify(current) !== JSON.stringify(next) ? next : current));
     }
+    failsRef.current = 0;
+    setLink('ok');
     const timer = window.setInterval(() => void refresh(), 2500);
+    const onBack = () => void refresh();
+    const onOff = () => {
+      failsRef.current = 2;
+      setLink('lost');
+    };
+    window.addEventListener('offline', onOff);
+    window.addEventListener('online', onBack);
+    document.addEventListener('visibilitychange', onBack);
     let channel: any = null;
     try {
       channel = supabase
@@ -635,6 +781,9 @@ function App() {
     return () => {
       alive = false;
       window.clearInterval(timer);
+      window.removeEventListener('online', onBack);
+      window.removeEventListener('offline', onOff);
+      document.removeEventListener('visibilitychange', onBack);
       if (channel) void supabase.removeChannel(channel);
     };
   }, [room?.id]);
@@ -698,6 +847,7 @@ function App() {
       mpPlanRoom.current !== room.id
     ) {
       mpPlanRoom.current = room.id;
+      setWetFrom(wetFromOf(pickAmbience(room.id)));
       const plan = generatePlan(squadPlayers(room.host_squad), squadPlayers(room.guest_squad), SHOOTOUT_CHANCE, {
         host: tacticOf(room.host_squad),
         guest: tacticOf(room.guest_squad),
@@ -1049,7 +1199,10 @@ function App() {
     // O jogador (anfitrião do plano) é o lado "user".
     // O bot escolhe uma tática ao acaso (mais equilibrada que as outras)
     const botRoll = Math.random();
-    const botTactic: Tactic = botRoll < 0.3 ? 'ofensiva' : botRoll < 0.6 ? 'defensiva' : 'equilibrada';
+    const botTactic: Tactic = botRoll < 0.18 ? 'ofensiva' : botRoll < 0.36 ? 'defensiva' : botRoll < 0.5 ? 'contra' : botRoll < 0.64 ? 'posse' : botRoll < 0.78 ? 'pressao' : 'equilibrada';
+    const matchAmb = pickAmbience();
+    setBotAmb(matchAmb);
+    setWetFrom(wetFromOf(matchAmb));
     const basePlan: PlanEntry[] = generatePlan(chosen, botPlayers, 0, { host: tactic, guest: botTactic })
       .filter((item) => item.minute > 0)
       .map((item) => ({
@@ -1061,6 +1214,9 @@ function App() {
       }));
     // De vez em quando a partida termina empatada e vai para os pênaltis
     planRef.current = forceShootout || Math.random() < SHOOTOUT_CHANCE ? forceDrawPlan(basePlan) : basePlan;
+    setCoach({ shouts: SHOUTS_PER_MATCH, until: 0, shout: null });
+    setPieces.current = pickSetPieceMinutes((planRef.current ?? []).map((item) => item.minute));
+    setSetPiece(null);
     beginMatch(chosen, botPlayers, { team: botClub, tactic: botTactic }, {
       userBench: userBenchPlayers,
       botBench: botBenchPlayers,
@@ -1174,6 +1330,12 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [screen, minute, extra, skipped, shownScore, score, penaltyPhase, shootout]);
   eventsRef.current = events;
+  // Progresso para desbloquear bolas, chuteiras e comemorações (conta uma vez por partida jogada, fora espectador)
+  useEffect(() => {
+    if (screen !== 'results' || spectating) return;
+    addProgress({ games: 1, wins: shownScore.user > shownScore.bot ? 1 : 0 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen]);
   // Cansaço (só contra o bot): jogador exausto fica mais lento no campo
   if (!spectating && screen === 'match') {
     const slowMap: Record<string, number> = {};
@@ -1268,10 +1430,63 @@ function App() {
     }
     const next = minute + 1;
     setMinute(next);
+    // Bola parada: o bot cobra sozinho; nas suas, o jogo para e você escolhe a jogada
+    if (!roomRef.current && !spectating && setPieces.current) {
+      const sp = setPieces.current;
+      if (sp.bot.includes(next)) {
+        sp.bot = sp.bot.filter((m) => m !== next);
+        const opts = SET_OPTIONS.falta;
+        resolveSetPiece(next, 'bot', Math.random() < 0.5 ? 'escanteio' : 'falta', opts[Math.floor(Math.random() * opts.length)].id);
+        return;
+      }
+      if (sp.user.includes(next)) {
+        sp.user = sp.user.filter((m) => m !== next);
+        const kind: SetKind = Math.random() < 0.55 ? 'escanteio' : 'falta';
+        if (skipped) resolveSetPiece(next, 'user', kind, 'cruzamento');
+        else {
+          setSetPiece({ kind, minute: next });
+          setPause('setpiece');
+        }
+        return;
+      }
+    }
     if (planRef.current) {
       const planned = planRef.current.find((item) => item.minute === next);
       if (planned) createEvent(next, planned);
     } else if (next % 4 === 0 || next % 7 === 0) createEvent(next);
+  }
+
+  // Troca de estilo no meio do jogo: o fôlego já gasto fica como estava e a troca custa um pouco
+  function changeTactic(next: Tactic) {
+    if (roomRef.current || spectating || next === matchTactics.user) return;
+    const old = matchTactics.user;
+    const at = Math.min(minute, 90);
+    setUserTeam((current) =>
+      current.map((player) => {
+        const at2 = (t: Tactic) => staminaAt(slotOf(player), at, t, player.since ?? 0, player.carried ?? 0);
+        return { ...player, carried: (player.carried ?? 0) + (at2(next) - at2(old)) + SWITCH_COST };
+      }),
+    );
+    if (planRef.current) planRef.current = retuneForTactic(planRef.current, minute, old, next);
+    setMatchTactics((current) => ({ ...current, user: next }));
+  }
+  function callShout(kind: Shout) {
+    if (roomRef.current || spectating || coach.shouts <= 0 || minute < coach.until) return;
+    if (planRef.current) planRef.current = applyShout(planRef.current, minute, kind);
+    setUserTeam((current) => current.map((player) => ({ ...player, carried: Math.max(0, (player.carried ?? 0) + SHOUT_STAMINA[kind]) })));
+    setCoach({ shouts: coach.shouts - 1, until: minute + SHOUT_MINUTES, shout: kind });
+  }
+
+  function resolveSetPiece(at: number, side: 'user' | 'bot', kind: SetKind, option: SetOption) {
+    const atkSquad = side === 'user' ? userTeam : botTeam;
+    const defSquad = side === 'user' ? botTeam : userTeam;
+    const atk = average(atkSquad.filter((player) => ['LF', 'RF', 'CF'].includes(slotOf(player))));
+    const def = average(defSquad.filter((player) => ['LB', 'RB', 'GK'].includes(slotOf(player))));
+    const takerPlayer = [...atkSquad.filter((player) => ['CM', 'LF', 'RF'].includes(slotOf(player)))].sort((a, b) => b.overall - a.overall)[0];
+    const outcome = rollSetPiece(kind, option, atk, def, takerPlayer?.overall ?? 75, Math.random());
+    createEvent(at, { minute: at, type: outcome, side } as PlanEntry, { kind, option });
+    setSetPiece(null);
+    setPause((current) => (current === 'setpiece' ? null : current));
   }
 
   function handleGoal(id: number, side: 'user' | 'bot') {
@@ -1279,9 +1494,10 @@ function App() {
     shownRef.current.add(id);
     setShownGoalIds((current) => [...current, id]);
     setShownScore((current) => ({ ...current, [side]: current[side] + 1 }));
+    if (side === 'user' && !spectating && !catchingUp.current) addProgress({ goals: 1 });
   }
 
-  function createEvent(currentMinute: number, forced?: PlanEntry) {
+  function createEvent(currentMinute: number, forced?: PlanEntry, setPieceInfo?: { kind: SetKind; option: SetOption }) {
     const userAttack = average(userTeam.filter((player) => ['LF', 'RF', 'CF'].includes(slotOf(player))));
     const botAttack = average(botTeam.filter((player) => ['LF', 'RF', 'CF'].includes(slotOf(player))));
     const userWins = userAttack + Math.random() * 20 >= botAttack + Math.random() * 20;
@@ -1400,7 +1616,7 @@ function App() {
       `${middle?.name ?? club} arma o contra-ataque de ${club}.`,
       `Bola longa de ${middle?.name ?? club}, mas ${mate?.name ?? 'o atacante'} não alcança.`,
     ];
-    const text =
+    const baseText =
       type === 'gol'
         ? goalText
         : type === 'finalização'
@@ -1408,6 +1624,15 @@ function App() {
           : type === 'defesa'
             ? choose(saveTexts, 3)
             : choose(possessionTexts, 4);
+    const spInfo = setPieceInfo ?? (forced?.spk && forced.spo ? { kind: forced.spk, option: forced.spo } : undefined);
+    const text = spInfo
+      ? setPieceText(spInfo.kind, spInfo.option, type, {
+          shooter: shooterName,
+          keeper: keeperName,
+          club: club ?? 'o time',
+          taker: middle?.name ?? mate?.name ?? shooterName,
+        })
+      : baseText;
     eventSeq.current += 1;
     const id = eventSeq.current;
     setEvents((current) =>
@@ -1498,6 +1723,8 @@ function App() {
         side: (item.side === role ? 'user' : 'bot') as 'user' | 'bot',
         shooter: item.shooter,
         keeper: item.keeper,
+        spk: item.spk,
+        spo: item.spo,
       }));
 
   // Confirma as trocas do intervalo. Contra o bot: o bot também troca (os mais cansados) e o 2º tempo do plano é refeito.
@@ -1570,14 +1797,19 @@ function App() {
             { host: userTeam, guest: botTeam },
           )
         : current.plan;
+    // Bolas paradas já resolvidas para o 2º tempo não podem sumir quando o plano é refeito
+    const keepSp = current.plan.filter((item) => item.spk && item.minute > 45);
+    const reshapedKept = keepSp.length
+      ? [...reshaped.filter((item) => !keepSp.some((kept) => kept.minute === item.minute && item.minute > 0)), ...keepSp].sort((a, b) => a.minute - b.minute)
+      : reshaped;
     const stamp = {
       ht: Date.now(),
       sh: encodeSubs(used(mine, hostSubs)),
       sg: encodeSubs(used(rival, guestSubs)),
     };
-    const withStamp = reshaped.some((item) => item.minute === 0)
-      ? reshaped.map((item) => (item.minute === 0 ? { ...item, ...stamp } : item))
-      : [{ minute: 0, type: 'posse' as const, side: 'host' as const, ...stamp }, ...reshaped];
+    const withStamp = reshapedKept.some((item) => item.minute === 0)
+      ? reshapedKept.map((item) => (item.minute === 0 ? { ...item, ...stamp } : item))
+      : [{ minute: 0, type: 'posse' as const, side: 'host' as const, ...stamp }, ...reshapedKept];
     setRoom((room) => (room ? { ...room, plan: withStamp } : room));
     void patchRoom(current.id, { plan: withStamp });
   }
@@ -1628,6 +1860,177 @@ function App() {
     );
     return () => window.clearTimeout(timer);
   }, [pause]);
+
+  // ===== Multiplayer: tudo que existe contra o bot (estilo no meio do jogo, gritos, jogada ensaiada) =====
+  // O anfitrião decide e grava no plano; cada lado só grava pedidos na própria coluna (`_a`).
+  const minuteNowRef = useRef(0);
+  minuteNowRef.current = minute;
+  const matchTacticsRef = useRef(matchTactics);
+  matchTacticsRef.current = matchTactics;
+  const mpTac = useRef<{ host: Tactic; guest: Tactic } | null>(null);
+  const mpSpDone = useRef<Set<string>>(new Set());
+  const dynShown = useRef<Set<string>>(new Set());
+  const dvSeen = useRef('');
+  const [rivalNote, setRivalNote] = useState('');
+  function mpSend(partial: Omit<Req, 'id'>) {
+    const cur = roomRef.current;
+    if (!cur || !myRole) return;
+    const own = myRole === 'host' ? cur.host_squad : cur.guest_squad;
+    const list = decodeReqs(own);
+    const req: Req = { ...partial, id: `${Date.now().toString(36)}${list.length}` };
+    const next = { ...own, _a: encodeReqs([...list, req]) };
+    const patch: Partial<Room> = myRole === 'host' ? { host_squad: next } : { guest_squad: next };
+    setRoom((r) => (r ? { ...r, ...patch } : r));
+    void patchRoom(cur.id, patch);
+  }
+  function mpNames(side: 'host' | 'guest', seed: string) {
+    const rng = seeded(seed);
+    const atk = side === 'host' ? userTeam : botTeam; // quem decide é o anfitrião: userTeam = time dele
+    const def = side === 'host' ? botTeam : userTeam;
+    const pool = atk.filter((player) => ['LF', 'RF', 'CF', 'CM'].includes(slotOf(player)));
+    const list = pool.length ? pool : atk;
+    return { shooter: list[Math.floor(rng() * list.length)]?.name, keeper: def.find((player) => slotOf(player) === 'GK')?.name };
+  }
+  // Anfitrião: aplica os pedidos novos no plano (lances futuros) e resolve as bolas paradas na hora
+  function hostApplyDynamics() {
+    const cur = roomRef.current;
+    if (!cur || myRole !== 'host' || !cur.plan || cur.status !== 'playing') return;
+    const meta = cur.plan.find((item) => item.startedAt);
+    if (!meta) return;
+    const nowMin = minuteNowRef.current;
+    const applied = new Set((meta.ap ?? '').split(',').filter(Boolean));
+    const fresh: string[] = [];
+    let items = cur.plan;
+    if (!mpTac.current) mpTac.current = { host: tacticOf(cur.host_squad), guest: tacticOf(cur.guest_squad) };
+    const all = [
+      ...decodeReqs(cur.host_squad).map((r) => ({ who: 'host' as const, r })),
+      ...decodeReqs(cur.guest_squad).map((r) => ({ who: 'guest' as const, r })),
+    ].sort((a, b) => a.r.e - b.r.e);
+    for (const { who, r } of all) {
+      if (r.k === 'sp') continue;
+      const key = `${who}:${r.id}`;
+      if (applied.has(key)) continue;
+      const from = Math.max(r.e, nowMin + MP_LEAD) - 1;
+      const rng = seeded(`${cur.id}:${key}`);
+      if (r.k === 'tac') {
+        items = retuneItems(items, from, who, mpTac.current[who], r.v as Tactic, rng);
+        mpTac.current = { ...mpTac.current, [who]: r.v as Tactic };
+      } else items = shoutItems(items, from, who, r.v as Shout, rng);
+      fresh.push(key);
+    }
+    const sets = mpSetPieces(cur.id);
+    for (const who of ['host', 'guest'] as const) {
+      for (const sp of sets[who]) {
+        const key = `sp:${who}:${sp.m}`;
+        if (applied.has(key) || fresh.includes(key)) continue;
+        if (nowMin < sp.m - MP_LEAD) continue;
+        fresh.push(key);
+        if (nowMin > sp.m - 3) continue; // tarde demais para os dois lados verem: a bola parada passa em branco
+        const req = decodeReqs(who === 'host' ? cur.host_squad : cur.guest_squad).find((r) => r.k === 'sp' && r.m === sp.m);
+        const option = (req?.v === 'curto' || req?.v === 'direto' ? req.v : 'cruzamento') as SetOption;
+        const atkTeam = who === 'host' ? userTeam : botTeam;
+        const defTeam = who === 'host' ? botTeam : userTeam;
+        const atk = average(atkTeam.filter((player) => ['LF', 'RF', 'CF'].includes(slotOf(player))));
+        const def = average(defTeam.filter((player) => ['LB', 'RB', 'GK'].includes(slotOf(player))));
+        const taker = [...atkTeam.filter((player) => ['CM', 'LF', 'RF'].includes(slotOf(player)))].sort((a, b) => b.overall - a.overall)[0];
+        const outcome = rollSetPiece(sp.kind, option, atk, def, taker?.overall ?? 75, seeded(`${cur.id}:${key}:r`)());
+        let minuteAt = sp.m;
+        while (items.some((item) => item.minute === minuteAt && item.minute > 0) && minuteAt < 89) minuteAt += 1;
+        if (items.some((item) => item.minute === minuteAt && item.minute > 0)) continue;
+        const names = mpNames(who, `${cur.id}:${key}:n`);
+        items = [...items, { minute: minuteAt, type: outcome, side: who, shooter: names.shooter, keeper: names.keeper, spk: sp.kind, spo: option }].sort((a, b) => a.minute - b.minute);
+      }
+    }
+    if (!fresh.length) return;
+    // lances que mudaram de tipo ganham nomes (iguais para todos)
+    items = items.map((item) => {
+      if (item.minute <= 0 || item.type === 'posse' || (item.shooter && item.keeper)) return item;
+      const names = mpNames(item.side, `${cur.id}:${item.minute}:${item.side}:n`);
+      return { ...item, shooter: item.shooter ?? names.shooter, keeper: item.keeper ?? names.keeper };
+    });
+    const ap = [...applied, ...fresh].slice(-80).join(',');
+    const dv = (meta.dv ?? 0) + 1;
+    items = items.map((item) => (item.startedAt ? { ...item, ap, dv } : item));
+    setRoom((r) => (r ? { ...r, plan: items } : r));
+    void patchRoom(cur.id, { plan: items });
+  }
+  useEffect(() => {
+    if (screen === 'match' && myRole === 'host') hostApplyDynamics();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [minute, room?.host_squad, room?.guest_squad, screen]);
+  // Todos (inclusive quem assiste): quando o anfitrião grava mudanças, passa a jogar o plano novo
+  useEffect(() => {
+    if (!room || !room.plan || room.status !== 'playing' || screen !== 'match') return;
+    const meta = room.plan.find((item) => item.startedAt);
+    if (!meta?.dv) return;
+    const key = `${matchKeyOf(room)}:${meta.dv}`;
+    if (dvSeen.current === key) return;
+    if (room.plan.some((item) => item.ht) && mpAppliedKey.current !== matchKeyOf(room)) return; // espera as trocas do intervalo
+    dvSeen.current = key;
+    planRef.current = itemsToPlan(room.plan, myRole ?? 'host');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room, screen]);
+  // Os dois lados mostram o estilo novo e o grito na mesma hora de jogo (fôlego e avisos)
+  useEffect(() => {
+    if (!room || !myRole || screen !== 'match' || spectating) return;
+    const prefix = matchKeyOf(room);
+    for (const who of ['host', 'guest'] as const) {
+      const mine = who === myRole;
+      for (const r of decodeReqs(who === 'host' ? room.host_squad : room.guest_squad)) {
+        if (r.k === 'sp' || minute < r.e) continue;
+        const key = `${prefix}:${who}:${r.id}`;
+        if (dynShown.current.has(key)) continue;
+        dynShown.current.add(key);
+        const setTeam = mine ? setUserTeam : setBotTeam;
+        if (r.k === 'tac') {
+          const side = mine ? 'user' : 'bot';
+          const old = matchTacticsRef.current[side];
+          const next = r.v as Tactic;
+          const at = Math.min(minute, 90);
+          setTeam((current) =>
+            current.map((player) => {
+              const st = (t: Tactic) => staminaAt(slotOf(player), at, t, player.since ?? 0, player.carried ?? 0);
+              return { ...player, carried: (player.carried ?? 0) + (st(next) - st(old)) + SWITCH_COST };
+            }),
+          );
+          matchTacticsRef.current = { ...matchTacticsRef.current, [side]: next };
+          setMatchTactics((current) => ({ ...current, [side]: next }));
+          if (!mine) setRivalNote(`${TACTIC_INFO[next].icon} Rival mudou para ${TACTIC_INFO[next].label}`);
+        } else {
+          const shout = r.v as Shout;
+          setTeam((current) => current.map((player) => ({ ...player, carried: Math.max(0, (player.carried ?? 0) + SHOUT_STAMINA[shout]) })));
+          if (!mine) setRivalNote(`${SHOUT_INFO[shout].icon} Técnico rival: ${SHOUT_INFO[shout].label}`);
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [minute, room?.host_squad, room?.guest_squad, screen]);
+  useEffect(() => {
+    if (!rivalNote) return undefined;
+    const id = window.setTimeout(() => setRivalNote(''), 4500);
+    return () => window.clearTimeout(id);
+  }, [rivalNote]);
+  // Minha jogada ensaiada: abre antes da bola parada (sem pausar o jogo) e fecha quando o anfitrião precisa resolver
+  useEffect(() => {
+    if (!room || !myRole || screen !== 'match' || spectating || pause) return;
+    const mine = mpSetPieces(room.id)[myRole];
+    const open = mine.find((sp) => minute >= sp.m - MP_SP_OPEN && minute < sp.m - MP_LEAD && !mpSpDone.current.has(`${room.id}:${sp.m}`));
+    setSetPiece((current) => {
+      if (open) return current && current.minute === open.m ? current : { kind: open.kind, minute: open.m, floating: true };
+      return current?.floating ? null : current;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [minute, room?.id, screen, pause]);
+  function mpPickSetPiece(option: SetOption) {
+    const cur = roomRef.current;
+    if (!cur || !setPiece) return;
+    mpSpDone.current.add(`${cur.id}:${setPiece.minute}`);
+    mpSend({ k: 'sp', v: option, m: setPiece.minute, e: setPiece.minute });
+    setSetPiece(null);
+  }
+  const myReqs = room && myRole ? decodeReqs(myRole === 'host' ? room.host_squad : room.guest_squad) : [];
+  const myShouts = myReqs.filter((r) => r.k === 'shout');
+  const lastShout = myShouts[myShouts.length - 1];
 
   function skipMatch() {
     if (planRef.current) {
@@ -1685,11 +2088,72 @@ function App() {
   const camera: BackdropCamera =
     screen === 'home' ? 'wide' : screen === 'club' ? 'left' : screen === 'lobby' || screen === 'tournament' ? 'stands' : screen === 'leaderboard' || screen === 'profile' || screen === 'squad' || screen === 'friends' ? 'right' : null;
   return (
-    <div className="app-shell" data-theme={theme}>
+    <div className="app-shell" data-theme={theme} data-lite={liteNow ? '1' : '0'}>
       <StadiumBackdrop camera={camera} />
       <style>{globalCss}</style>
       <style>{cardCss}</style>
+      {!online && (
+        <div
+          role="status"
+          style={{ position: 'fixed', top: 'max(8px, env(safe-area-inset-top))', left: '50%', transform: 'translateX(-50%)', zIndex: 500, padding: '7px 16px', borderRadius: 999, background: 'rgba(15,20,30,.94)', border: '1px solid #F5B800', color: '#F5B800', font: '800 12px Inter, sans-serif', letterSpacing: '.6px', boxShadow: '0 6px 20px rgba(0,0,0,.5)', whiteSpace: 'nowrap', pointerEvents: 'none' }}
+        >
+          {room || spectating ? '📡 SEM INTERNET · RECONECTANDO À PARTIDA…' : '📡 SEM INTERNET · JOGUE CONTRA O BOT'}
+        </div>
+      )}
+      {resumeRoom && !room && (
+        <div
+          role="status"
+          style={{ position: 'fixed', left: '50%', top: 'max(8px, env(safe-area-inset-top))', transform: 'translateX(-50%)', zIndex: 650, display: 'flex', alignItems: 'center', gap: 8, maxWidth: 'calc(100vw - 24px)', padding: '9px 10px 9px 16px', borderRadius: 999, background: 'rgba(15,22,36,.97)', border: '1px solid #3ddc84', color: '#fff', font: '800 12px Inter, sans-serif', boxShadow: '0 8px 28px rgba(0,0,0,.5)' }}
+        >
+          <span>🔌 Você ainda tem uma partida em andamento</span>
+          <button onClick={() => resumeMpRoom(resumeRoom)} style={{ border: 0, cursor: 'pointer', padding: '7px 12px', borderRadius: 999, background: '#3ddc84', color: '#06210f', font: '900 12px Inter, sans-serif', whiteSpace: 'nowrap' }}>
+            Voltar
+          </button>
+          <button
+            onClick={() => {
+              clearActiveRoom();
+              setResumeRoom(null);
+            }}
+            aria-label="Dispensar"
+            style={{ border: 0, cursor: 'pointer', padding: '7px 9px', borderRadius: 999, background: 'transparent', color: '#9fb0c8', font: '900 12px Inter, sans-serif' }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+      {(room || spectating) && link !== 'ok' && online !== undefined && (
+        <div
+          role="status"
+          style={{ position: 'fixed', top: 'max(8px, env(safe-area-inset-top))', left: '50%', transform: 'translateX(-50%)', zIndex: 520, padding: '7px 16px', borderRadius: 999, background: link === 'lost' ? 'rgba(120,40,10,.96)' : 'rgba(10,80,40,.96)', border: `1px solid ${link === 'lost' ? '#ffb066' : '#3ddc84'}`, color: '#fff', font: '900 12px Inter, sans-serif', letterSpacing: '.5px' }}
+        >
+          {link === 'lost' ? '📡 CONEXÃO PERDIDA · TENTANDO VOLTAR À PARTIDA…' : '✅ RECONECTADO · A PARTIDA SEGUE DE ONDE ESTAVA'}
+        </div>
+      )}
+      {batteryNote && (
+        <div role="status" style={{ position: 'fixed', top: 'max(8px, env(safe-area-inset-top))', left: '50%', transform: 'translateX(-50%)', zIndex: 510, padding: '7px 16px', borderRadius: 999, background: 'rgba(40,30,6,.96)', border: '1px solid #F5B800', color: '#fff', font: '900 12px Inter, sans-serif', letterSpacing: '.4px' }}>
+          🔋 BATERIA BAIXA · EFEITOS REDUZIDOS PARA ECONOMIZAR
+        </div>
+      )}
+      {update.ready && (
+        <div
+          role="status"
+          style={{ position: 'fixed', left: '50%', bottom: 'max(14px, env(safe-area-inset-bottom))', transform: 'translateX(-50%)', zIndex: 600, display: 'flex', alignItems: 'center', gap: 10, maxWidth: 'calc(100vw - 24px)', padding: '9px 10px 9px 16px', borderRadius: 999, background: 'rgba(15,22,36,.96)', border: '1px solid #F5B800', color: '#fff', font: '800 12px Inter, sans-serif', boxShadow: '0 8px 28px rgba(0,0,0,.5)' }}
+        >
+          <span>{screen === 'match' || !!room ? '🔄 Versão nova pronta. Atualize quando acabar a partida.' : '🔄 Versão nova disponível'}</span>
+          <button
+            onClick={() => {
+              if ((screen === 'match' || !!room) && !window.confirm('Atualizar agora vai sair da partida. Continuar?')) return;
+              update.apply();
+            }}
+            style={{ border: 0, cursor: 'pointer', padding: '7px 12px', borderRadius: 999, background: '#F5B800', color: '#111', font: '900 12px Inter, sans-serif', whiteSpace: 'nowrap' }}
+          >
+            Atualizar agora
+          </button>
+        </div>
+      )}
+      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} userId={userId} install={install} onLogin={() => setShowLogin(true)} />}
       <Header
+        onSettings={() => setShowSettings(true)}
         nickname={nickname}
         isAdmin={isAdmin}
         onAdmin={() => navigate('admin')}
@@ -1798,6 +2262,9 @@ function App() {
           nickname={nickname}
           featured={featuredPlayers}
           liveRooms={liveRoomCount}
+          offline={!online}
+          install={install}
+          onSettings={() => setShowSettings(true)}
         />
       )}
 
@@ -1919,6 +2386,27 @@ function App() {
           score={shownScore}
           events={events}
           shownGoalIds={shownGoalIds}
+          ambience={liveNet ? undefined : botAmb}
+          setPiece={setPiece}
+          rivalNote={rivalNote}
+          coach={
+            spectating
+              ? undefined
+              : room
+                ? {
+                    shoutsLeft: SHOUTS_PER_MATCH - myShouts.length,
+                    activeUntil: lastShout ? lastShout.e + SHOUT_MINUTES : 0,
+                    activeShout: lastShout ? (lastShout.v as Shout) : null,
+                    delayNote: MP_DELAY,
+                    onTactic: (t: Tactic) => mpSend({ k: 'tac', v: t, m: minute, e: minute + MP_DELAY }),
+                    onShout: (shout: Shout) => {
+                      if (myShouts.length >= SHOUTS_PER_MATCH || (lastShout && minute < lastShout.e + SHOUT_MINUTES)) return;
+                      mpSend({ k: 'shout', v: shout, m: minute, e: minute + MP_DELAY });
+                    },
+                  }
+                : { shoutsLeft: coach.shouts, activeUntil: coach.until, activeShout: coach.shout, onTactic: changeTactic, onShout: callShout }
+          }
+          onSetPiece={(option) => (room ? mpPickSetPiece(option) : setPiece && resolveSetPiece(setPiece.minute, 'user', setPiece.kind, option))}
           onGoal={handleGoal}
           onClip={handleClip}
           mapRef={matchMapRef}
