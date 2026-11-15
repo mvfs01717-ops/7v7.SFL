@@ -3,7 +3,6 @@ import { setPerfMode, useBattery, useLite, usePerfMode, type PerfMode } from '@/
 import { setSound, useSound } from '@/lib/sfx';
 import { useInviteNotifications } from '@/lib/push';
 import type { InstallApi } from '@/lib/pwa';
-import { BALLS, BOOTS, CELEBRATIONS, choose, reqText, unlocked, useCosmetics } from '@/lib/cosmetics';
 
 // Configurações do aparelho: modo otimizado para celular, notificação de convite e instalação do app.
 
@@ -44,7 +43,6 @@ export function SettingsPanel({ onClose, userId, install, onLogin }: { onClose: 
   const lite = useLite();
   const battery = useBattery();
   const sound = useSound();
-  const cos = useCosmetics();
 
   return (
     <div className="st-back" role="dialog" aria-label="Configurações" onClick={onClose}>
@@ -81,57 +79,6 @@ export function SettingsPanel({ onClose, userId, install, onLogin }: { onClose: 
             <span>🔊 Sons dos lances (trave etc.)</span>
             <input type="checkbox" checked={sound} onChange={(e) => setSound(e.target.checked)} style={{ width: 20, height: 20 }} />
           </label>
-        </section>
-
-        <section className="st-sec">
-          <h3>🎽 VESTIÁRIO</h3>
-          <p>Bolas, chuteiras e comemorações desbloqueiam jogando. Você tem {cos.progress.games} jogos, {cos.progress.wins} vitórias e {cos.progress.goals} gols. Só aparece para você, neste aparelho.</p>
-          <b style={{ fontSize: 12, letterSpacing: '.6px' }}>BOLA</b>
-          <div className="st-grid">
-            {BALLS.map((b) => {
-              const ok = unlocked(b.req, cos.progress);
-              return (
-                <button key={b.id} className={`st-it ${cos.ball.id === b.id ? 'on' : ''} ${ok ? '' : 'lock'}`} disabled={!ok} onClick={() => choose('ball', b.id)}>
-                  <svg width="28" height="28" viewBox="-14 -14 28 28" aria-hidden="true">
-                    <circle r="12" fill={b.base} stroke={b.ink} strokeWidth="1.6" />
-                    <polygon points="0,-5 4.7,-1.5 2.9,4 -2.9,4 -4.7,-1.5" fill={b.ink} />
-                    <path d="M0 -5 L0 -12 M4.7 -1.5 L11 -3.5 M2.9 4 L7 10 M-2.9 4 L-7 10 M-4.7 -1.5 L-11 -3.5" stroke={b.ink} strokeWidth="1.2" />
-                  </svg>
-                  {b.label}
-                  {!ok && b.req && <small>🔒 {reqText(b.req)}</small>}
-                </button>
-              );
-            })}
-          </div>
-          <b style={{ fontSize: 12, letterSpacing: '.6px' }}>CHUTEIRA (rastro quando você acelera)</b>
-          <div className="st-grid">
-            {BOOTS.map((b) => {
-              const ok = unlocked(b.req, cos.progress);
-              return (
-                <button key={b.id} className={`st-it ${cos.boots.id === b.id ? 'on' : ''} ${ok ? '' : 'lock'}`} disabled={!ok} onClick={() => choose('boots', b.id)}>
-                  <svg width="34" height="24" viewBox="0 0 34 24" aria-hidden="true">
-                    <path d="M3 6 Q3 3 7 3 L13 3 Q15 9 21 10 Q31 11 31 17 L31 19 Q31 21 29 21 L5 21 Q3 21 3 19 Z" fill={b.color} stroke={b.glow} strokeWidth="1.2" />
-                    <path d="M8 21 v3 M15 21 v3 M22 21 v3 M28 21 v3" stroke="#cbd5e1" strokeWidth="2" strokeLinecap="round" />
-                  </svg>
-                  {b.label}
-                  {!ok && b.req && <small>🔒 {reqText(b.req)}</small>}
-                </button>
-              );
-            })}
-          </div>
-          <b style={{ fontSize: 12, letterSpacing: '.6px' }}>COMEMORAÇÃO DE GOL</b>
-          <div className="st-grid">
-            {CELEBRATIONS.map((c) => {
-              const ok = unlocked(c.req, cos.progress);
-              return (
-                <button key={c.id} className={`st-it ${cos.celeb.id === c.id ? 'on' : ''} ${ok ? '' : 'lock'}`} disabled={!ok} onClick={() => choose('celeb', c.id)} title={c.text}>
-                  <span className="st-ico">{c.icon}</span>
-                  {c.label}
-                  {ok ? <small>{c.text}</small> : c.req && <small>🔒 {reqText(c.req)}</small>}
-                </button>
-              );
-            })}
-          </div>
         </section>
 
         <section className="st-sec">
