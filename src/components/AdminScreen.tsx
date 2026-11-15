@@ -1,3 +1,4 @@
+import { ColorField } from '@/components/game/ColorField';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import {
@@ -210,8 +211,6 @@ const adminCss = `
 .ad-form h3 { margin: 0; font-size: 15px; letter-spacing: 1px; text-transform: uppercase; }
 .ad-form input[type='text'], .ad-form input:not([type]) { min-height: 46px; padding: 0 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.14); background: #070b14; color: #fff; width: 100%; box-sizing: border-box; }
 .ad-colors { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.ad-colors label { display: grid; gap: 6px; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; opacity: .85; }
-.ad-colors input[type='color'] { width: 100%; height: 44px; padding: 3px; border-radius: 10px; border: 1px solid rgba(255,255,255,.14); background: #070b14; cursor: pointer; }
 .ad-preview { display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 12px; background: rgba(255,255,255,.04); font-size: 13px; opacity: .9; }
 .ad-data { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px; align-items: start; }
 .ad-card h3 { margin: 0 0 12px; font-size: 14px; letter-spacing: 2px; text-transform: uppercase; opacity: .85; }
@@ -1003,14 +1002,8 @@ export default function AdminScreen({
                 onChange={(event) => setTeamDraft({ ...teamDraft, abbreviation: event.target.value.toUpperCase() })}
               />
               <div className="ad-colors">
-                <label>
-                  COR PRINCIPAL
-                  <input type="color" value={teamDraft.primary_color} onChange={(event) => setTeamDraft({ ...teamDraft, primary_color: event.target.value })} />
-                </label>
-                <label>
-                  COR SECUNDÁRIA
-                  <input type="color" value={teamDraft.secondary_color} onChange={(event) => setTeamDraft({ ...teamDraft, secondary_color: event.target.value })} />
-                </label>
+                <ColorField label="COR PRINCIPAL" value={teamDraft.primary_color} onChange={(hex) => setTeamDraft({ ...teamDraft, primary_color: hex })} />
+                <ColorField label="COR SECUNDÁRIA" value={teamDraft.secondary_color} onChange={(hex) => setTeamDraft({ ...teamDraft, secondary_color: hex })} />
               </div>
               <div className="ad-preview">
                 <div className="ad-shield" style={{ background: teamDraft.primary_color, color: teamDraft.secondary_color }}>
