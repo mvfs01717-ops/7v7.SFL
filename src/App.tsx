@@ -184,6 +184,8 @@ function App() {
   }, [battery.low, perfMode]);
   const [showSettings, setShowSettings] = useState(false);
   const [showNews, setShowNews] = useState(false);
+  // Amigo escolhido na tela de Amigos para receber o convite quando a sala for criada no Multiplayer
+  const [inviteTarget, setInviteTarget] = useState<FriendRow | null>(null);
   const install = useInstall();
   // true quando os times e jogadores vieram da cópia guardada no aparelho (sem internet)
   const [usingCache, setUsingCache] = useState(false);
@@ -405,8 +407,8 @@ function App() {
     setMpError('');
     navigate('friends');
   }
-  // Convidar um amigo: cria a sala com o clube e o modo escolhidos, avisa o amigo e leva você para a sala de espera
-  async function handleInviteFriend(friend: FriendRow, teamId: string, roomMode: 'classic' | 'dice') {
+  // Convidar um amigo: com sala aberta avisa na hora; sem sala, leva para o Multiplayer com o amigo já escolhido
+  async function handleInviteFriend(friend: FriendRow) {
     if (!userId) return;
     setMpError('');
     if (room) {
@@ -417,17 +419,7 @@ function App() {
       } else setMpError('Saia da sala atual para convidar um amigo.');
       return;
     }
-    setMpBusy(true);
-    const result = await createRoom(userId, nickname, teamId, roomMode);
-    if (result.error || !result.room) {
-      setMpBusy(false);
-      setMpError(result.error ?? 'Erro ao criar a sala.');
-      return;
-    }
-    setRoom(result.room);
-    const sent = await friends.sendInvite(friend.user_id, result.room.code, result.room.mode);
-    setMpBusy(false);
-    if (!sent) setMpError(`Não foi possível avisar ${friend.nickname}. Passe o código ${result.room.code} para ele.`);
+    setInviteTarget(friend);
     navigate('lobby');
   }
   function openTournament() {
@@ -509,9 +501,18 @@ function App() {
     setMpBusy(true);
     setMpError('');
     const result = await createRoom(userId, nickname, teamId, roomMode);
+    if (result.error || !result.room) {
+      setMpBusy(false);
+      setMpError(result.error ?? 'Erro ao criar a sala.');
+      return;
+    }
+    setRoom(result.room);
+    if (inviteTarget) {
+      const sent = await friends.sendInvite(inviteTarget.user_id, result.room.code, result.room.mode);
+      if (!sent) setMpError(`Não foi possível avisar ${inviteTarget.nickname}. Passe o código ${result.room.code} para ele.`);
+      setInviteTarget(null);
+    }
     setMpBusy(false);
-    if (result.error || !result.room) setMpError(result.error ?? 'Erro ao criar a sala.');
-    else setRoom(result.room);
   }
   async function handleJoinRoom(code: string, teamId: string) {
     if (!userId) return;
@@ -2208,7 +2209,10 @@ function App() {
           myRole={myRole}
           busy={mpBusy}
           error={mpError}
-          onBack={reset}
+          onBack={() => {
+            setInviteTarget(null);
+            reset();
+          }}
           onCreate={handleCreateRoom}
           onJoin={handleJoinRoom}
           onResume={resumeMpDraft}
@@ -2223,6 +2227,8 @@ function App() {
           friends={friends}
           inviteCode={inviteCode}
           onInviteUsed={() => setInviteCode(null)}
+          inviteTarget={inviteTarget}
+          onClearTarget={() => setInviteTarget(null)}
         />
       )}
 
@@ -2477,12 +2483,11 @@ function App() {
       {screen === 'leaderboard' && <Leaderboard onBack={reset} />}
       {screen === 'friends' && !!userId && (
         <FriendsScreen
-          teams={clubs}
           friends={friends}
           busy={mpBusy}
           error={mpError}
           onBack={reset}
-          onInvite={(friend, teamId, roomMode) => void handleInviteFriend(friend, teamId, roomMode)}
+          onInvite={(friend) => void handleInviteFriend(friend)}
           onWatch={watchRoom}
         />
       )}

@@ -197,6 +197,8 @@ export function LobbyScreen({
   friends,
   inviteCode,
   onInviteUsed,
+  inviteTarget,
+  onClearTarget,
 }: {
   teams: Team[];
   room: Room | null;
@@ -216,6 +218,9 @@ export function LobbyScreen({
   // Código vindo de um convite aceito: a sala é procurada sozinha
   inviteCode?: string | null;
   onInviteUsed?: () => void;
+  // Amigo escolhido na tela de Amigos: a sala criada aqui já avisa ele
+  inviteTarget?: { nickname: string } | null;
+  onClearTarget?: () => void;
 }) {
   const [teamId, setTeamId] = useState('');
   const [roomMode, setRoomMode] = useState<'classic' | 'dice'>('classic');
@@ -310,9 +315,16 @@ export function LobbyScreen({
               <b>1</b>
               <div>
                 <h3>Criar sala</h3>
-                <p>Escolha seu clube e o modo. Depois passe o código para seu amigo.</p>
+                <p>{inviteTarget ? 'Escolha seu clube e o modo. O convite chega para o seu amigo assim que a sala for criada.' : 'Escolha seu clube e o modo. Depois passe o código para seu amigo.'}</p>
               </div>
             </div>
+            {inviteTarget && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '4px 0 2px', padding: '9px 12px', borderRadius: 10, background: 'rgba(245,184,0,.12)', border: '1px solid rgba(245,184,0,.45)', fontWeight: 800, fontSize: 13 }}>
+                <span aria-hidden="true">👤</span>
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Convidando {inviteTarget.nickname}</span>
+                <button type="button" onClick={onClearTarget} aria-label="Cancelar convite" style={{ border: 0, background: 'transparent', color: '#fff', cursor: 'pointer', fontWeight: 900, fontSize: 14 }}>✕</button>
+              </div>
+            )}
             <span className="lobby-label">SEU CLUBE</span>
             <div className="lobby-clubs">
               {teams.map((team) => (
@@ -350,7 +362,7 @@ export function LobbyScreen({
               disabled={busy || !chosenTeam}
               onClick={() => onCreate(chosenTeam, roomMode)}
             >
-              {busy ? 'Criando...' : 'Criar sala'}
+              {busy ? 'Criando...' : inviteTarget ? 'Criar sala e convidar' : 'Criar sala'}
             </button>
           </section>
 
