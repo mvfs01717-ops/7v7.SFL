@@ -7,6 +7,7 @@ import { isFreeAgent, HALFTIME_MS, HT_BREAK_MS, HT_RETURN_MS, HT_RETURN_NO_SUBS_
 import { BENCH_SLOTS, emptyStats, positions, slotPositionsOf, type BenchSlot, type DraftSlot, type GoalRecord, type MatchEvent, type MatchStats, type Player, type Position, type Screen, type Team } from '@/lib/game/types';
 import { BENCH_KEYS, SUBS_MAX, SUBS_WINDOW_SEC, autoSubstitutions, encodeSubs, hasBench, subsDecided, subsOf, createRoom, effortLoss, fetchRoom, pingRoom, fitsSlot, generatePlan, isRoomLive, listLiveRooms, joinRoom, openRoomChat, patchRoom, recordResult, reshapeSecondHalf, setWetFrom, saveActiveRoom, clearActiveRoom, loadActiveRoom, slowdown, staminaAt, tacticOf, TACTIC_INFO, type ChatMessage, type FieldLite, type PlanItem, type Room, type Tactic } from '@/lib/multiplayer';
 import { supabase } from '@/lib/supabase';
+import { WhatsNew } from '@/components/game/WhatsNew';
 import { SettingsPanel } from '@/components/game/SettingsPanel';
 import { useBattery, useLite, usePerfMode } from '@/lib/settings';
 import { loadDataCache, saveDataCache, useInstall, useOnline, useUpdateAvailable } from '@/lib/pwa';
@@ -182,6 +183,7 @@ function App() {
     return undefined;
   }, [battery.low, perfMode]);
   const [showSettings, setShowSettings] = useState(false);
+  const [showNews, setShowNews] = useState(false);
   const install = useInstall();
   // true quando os times e jogadores vieram da cópia guardada no aparelho (sem internet)
   const [usingCache, setUsingCache] = useState(false);
@@ -2151,9 +2153,11 @@ function App() {
           </button>
         </div>
       )}
+      {showNews && <WhatsNew onClose={() => setShowNews(false)} />}
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} userId={userId} install={install} onLogin={() => setShowLogin(true)} />}
       <Header
         onSettings={() => setShowSettings(true)}
+        onNews={() => setShowNews(true)}
         nickname={nickname}
         isAdmin={isAdmin}
         onAdmin={() => navigate('admin')}
@@ -2265,6 +2269,7 @@ function App() {
           offline={!online}
           install={install}
           onSettings={() => setShowSettings(true)}
+          onNews={() => setShowNews(true)}
         />
       )}
 

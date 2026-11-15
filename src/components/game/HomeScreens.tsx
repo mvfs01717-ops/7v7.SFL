@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { stadiumCss } from '@/lib/game/stadiumCss';
-import { ArrowLeft, ArrowRight, CircleUserRound, Database, Download, Menu, Settings, Play, Shield, Swords, Trophy, Users, X, Zap } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CircleUserRound, Database, Download, Menu, Settings, Sparkles, Play, Shield, Swords, Trophy, Users, X, Zap } from 'lucide-react';
 import { positionNames, type Player, type Team } from '@/lib/game/types';
 import { Badge, Card, LogoMark, SHIELD_CLIP } from '@/components/game/Card';
+import { useNewsUnseen } from '@/components/game/WhatsNew';
 
 const headerCss = `
 .topbar.hd { height: 68px; gap: 28px; position: sticky; top: 0; z-index: 30; border-bottom: 0;
@@ -49,6 +50,7 @@ export function Header({
   onFriends,
   onLogin,
   onSettings,
+  onNews,
   loggedIn,
   active,
 }: {
@@ -62,10 +64,12 @@ export function Header({
   onFriends: () => void;
   onLogin: () => void;
   onSettings?: () => void;
+  onNews?: () => void;
   loggedIn: boolean;
   active: string;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const newsUnseen = useNewsUnseen();
   const go = (action: () => void) => {
     setMenuOpen(false);
     action();
@@ -94,6 +98,12 @@ export function Header({
           </button>
         ))}
       </nav>
+      {onNews && (
+        <button className="gear" aria-label="O que há de novo" title="O que há de novo" onClick={onNews} style={{ position: 'relative' }}>
+          <Sparkles size={18} />
+          {newsUnseen && <i style={{ position: 'absolute', top: 4, right: 4, width: 8, height: 8, borderRadius: 99, background: '#F5B800' }} />}
+        </button>
+      )}
       {onSettings && (
         <button className="gear" aria-label="Configurações" title="Configurações" onClick={onSettings}>
           <Settings size={18} />
@@ -310,6 +320,7 @@ export function Home({
   offline = false,
   install,
   onSettings,
+  onNews,
 }: {
   isAdmin: boolean;
   onAdmin: () => void;
@@ -329,11 +340,13 @@ export function Home({
   liveRooms?: number;
   // Sem internet: só o que roda no aparelho (draft contra o bot e elenco) fica ativo
   onSettings?: () => void;
+  onNews?: () => void;
   offline?: boolean;
   install?: { canInstall: boolean; needsIosSteps: boolean; install: () => Promise<void> };
 }) {
   const [sel, setSel] = useState<HomeKey>('play');
   const [iosHelp, setIosHelp] = useState(false);
+  const newsUnseen = useNewsUnseen();
   const [leaving, setLeaving] = useState(false);
   const [idx, setIdx] = useState(0);
   const current = featured.length ? featured[idx % featured.length] : null;
@@ -446,6 +459,16 @@ export function Home({
                 <small>Ícone na tela inicial</small>
               </span>
               <span className="hm-badge gold">GRÁTIS</span>
+            </button>
+          )}
+          {onNews && (
+            <button className="hm-item" onClick={onNews}>
+              <span className="hm-ico"><Sparkles size={22} /></span>
+              <span>
+                <b>O que há de novo</b>
+                <small>Novidades desta versão</small>
+              </span>
+              {newsUnseen && <span className="hm-badge gold">NOVO</span>}
             </button>
           )}
           {onSettings && (
