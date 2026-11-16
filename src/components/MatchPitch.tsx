@@ -91,6 +91,8 @@ type Step = {
   scripted?: boolean;
   ambient?: boolean;
   dribble?: boolean;
+  // Finta (primeiro toque do drible) ou arrancada (segundo); guarda o lado e se o drible dá certo
+  feint?: { phase: 'fake' | 'burst'; opp: string; sg: number; win: boolean };
   arrive?: boolean;
   caption?: string;
   // Altura da bola no meio do trajeto (passe/chute por cima), em pixels
@@ -617,6 +619,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
   const slideRef = useRef<Record<string, { until: number; fx: number; fy: number }>>({});
   // Animação do desarme: o marcador estica no chão (carrinho) ou dá o bote, a bota aparece, o impacto pisca e o desarmado tropeça
   const tackleFx = useRef<{ def: string; hold: string; t0: number; span: number; slide: boolean; win: boolean; ax: number; ay: number; contact: number } | null>(null);
+  const dribFx = useRef<{ key: string; opp: string; t0: number; dur: number; sg: number; win: boolean; phase: 'fake' | 'burst'; dx: number } | null>(null);
   const tkSnap = useRef<{ def: string; hold: string; stretch: number; hrot: number; hsc: number } | null>(null);
   const bootNode = useRef<SVGGElement | null>(null);
   const impactNode = useRef<SVGCircleElement | null>(null);
@@ -766,6 +769,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
       dur: 340,
       ambient,
       dribble: true,
+      feint: { phase: 'fake', opp: opp.key, sg, win },
       caption: win ? `${h.name} dribla ${opp.name}` : `${h.name} tenta driblar ${opp.name}`,
       after: () => {
         const t = tnow();
@@ -793,6 +797,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
       dur: 400,
       ambient,
       dribble: true,
+      feint: { phase: 'burst', opp: opp.key, sg, win },
     };
     return [first, second];
   }
@@ -826,6 +831,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         speed: step.speed ?? (step.dribble ? 1.3 : step.arrive ? 1.25 : 0.9),
       };
       if (step.caption) setCaption(step.caption);
+      dribFx.current = step.feint ? { key: holder.key, opp: step.feint.opp, t0: now, dur: step.dur, sg: step.feint.sg, win: step.feint.win, phase: step.feint.phase, dx: dirOf(holder.side) } : null;
       return;
     }
 
@@ -1522,8 +1528,10 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         const ux = sp > 12 ? holderNow.vx / sp : dirOf(holderNow.side);
         const uy = sp > 12 ? holderNow.vy / sp : 0;
         const k = 1 - Math.exp(-dt / 60);
-        st.ballX += (holderNow.x + ux * 11 - st.ballX) * k;
-        const wob = st.active && st.active.step.dribble ? Math.sin(now / 45) * 6 : 0;
+        const touch = st.active && st.active.step.kind === 'carry' && !st.active.step.dribble && sp > 20 ? Math.max(0, Math.sin(now / 120)) * 5 : 0;
+        st.ballX += (holderNow.x + ux * (11 + touch) - st.ballX) * k;
+        const df = dribFx.current;
+        const wob = st.active && st.active.step.dribble ? (df && df.phase === 'fake' ? df.sg * Math.sin(clamp((now - df.t0) / df.dur, 0, 1) * Math.PI * 2) * 9 : Math.sin(now / 45) * 6) : 0;
         st.ballY += (holderNow.y + uy * 11 + 2 + wob - st.ballY) * k;
       };
 
@@ -2098,6 +2106,63 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
               } else im?.setAttribute('display', 'none');
               tkSnap.current = { def: fx.def, hold: fx.hold, stretch, hrot, hsc };
             }
+          }
+        }
+      }
+
+      // Finta e arrancada do drible: corpo balança, marcador cai no engano; condução tem leve balanço de passada
+      {
+        const df = dribFx.current;
+        const carrying = st.active && st.active.step.kind === 'carry' && !tackleFx.current;
+        if (df && !(st.active && st.active.step.dribble)) dribFx.current = null;
+        if (df && carrying && st.active && st.active.step.dribble) {
+          const cEl = all.find((x) => x.key === df.key);
+          const oEl = all.find((x) => x.key === df.opp);
+          const pr = clamp((now - df.t0) / df.dur, 0, 1);
+          if (cEl) {
+            let rot: number;
+            let sx = 1;
+            let sy = 1;
+            let shift = 0;
+            if (df.phase === 'fake') {
+              rot = df.sg * -Math.sin(pr * Math.PI * 2) * 22;
+              sy = 1 + 0.14 * Math.sin(pr * Math.PI);
+              sx = 1 - 0.08 * Math.sin(pr * Math.PI);
+              shift = -df.sg * Math.sin(pr * Math.PI) * 6;
+            } else {
+              rot = df.sg * Math.sin(pr * Math.PI) * 8;
+              sx = 1 + 0.2 * Math.sin(pr * Math.PI);
+              sy = 1 - 0.1 * Math.sin(pr * Math.PI);
+            }
+            nodes.current[cEl.key]?.setAttribute('transform', `translate(${cEl.x.toFixed(1)} ${(cEl.y + shift).toFixed(1)}) rotate(${rot.toFixed(1)}) scale(${sx.toFixed(3)} ${sy.toFixed(3)})`);
+            if (!liteRef.current && df.phase === 'burst' && pr < 0.6 && Math.random() < 0.5) {
+              const i = markNext.current % MARK_POOL;
+              markNext.current += 1;
+              const node = markNodes.current[i];
+              if (node) {
+                node.setAttribute('d', `M${(cEl.x - df.dx * 14).toFixed(1)} ${(cEl.y + 11).toFixed(1)} L${cEl.x.toFixed(1)} ${(cEl.y + 11).toFixed(1)}`);
+                node.setAttribute('stroke-width', '3.2');
+                markData.current[i] = { born: now, base: 0.32 };
+              }
+            }
+          }
+          if (oEl) {
+            // Marcador vai para o lado errado e fica desequilibrado; se o drible falha, ele dá o bote
+            const fakePhase = df.phase === 'fake';
+            const sway = df.win ? (fakePhase ? Math.sin(pr * Math.PI) * 16 * df.sg : 16 * df.sg * (1 - pr) + Math.sin(pr * Math.PI * 3) * 4) : -Math.sin(pr * Math.PI) * 6 * df.sg;
+            const dip = df.win ? 1 + 0.1 * (fakePhase ? Math.sin(pr * Math.PI) : 1 - pr) : 1;
+            const bite = df.win && fakePhase ? df.sg * Math.sin(pr * Math.PI) * 5 : 0;
+            nodes.current[oEl.key]?.setAttribute('transform', `translate(${oEl.x.toFixed(1)} ${(oEl.y + bite).toFixed(1)}) rotate(${sway.toFixed(1)}) scale(${dip.toFixed(3)})`);
+          }
+          tkSnap.current = cEl && oEl ? { def: df.opp, hold: df.key, stretch: 0, hrot: df.phase === 'fake' ? df.sg * -Math.sin(pr * Math.PI * 2) * 22 : df.sg * Math.sin(pr * Math.PI) * 8, hsc: 1 + 0.12 * Math.sin(pr * Math.PI) } : null;
+        } else if (!tackleFx.current && tkSnap.current && tkSnap.current.stretch === 0) {
+          tkSnap.current = null;
+        } else if (carrying && st.holder && !(st.active && st.active.step.dribble)) {
+          // Condução normal: o corpo balança de leve a cada passada
+          const hEl = all.find((x) => x.key === st.holder);
+          if (hEl && Math.hypot(hEl.vx, hEl.vy) > 20) {
+            const ph = now / 120 + hEl.x * 0.05;
+            nodes.current[hEl.key]?.setAttribute('transform', `translate(${hEl.x.toFixed(1)} ${(hEl.y + Math.sin(ph * 2) * 0.9).toFixed(1)}) rotate(${(Math.sin(ph) * 4).toFixed(1)}) scale(${(1 + Math.abs(Math.sin(ph)) * 0.035).toFixed(3)})`);
           }
         }
       }
