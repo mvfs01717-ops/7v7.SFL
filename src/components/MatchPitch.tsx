@@ -276,8 +276,9 @@ const crowdCss = `
 .pc-net-hit { animation: pcNet 1s cubic-bezier(.2,.8,.3,1) both; }
 @keyframes pcNet { 0% { transform: scaleX(1) skewY(0); } 18% { transform: scaleX(1.85) skewY(7deg); } 38% { transform: scaleX(1.25) skewY(-5deg); } 60% { transform: scaleX(1.5) skewY(3deg); } 80% { transform: scaleX(1.12) skewY(-1.5deg); } 100% { transform: scaleX(1) skewY(0); } }
 .pc-dust { opacity: 0; transform-box: fill-box; transform-origin: 50% 50%; }
-@keyframes pcRain { from { transform: translate(0, -70px); } to { transform: translate(-22px, 560px); } }
-.pc-drop { animation: pcRain var(--rd, .7s) linear var(--rl, 0s) infinite; }
+/* Chuva: cada grupo de gotas anda um "degrau" (63px) e recomeça sem emenda, então são só 8 animações em vez de 80 */
+@keyframes pcRain { from { transform: translate(0, 0); } to { transform: translate(-2.2px, 63px); } }
+.pc-dropg { animation: pcRain var(--rd, .07s) linear var(--rl, 0s) infinite; }
 @keyframes pcStrike { 0%, 93% { opacity: 0; } 94% { opacity: .38; } 95% { opacity: 0; } 96% { opacity: .24; } 97%, 100% { opacity: 0; } }
 .pc-strike { opacity: 0; animation: pcStrike 17s linear infinite; }
 @keyframes pcBob { 50% { transform: translateY(-1.4px); } }
@@ -288,7 +289,7 @@ const crowdCss = `
 @keyframes pcPop { 0% { transform: scale(.6) translateY(-6px); opacity: 0; } 100% { transform: none; opacity: 1; } }
 /* Celular: balões da torcida pequenos, de uma linha só, para não cobrirem o campo */
 @media (max-width: 560px) { .pc-bub { top: 3px; max-width: 36%; padding: 2px 7px; border-radius: 9px; font-size: 9.5px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: none; } .pc-bub.hype { box-shadow: 0 0 8px rgba(245,184,0,.4); } .pc-db { display: none; } }
-@media (prefers-reduced-motion: reduce) { .pc-replay, .pc-fan, .pc-flag, .pc-bub, .pc-glow, .pc-conf, .pc-flood, .pc-net-hit, .pc-drop, .pc-strike { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { .pc-replay, .pc-fan, .pc-flag, .pc-bub, .pc-glow, .pc-conf, .pc-flood, .pc-net-hit, .pc-dropg, .pc-strike { animation: none !important; } }
 `;
 
 function toPoint(side: Side, f: number, g: number): Point {
@@ -433,12 +434,12 @@ const BALL_EDGES = Array.from({ length: 5 }, (_, i) => {
   return pentagon(8.6 * Math.cos(rad), 8.6 * Math.sin(rad), 2.9, a + 180);
 });
 
-// Desgaste do gramado: o campo é dividido em quadradinhos de 20 px; cada segundo que um jogador passa num quadradinho
+// Desgaste do gramado: o campo é dividido em quadradinhos de 24 px; cada segundo que um jogador passa num quadradinho
 // deixa a terra aparecer um pouco mais. Gols, meio-campo e corredores dos lados ficam gastos no fim do jogo.
-const WEAR_CELL = 16;
+const WEAR_CELL = 24;
 const WEAR_COLS = Math.ceil((FX1 - FX0) / WEAR_CELL);
 const WEAR_ROWS = Math.ceil((FY1 - FY0) / WEAR_CELL);
-const WEAR_PER_SEC = 0.07; // desgaste ganho por segundo de pisada
+const WEAR_PER_SEC = 0.0311; // desgaste ganho por segundo de pisada (calibrado para quadradinhos de 24 px; era 0.07 com 16 px)
 const WEAR_FULL_TOTAL = 1000; // pisadas totais (em segundos de jogador) para o campo chegar no "jogo inteiro"
 // Cada quadradinho tem um jeito próprio (posição, tamanho, giro e "resistência" do gramado) para o desgaste não parecer uma grade.
 // Primeiro o gramado afina e amarela; só depois, nos pontos mais fracos, a terra aparece em manchas.
@@ -2866,17 +2867,15 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         </g>
         {rain && (
           <g style={{ pointerEvents: 'none' }} stroke="#d6e8f5" strokeWidth={1} strokeLinecap="round">
-            {Array.from({ length: lite ? 28 : 80 }).map((_, i) => (
-              <line
-                key={i}
-                className="pc-drop"
-                x1={wrand(i, 31) * (W + 40)}
-                y1={-STAND}
-                x2={wrand(i, 31) * (W + 40) - 3}
-                y2={-STAND + 11 + wrand(i, 32) * 6}
-                opacity={0.2 + wrand(i, 33) * 0.3}
-                style={{ ['--rd' as string]: `${(0.55 + wrand(i, 34) * 0.4).toFixed(2)}s`, ['--rl' as string]: `${(-wrand(i, 35) * 1).toFixed(2)}s` }}
-              />
+            {Array.from({ length: lite ? 3 : 8 }).map((_, gi) => (
+              <g key={gi} className="pc-dropg" style={{ ['--rd' as string]: `${(0.055 + wrand(gi, 34) * 0.04).toFixed(3)}s`, ['--rl' as string]: `${(-wrand(gi, 35) * 0.06).toFixed(3)}s` }}>
+                {Array.from({ length: 10 }).map((__, j) => {
+                  const i = gi * 10 + j;
+                  const x = wrand(i, 31) * (W + 40);
+                  const y = -STAND - 63 + j * 63 + wrand(i, 36) * 40;
+                  return <line key={j} x1={x} y1={y} x2={x - 3} y2={y + 11 + wrand(i, 32) * 6} opacity={0.2 + wrand(i, 33) * 0.3} />;
+                })}
+              </g>
             ))}
           </g>
         )}
