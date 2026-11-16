@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { BarChart3, Crown, RefreshCw, Zap } from 'lucide-react';
 import { type Shootout } from '@/components/PenaltyShootout';
 import { slotOf } from '@/lib/game/helpers';
 import { type GoalRecord, type MatchEvent, type MatchStats, type Player, type Team } from '@/lib/game/types';
-import { Card, TeamMark } from '@/components/game/Card';
+import { TeamMark } from '@/components/game/Card';
+import { MvpCard, MvpReveal } from '@/components/game/Mvp';
 import { EventIcon } from '@/components/game/MatchScreen';
 import { MatchMapPanel } from '@/components/game/MatchMapPanel';
 import type { MatchMapData } from '@/lib/game/matchMap';
@@ -34,7 +35,7 @@ const resultsCss = `
 @keyframes rsFall { 0% { transform: translateY(0) rotate(0); opacity: 0; } 8% { opacity: 1; } 100% { transform: translateY(105vh) rotate(720deg); opacity: .9; } }
 .rs-mvp { display: flex; align-items: center; gap: 22px; width: min(640px, 100%); margin: 0 auto 24px; padding: 18px 24px; border-radius: 6px 24px 6px 24px;
   border: 1px solid rgba(245,184,0,.45); background: linear-gradient(110deg, rgba(245,184,0,.22), rgba(255,255,255,.03)); box-shadow: 0 0 40px rgba(245,184,0,.15); animation: rsRise .7s .35s both; }
-.rs-mvp-card { width: 104px; flex: none; filter: drop-shadow(0 14px 14px rgba(0,0,0,.6)); }
+.rs-mvp-card { width: 128px; flex: none; filter: drop-shadow(0 14px 14px rgba(0,0,0,.6)); }
 .rs-mvp h3 { margin: 4px 0 2px; font-size: 28px; font-style: italic; text-transform: uppercase; line-height: 1; }
 .rs-mvp small { opacity: .7; }
 .rs-mvp-r { margin-left: auto; text-align: center; font-size: 54px; font-weight: 900; font-style: italic; line-height: 1; color: #4ade80; text-shadow: 0 0 24px rgba(74,222,128,.5); }
@@ -62,7 +63,7 @@ const resultsCss = `
 .rs .result-actions .outline-button { border-radius: 4px; padding: 17px 28px; letter-spacing: 2px; text-transform: uppercase; }
 @media (max-width: 560px) {
   .rs .result-score > strong { font-size: 54px; } .rs .result-score { padding: 10px 14px; gap: 10px; }
-  .rs-mvp { gap: 12px; padding: 14px; } .rs-mvp-card { width: 78px; } .rs-mvp h3 { font-size: 20px; } .rs-mvp-r { font-size: 38px; }
+  .rs-mvp { gap: 12px; padding: 14px; } .rs-mvp-card { width: 96px; } .rs-mvp h3 { font-size: 20px; } .rs-mvp-r { font-size: 38px; }
   .rs .result-actions .gold-button, .rs .result-actions .outline-button { width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) { .rs *, .rs-conf i { animation: none !important; } }
@@ -122,6 +123,16 @@ export function ResultsScreen({
     });
     return best as { player: Player; rating: number; info: PlayerRating } | null;
   }, [ratings, userTeam, botTeam]);
+  const mvpMine = !!mvp && userTeam.some((p) => p.id === mvp.player.id);
+  const mvpTeam = mvpMine ? club : opponent;
+  // A revelação do MVP entra um instante depois da tela de resultado e só aparece uma vez por partida
+  const [mvpOpen, setMvpOpen] = useState(false);
+  useEffect(() => {
+    if (!mvp) return undefined;
+    const id = window.setTimeout(() => setMvpOpen(true), 1500);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const confetti = useMemo(
     () => Array.from({ length: 26 }, (_, i) => ({ l: (i * 37) % 100, d: (i * 0.41) % 5, t: 4 + ((i * 7) % 4), c: ['#F5B800', '#4ade80', '#fff', '#ffe27a'][i % 4] })),
     [],
@@ -159,14 +170,19 @@ export function ResultsScreen({
       {mvp && (
         <div className="rs-mvp">
           <div className="rs-mvp-card">
-            <Card player={mvp.player} fluid />
+            <MvpCard player={mvp.player} team={mvpTeam} rating={mvp.rating} goals={mvp.info.goals} assists={mvp.info.assists} />
           </div>
           <div>
             <span className="eyebrow">MELHOR EM CAMPO</span>
             <h3>{mvp.player.name}</h3>
             <small>
-              {mvp.info.goals} {mvp.info.goals === 1 ? 'gol' : 'gols'} · {mvp.info.assists} assist.
+              {mvp.info.goals} {mvp.info.goals === 1 ? 'gol' : 'gols'} · {mvp.info.assists} assist. · {mvpMine ? club.abbreviation : opponent.abbreviation}
             </small>
+            <div>
+              <button type="button" onClick={() => setMvpOpen(true)} style={{ marginTop: 8, padding: '6px 12px', borderRadius: 99, border: '1px solid rgba(245,184,0,.6)', background: 'transparent', color: '#F5B800', font: '800 11px Inter, sans-serif', cursor: 'pointer' }}>
+                ▶ Rever MVP
+              </button>
+            </div>
           </div>
           <div className="rs-mvp-r">
             {mvp.rating.toFixed(1)}
@@ -174,6 +190,7 @@ export function ResultsScreen({
           </div>
         </div>
       )}
+      {mvp && mvpOpen && <MvpReveal player={mvp.player} team={mvpTeam} rating={mvp.rating} goals={mvp.info.goals} assists={mvp.info.assists} mine={mvpMine} onClose={() => setMvpOpen(false)} />}
       {shootout && (
         <div
           style={{

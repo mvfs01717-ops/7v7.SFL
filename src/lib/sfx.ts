@@ -79,3 +79,33 @@ export function playPost(volume = 0.22) {
   noise.connect(ng).connect(out);
   noise.start(t);
 }
+
+// Fanfarra do MVP: pancada grave quando "MVP" aparece, notas subindo enquanto a carta voa e acorde brilhante quando ela pousa
+export function playMvp(volume = 0.2) {
+  if (!on || document.hidden) return;
+  const ac = audio();
+  if (!ac) return;
+  const t = ac.currentTime;
+  const out = ac.createGain();
+  out.gain.value = volume;
+  out.connect(ac.destination);
+  const tone = (freq: number, start: number, dur: number, type: OscillatorType, level: number, to?: number) => {
+    const osc = ac.createOscillator();
+    const g = ac.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t + start);
+    if (to) osc.frequency.exponentialRampToValueAtTime(to, t + start + dur);
+    g.gain.setValueAtTime(0.0001, t + start);
+    g.gain.exponentialRampToValueAtTime(level, t + start + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + start + dur);
+    osc.connect(g).connect(out);
+    osc.start(t + start);
+    osc.stop(t + start + dur + 0.05);
+  };
+  tone(150, 0.15, 0.6, 'sine', 1.6, 45);
+  [523.25, 659.25, 783.99].forEach((f, i) => tone(f, 1.0 + i * 0.28, 0.3, 'triangle', 0.5));
+  [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {
+    tone(f, 2.0, 1.4, 'triangle', 0.45 - i * 0.05);
+    tone(f * 2, 2.0, 0.9, 'sine', 0.12);
+  });
+}
