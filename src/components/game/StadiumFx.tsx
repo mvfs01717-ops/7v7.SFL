@@ -21,6 +21,7 @@ const FY0 = 10;
 const MID_X = 370;
 
 export const fxCss = `
+@media (max-width: 560px) { .fx-telao { display: none; } }
 @keyframes fxSpark { 0% { transform: translate(0,0) scale(1); opacity: 1; } 70% { opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)) scale(.15); opacity: 0; } }
 @keyframes fxSmoke { 0% { transform: translate(0,0) scale(.5); opacity: 0; } 15% { opacity: .5; } 100% { transform: translate(var(--sx), -46px) scale(2.6); opacity: 0; } }
 @keyframes fxJump { 0%,100% { transform: translateY(0); } 35% { transform: translateY(-16px); } 60% { transform: translateY(-3px); } }
@@ -363,8 +364,8 @@ export function StadiumFx({ liveRef, club, opponent, home, ambience, burst, scor
           </g>
         ))}
 
-        {/* telão */}
-        <g>
+        {/* telão (no celular fica escondido: o placar da TV já está por cima dele) */}
+        <g className="fx-telao">
           <rect x={telX - 3} y={telY - 3} width={telW + 6} height={telH + 6} rx={4} fill="#1a1f2b" stroke="#3a4558" strokeWidth={1} />
           <rect x={telX} y={telY} width={telW} height={telH} rx={2} fill="url(#fx-tel)" />
           {mode === 'score' && (

@@ -8,7 +8,7 @@ import type { MatchMapData } from '@/lib/game/matchMap';
 import { useCrowd } from '@/components/game/useCrowd';
 import { useWatchers } from '@/lib/friends';
 import PenaltyShootout, { type Shootout } from '@/components/PenaltyShootout';
-import { slotOf } from '@/lib/game/helpers';
+import { average, slotOf } from '@/lib/game/helpers';
 import { type MatchEvent, type MatchStats, type Player, type Position, type Team } from '@/lib/game/types';
 import { SUBS_WINDOW_SEC, effortLoss, setWetFrom, staminaAt, type ChatMessage, type Tactic } from '@/lib/multiplayer';
 import { TeamMark } from '@/components/game/Card';
@@ -16,8 +16,8 @@ import { ChatBox, ChatToast } from '@/components/game/Chat';
 import { pickKits } from '@/lib/game/kit';
 import { CoachPanel } from '@/components/game/CoachPanel';
 import type { Shout } from '@/lib/game/coach';
-import { HalftimeBreak, PenaltyPrep, SetPiecePrep, SubstitutionPanel, staminaColor } from '@/components/game/Halftime';
-import type { SetKind, SetOption } from '@/lib/game/setpiece';
+import { HalftimeBreak, PenaltyPrep, SetPiecePrep, SubstitutionPanel, staminaColor, type SetPieceInfo } from '@/components/game/Halftime';
+import { SET_TITLE, type SetKind, type SetOption } from '@/lib/game/setpiece';
 import { ambienceLabel, pickAmbience, weatherAt, wetFromOf, type Ambience } from '@/lib/game/ambience';
 import { stadiumFor } from '@/lib/game/stadium';
 import { TvOverlay } from '@/components/game/TvOverlay';
@@ -184,6 +184,19 @@ export function MatchScreen({
   // Câmeras ao vivo (3D): a escolha fica salva no aparelho
   const liveRef = useRef<LiveSnap | null>(null);
   const narrow = useNarrow();
+  const [feedCaption, setFeedCaption] = useState('Bola rolando');
+  const spInfo = useMemo<SetPieceInfo | null>(() => {
+    if (!setPiece) return null;
+    const taker = [...userTeam.filter((p) => ['CM', 'LF', 'RF'].includes(slotOf(p)))].sort((a, b) => b.overall - a.overall)[0];
+    return {
+      taker: taker?.name,
+      takerOvr: taker?.overall ?? 75,
+      atk: average(userTeam.filter((p) => ['LF', 'RF', 'CF'].includes(slotOf(p)))),
+      def: average(botTeam.filter((p) => ['LB', 'RB', 'GK'].includes(slotOf(p)))),
+      odds: !multiplayer,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setPiece?.minute, setPiece?.kind, multiplayer]);
   const [cam, setCam] = useState<LiveMode>(() => {
     try {
       const v = localStorage.getItem('7v7-cam') as LiveMode | null;
@@ -295,6 +308,8 @@ export function MatchScreen({
             endHalfRef={endHalfRef}
             deadBallRef={deadBallRef}
             hold={pause === 'setpiece'}
+            hideOverlays
+            onCaption={setFeedCaption}
           />
           </div>
           {cam === 'tatica' && <StadiumFx liveRef={liveRef} club={club} opponent={opponent} home={homeSide} ambience={ambience} burst={crowd.burst} score={score} wrapRef={pitchWrapRef} />}
@@ -339,13 +354,44 @@ export function MatchScreen({
             <SubstitutionPanel club={club} userTeam={userTeam} bench={bench} tactic={tactic} minute={minute} onConfirm={onSubs} limitSec={multiplayer ? SUBS_WINDOW_SEC : undefined} />
           )}
           {!narrow && coach && !pause && !penaltyPhase && !penaltyPrep && minute < 90 && <CoachPanel tactic={tactic} minute={minute} shoutsLeft={coach.shoutsLeft} activeUntil={coach.activeUntil} activeShout={coach.activeShout} onTactic={coach.onTactic} onShout={coach.onShout} delayNote={coach.delayNote} />}
-          {(pause === 'setpiece' || setPiece?.floating) && setPiece && onSetPiece && <SetPiecePrep key={setPiece.minute} kind={setPiece.kind} minute={setPiece.minute} club={club} floating={!!setPiece.floating} onPick={onSetPiece} />}
+          {(pause === 'setpiece' || setPiece?.floating) && setPiece && onSetPiece && <SetPiecePrep key={setPiece.minute} kind={setPiece.kind} minute={setPiece.minute} club={club} floating={!!setPiece.floating} onPick={onSetPiece} info={spInfo} />}
           {rivalNote && (
             <div role="status" style={{ position: 'absolute', left: 8, top: 70, zIndex: 7, padding: '6px 12px', borderRadius: 10, background: 'rgba(8,12,20,.92)', border: '1px solid #ff6a4f', color: '#fff', font: '800 11px Inter, sans-serif' }}>
               {rivalNote}
             </div>
           )}
           {penaltyPrep && <PenaltyPrep club={club} opponent={opponent} score={score} />}
+        </div>
+        <div className="ms-feed" aria-label="Narração do lance">
+          <style>{`
+            .ms-feed { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; margin: 6px 0 0; min-height: 34px; padding: 6px 10px; border-radius: 10px; background: rgba(10,16,26,.8); border-left: 3px solid #F5B800; color: #fff; font: 700 12.5px/1.3 Inter, sans-serif; }
+            .ms-feed .ms-cap { flex: 1 1 220px; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+            .ms-feed .ms-chips { display: flex; gap: 6px; flex: 0 1 auto; flex-wrap: wrap; }
+            .ms-feed .ms-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 3px 9px; border-radius: 999px; font: 800 11px/1.25 Inter, sans-serif; background: rgba(255,255,255,.1); color: #f4f4f0; animation: msChip .3s ease-out both; }
+            .ms-feed .ms-chip i { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+            .ms-feed .ms-chip.hype { background: #F5B800; color: #1a1200; }
+            .ms-feed .ms-chip.sad { color: #cbd5e1; font-style: italic; }
+            @keyframes msChip { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+            @media (max-width: 560px) { .ms-feed { min-height: 58px; align-content: center; font-size: 12px; } .ms-feed .ms-chip { font-size: 10.5px; } }
+            @media (prefers-reduced-motion: reduce) { .ms-feed .ms-chip { animation: none; } }
+          `}</style>
+          <span className="ms-cap">{pause === 'setpiece' && setPiece ? `${SET_TITLE[setPiece.kind]} · escolha a jogada` : feedCaption}</span>
+          {(crowd.bubbles.user || crowd.bubbles.bot) && (
+            <span className="ms-chips">
+              {crowd.bubbles.user && (
+                <span key={crowd.bubbles.user.key} className={`ms-chip ${crowd.bubbles.user.mood}`}>
+                  <i style={{ background: club.primary_color }} />
+                  {crowd.bubbles.user.text}
+                </span>
+              )}
+              {crowd.bubbles.bot && (
+                <span key={crowd.bubbles.bot.key} className={`ms-chip ${crowd.bubbles.bot.mood}`}>
+                  <i style={{ background: opponent.primary_color }} />
+                  {crowd.bubbles.bot.text}
+                </span>
+              )}
+            </span>
+          )}
         </div>
         {narrow && (
           <div className="ms-bar" role="toolbar" aria-label="Câmera e técnico">

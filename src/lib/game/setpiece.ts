@@ -5,7 +5,7 @@ export type SetKind = 'escanteio' | 'falta';
 export type SetOption = 'cruzamento' | 'curto' | 'direto';
 export type SetOutcome = 'gol' | 'defesa' | 'finalização' | 'posse';
 
-export const SET_TITLE: Record<SetKind, string> = { escanteio: 'ESCANTEIO A FAVOR', falta: 'FALTA PERTO DA ÁREA' };
+export const SET_TITLE: Record<SetKind, string> = { escanteio: 'ESCANTEIO A FAVOR', falta: 'FALTA A FAVOR' };
 
 export const SET_OPTIONS: Record<SetKind, { id: SetOption; label: string; icon: string; text: string; risk: 'baixo' | 'médio' | 'alto' }[]> = {
   escanteio: [

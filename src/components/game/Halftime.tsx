@@ -3,7 +3,7 @@ import { PENALTY_PREP_MS, slotOf } from '@/lib/game/helpers';
 import { positions, type Player, type Position, type Team } from '@/lib/game/types';
 import { Card, cardCss } from '@/components/game/Card';
 import { FIELD_SPOTS, DraftField, draftCss } from '@/components/game/DraftScreen';
-import { SET_OPTIONS, SET_TITLE, type SetKind, type SetOption } from '@/lib/game/setpiece';
+import { setPieceOdds, SET_OPTIONS, SET_TITLE, type SetKind, type SetOption } from '@/lib/game/setpiece';
 import { SUBS_MAX, fitsSlot, staminaAt, substitutionGain, type FieldLite, type Tactic } from '@/lib/multiplayer';
 
 // ---- Intervalo e transição para os pênaltis: usam o mesmo campo do MatchPitch (SVG 740 x 440, time do usuário à esquerda) ----
@@ -513,7 +513,10 @@ export function PenaltyPrep({ club, opponent, score }: { club: Team; opponent: T
 }
 
 // Bola parada: o jogador escolhe a jogada ensaiada antes do escanteio ou da falta (só contra o bot)
-export function SetPiecePrep({ kind, minute, club, onPick, floating = false }: { kind: SetKind; minute: number; club: { abbreviation: string; primary_color: string }; onPick: (option: SetOption) => void; floating?: boolean }) {
+// Dados para ajudar na escolha: quem cobra e as chances reais de cada jogada (iguais às do sorteio do jogo)
+export type SetPieceInfo = { taker?: string; takerOvr: number; atk: number; def: number; odds: boolean };
+
+export function SetPiecePrep({ kind, minute, club, onPick, floating = false, info }: { kind: SetKind; minute: number; club: { abbreviation: string; primary_color: string }; onPick: (option: SetOption) => void; floating?: boolean; info?: SetPieceInfo | null }) {
   const total = floating ? 8 : 12;
   const [left, setLeft] = useState(total);
   useEffect(() => {
@@ -525,6 +528,9 @@ export function SetPiecePrep({ kind, minute, club, onPick, floating = false }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [left]);
   const riskColor = { baixo: '#3ddc84', médio: '#F5B800', alto: '#ff6a4f' } as const;
+  const oddsOf = (id: SetOption) => (info?.odds ? setPieceOdds(kind, id, info.atk, info.def, info.takerOvr) : null);
+  const pct = (n: number) => `${Math.round(n * 100)}%`;
+  const bestId = info?.odds ? SET_OPTIONS[kind].reduce((best, o) => ((oddsOf(o.id)?.gol ?? 0) > (oddsOf(best.id)?.gol ?? 0) ? o : best), SET_OPTIONS[kind][0]).id : null;
   if (floating) {
     // Multiplayer: não pausa o jogo, aparece por cima do campo com tempo curto
     return (
@@ -539,6 +545,7 @@ export function SetPiecePrep({ kind, minute, club, onPick, floating = false }: {
               <span style={{ fontSize: 20 }}>{o.icon}</span>
               <b style={{ font: '900 11px Inter, sans-serif' }}>{o.label}</b>
               <small style={{ font: '800 9px Inter, sans-serif', color: riskColor[o.risk], textTransform: 'uppercase' }}>risco {o.risk}</small>
+              {oddsOf(o.id) && <small style={{ font: '800 9px Inter, sans-serif', opacity: 0.85 }}>⚽ {pct(oddsOf(o.id)!.gol)}</small>}
             </button>
           ))}
         </div>
@@ -559,13 +566,19 @@ export function SetPiecePrep({ kind, minute, club, onPick, floating = false }: {
         .spp-opt:active { background: rgba(245,184,0,.18); }
         .spp-opt b { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font: 900 15px Inter, sans-serif; }
         .spp-opt b em { font: 900 10px Inter, sans-serif; letter-spacing: .6px; font-style: normal; text-transform: uppercase; }
+        .spp-odds { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 5px; font: 800 11px Inter, sans-serif; }
+        .spp-odds i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: -4px; }
+        .spp-best { font: 900 9px Inter, sans-serif; letter-spacing: .6px; font-style: normal; padding: 2px 6px; border-radius: 6px; background: #F5B800; color: #1a1200; }
         .spp-opt small { display: block; margin-top: 2px; font: 600 12px/1.3 Inter, sans-serif; opacity: .8; }
       `}</style>
       <div className="spp-box">
         <div style={{ textAlign: 'center', marginBottom: 8 }}>
           <div style={{ font: '900 11px Inter, sans-serif', letterSpacing: '1.4px', color: '#F5B800' }}>{minute}' · {club.abbreviation} · JOGO PARADO</div>
           <div style={{ font: '900 21px Inter, sans-serif', letterSpacing: '.5px' }}>{SET_TITLE[kind]}</div>
-          <div style={{ font: '700 12px Inter, sans-serif', opacity: 0.8 }}>Escolha a jogada ensaiada</div>
+          <div style={{ font: '700 12px Inter, sans-serif', opacity: 0.85 }}>
+            {info?.taker ? <>Cobrador: <b style={{ color: '#F5B800' }}>{info.taker}</b> · {info.takerOvr}</> : 'Escolha a jogada ensaiada'}
+          </div>
+          {info?.taker && <div style={{ font: '600 11px Inter, sans-serif', opacity: 0.65, marginTop: 1 }}>Escolha a jogada ensaiada</div>}
         </div>
         <div style={{ display: 'grid', gap: 7 }}>
           {SET_OPTIONS[kind].map((o) => (
@@ -577,6 +590,13 @@ export function SetPiecePrep({ kind, minute, club, onPick, floating = false }: {
                   <em style={{ color: riskColor[o.risk] }}>risco {o.risk}</em>
                 </b>
                 <small>{o.text}</small>
+                {oddsOf(o.id) && (
+                  <span className="spp-odds">
+                    <i style={{ background: '#3ddc84' }} />⚽ gol {pct(oddsOf(o.id)!.gol)}
+                    <i style={{ background: '#F5B800' }} />chega ao gol {pct(oddsOf(o.id)!.gol + oddsOf(o.id)!.defesa + oddsOf(o.id)!.finalização)}
+                    {o.id === bestId && <em className="spp-best">MAIOR CHANCE DE GOL</em>}
+                  </span>
+                )}
               </span>
             </button>
           ))}

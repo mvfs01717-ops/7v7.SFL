@@ -56,6 +56,9 @@ type Props = {
   endHalfRef?: { current: boolean };
   // Jogada ensaiada em escolha: o campo inteiro congela (bola, jogadores e relógio das animações) até a decisão
   hold?: boolean;
+  // Legenda e balões da torcida saem de cima do campo: quem usa o campo mostra esses textos em outro lugar
+  hideOverlays?: boolean;
+  onCaption?: (text: string) => void;
   deadBallRef?: { current: boolean };
   // Cansaço: o campo SOMA o esforço de cada jogador em `effort` (corrida, condução com a bola, sprints e desarmes)
   // e LÊ de `slow` (0 a ~0,25) o quanto cada um está mais lento por estar cansado. As chaves são `user-CM`, `bot-LF`...
@@ -485,7 +488,7 @@ export type LiveSnap = {
   fx: { def: number; hold: number; stretch: number; hrot: number; hsc: number } | null;
 };
 
-export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = 'user', ambience, crowd, onClip, mapRef, club, opponent, userTeam, botTeam, events, onGoal, restartKey, workRef, endHalfRef, deadBallRef, hold = false }: Props) {
+export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = 'user', ambience, crowd, onClip, mapRef, club, opponent, userTeam, botTeam, events, onGoal, restartKey, workRef, endHalfRef, deadBallRef, hold = false, hideOverlays = false, onCaption }: Props) {
   const holdRef = useRef(false);
   holdRef.current = hold;
   // Tempo do campo: igual ao relógio do navegador, menos o tempo que ficou congelado
@@ -671,6 +674,11 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
   }, [burstKey]);
   const netMesh = useRef<Record<Side, SVGGElement | null>>({ user: null, bot: null });
   const [caption, setCaption] = useState('Bola rolando');
+  const onCaptionRef = useRef(onCaption);
+  onCaptionRef.current = onCaption;
+  useEffect(() => {
+    onCaptionRef.current?.(caption);
+  }, [caption]);
   const [goalText, setGoalText] = useState('');
   const [replay, setReplay] = useState<ReplayData | null>(null);
   const rec = useRef<{ last: number; frames: number[][]; pending: ReplayData | null; timers: number[]; seq: number }>({ last: 0, frames: [], pending: null, timers: [], seq: 0 });
@@ -2892,6 +2900,8 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         />
       </svg>
 
+      {!hideOverlays && (
+        <>
       {crowd?.bubbles.user && (
         <p key={crowd.bubbles.user.key} className={`pc-bub ${crowd.bubbles.user.mood}`} style={{ left: 8 }}>
           {crowd.bubbles.user.text}
@@ -2902,8 +2912,11 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           {crowd.bubbles.bot.text}
         </p>
       )}
+        </>
+      )}
       {replay && <GoalReplay key={`replay-${replay.id}`} data={replay} club={club} opponent={opponent} onDone={() => setReplay(null)} />}
-      {crowd && <span className="pc-db">🔊 {Math.round(68 + crowd.noise * 0.5)} dB</span>}
+      {crowd && !hideOverlays && <span className="pc-db">🔊 {Math.round(68 + crowd.noise * 0.5)} dB</span>}
+      {!hideOverlays && (
       <div
         style={{
           position: 'absolute',
@@ -2922,6 +2935,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
       >
         {caption}
       </div>
+      )}
       {goalText && (
         <div
           style={{
