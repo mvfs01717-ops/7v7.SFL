@@ -277,6 +277,7 @@ export function MatchScreen({
             workRef={staminaOn ? workRef : undefined}
             endHalfRef={endHalfRef}
             deadBallRef={deadBallRef}
+            hold={pause === 'setpiece'}
           />
           </div>
           {cam === 'tatica' && <StadiumFx liveRef={liveRef} club={club} opponent={opponent} home={homeSide} ambience={ambience} burst={crowd.burst} score={score} wrapRef={pitchWrapRef} />}

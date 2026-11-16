@@ -3,7 +3,7 @@ import { X } from 'lucide-react';
 
 // "O que há de novo": lista das novidades da versão. O selo NOVO some depois que a pessoa abre (guardado só neste aparelho).
 
-export const NEWS_VERSION = '2026-11-14';
+export const NEWS_VERSION = '2026-11-16';
 const KEY = '7v7-news-seen';
 const listeners = new Set<() => void>();
 
@@ -42,10 +42,11 @@ const NEWS: { title: string; items: { icon: string; label: string; text: string 
   {
     title: 'DURANTE A PARTIDA',
     items: [
-      { icon: '🎥', label: 'Câmeras ao vivo', text: 'Troque a câmera na hora do jogo: geral, cinematográfica, do gol e da jogada.' },
+      { icon: '🎥', label: 'Câmeras e replay', text: 'Troque a câmera na hora do jogo. No celular o replay do gol aparece no canto da tela, sem cobrir o campo.' },
       { icon: '🧠', label: 'Tática no meio do jogo', text: 'Mude o estilo (posse, pressão alta...) sem esperar o intervalo. Trocar custa um pouco de cansaço.' },
       { icon: '📣', label: 'Gritos do técnico', text: 'Três por partida: motivar, acalmar ou mandar atacar. Mexe no rendimento por alguns minutos.' },
-      { icon: '🎯', label: 'Jogada ensaiada', text: 'Antes de escanteio ou falta, escolha entre cruzamento, toque curto ou chute direto.' },
+      { icon: '🦵', label: 'Carrinho e desarme', text: 'Os desarmes têm animação: o marcador desliza no chão ou dá o bote, a chuteira vai na bola e quem perdeu tropeça.' },
+      { icon: '🎯', label: 'Jogada ensaiada', text: 'Antes de escanteio ou falta o jogo para de verdade e você escolhe entre cruzamento, toque curto ou chute direto.' },
       { icon: '🥅', label: 'Bola na trave', text: 'Som, trave balançando e a câmera treme um pouquinho.' },
       { icon: '👕', label: 'Camisa reserva', text: 'Se as cores dos times forem parecidas demais, o visitante joga de reserva automaticamente.' },
     ],

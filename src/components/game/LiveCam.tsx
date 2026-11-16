@@ -429,7 +429,17 @@ export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, 
             ring.setAttribute('ry', (24 * ts * tilt * 0.6).toFixed(1));
           }
         }
-        tokens.current[n]?.setAttribute('transform', `translate(${body.sx.toFixed(1)} ${body.sy.toFixed(1)}) scale(${ts.toFixed(3)})`);
+        let tokTf = `translate(${body.sx.toFixed(1)} ${body.sy.toFixed(1)}) scale(${ts.toFixed(3)})`;
+        const tk = snap.fx;
+        if (tk && n === tk.def && tk.stretch > 0.001) {
+          // Carrinho/bote: o marcador estica na direção do desarmado (na tela)
+          const hp = proj(snap.pts[tk.hold * 2], snap.pts[tk.hold * 2 + 1], 14);
+          const ang = (Math.atan2(hp.sy - body.sy, hp.sx - body.sx) * 180) / Math.PI;
+          tokTf = `translate(${body.sx.toFixed(1)} ${body.sy.toFixed(1)}) scale(${ts.toFixed(3)}) rotate(${ang.toFixed(1)}) scale(${(1 + tk.stretch).toFixed(3)} ${(1 - tk.stretch * 0.5).toFixed(3)}) rotate(${(-ang).toFixed(1)})`;
+        } else if (tk && n === tk.hold && (tk.hsc !== 1 || tk.hrot !== 0)) {
+          tokTf = `translate(${body.sx.toFixed(1)} ${body.sy.toFixed(1)}) scale(${(ts * tk.hsc).toFixed(3)}) rotate(${tk.hrot.toFixed(1)})`;
+        }
+        tokens.current[n]?.setAttribute('transform', tokTf);
         depths.push({ key: n, d: g.d });
       }
       const zb = 6 + bz;

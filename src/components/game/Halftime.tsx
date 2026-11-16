@@ -532,23 +532,36 @@ export function SetPiecePrep({ kind, minute, club, onPick, floating = false }: {
       </div>
     );
   }
+  // Jogo parado: folha fixa na parte de baixo da tela (cabe em qualquer celular, com rolagem se precisar)
   return (
-    <div role="dialog" aria-label="Jogada ensaiada" style={{ position: 'absolute', inset: 0, zIndex: 8, display: 'grid', placeItems: 'center', background: 'rgba(4,8,16,.72)', borderRadius: 14, padding: 12 }}>
-      <div style={{ width: 'min(100%, 460px)', color: '#fff' }}>
-        <div style={{ textAlign: 'center', marginBottom: 10 }}>
-          <div style={{ font: '900 11px Inter, sans-serif', letterSpacing: '1.4px', color: '#F5B800' }}>{minute}' · {club.abbreviation}</div>
-          <div style={{ font: '900 22px Inter, sans-serif', letterSpacing: '.5px' }}>{SET_TITLE[kind]}</div>
+    <div role="dialog" aria-label="Jogada ensaiada" className="spp-back">
+      <style>{`
+        .spp-back { position: fixed; inset: 0; z-index: 520; display: grid; align-items: end; justify-items: center; background: rgba(4,8,16,.72); padding: 0 10px calc(10px + env(safe-area-inset-bottom)); overflow: hidden; }
+        @media (min-width: 760px) { .spp-back { align-items: center; } }
+        .spp-box { width: min(100%, 480px); max-height: calc(100dvh - 20px); overflow-y: auto; background: #0e1522; border: 1px solid rgba(245,184,0,.55); border-radius: 16px; padding: 12px; color: #fff; box-shadow: 0 -10px 40px rgba(0,0,0,.55); }
+        .spp-opt { width: 100%; display: grid; grid-template-columns: 34px 1fr; align-items: center; gap: 10px; text-align: left; cursor: pointer; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.07); color: #fff; }
+        .spp-opt:active { background: rgba(245,184,0,.18); }
+        .spp-opt b { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font: 900 15px Inter, sans-serif; }
+        .spp-opt b em { font: 900 10px Inter, sans-serif; letter-spacing: .6px; font-style: normal; text-transform: uppercase; }
+        .spp-opt small { display: block; margin-top: 2px; font: 600 12px/1.3 Inter, sans-serif; opacity: .8; }
+      `}</style>
+      <div className="spp-box">
+        <div style={{ textAlign: 'center', marginBottom: 8 }}>
+          <div style={{ font: '900 11px Inter, sans-serif', letterSpacing: '1.4px', color: '#F5B800' }}>{minute}' · {club.abbreviation} · JOGO PARADO</div>
+          <div style={{ font: '900 21px Inter, sans-serif', letterSpacing: '.5px' }}>{SET_TITLE[kind]}</div>
           <div style={{ font: '700 12px Inter, sans-serif', opacity: 0.8 }}>Escolha a jogada ensaiada</div>
         </div>
-        <div style={{ display: 'grid', gap: 8 }}>
+        <div style={{ display: 'grid', gap: 7 }}>
           {SET_OPTIONS[kind].map((o) => (
-            <button key={o.id} onClick={() => onPick(o.id)} style={{ display: 'grid', gridTemplateColumns: '36px 1fr auto', alignItems: 'center', gap: 10, textAlign: 'left', cursor: 'pointer', padding: '11px 12px', borderRadius: 12, border: '1px solid rgba(255,255,255,.2)', background: 'rgba(255,255,255,.08)', color: '#fff' }}>
-              <span style={{ fontSize: 26 }}>{o.icon}</span>
+            <button key={o.id} className="spp-opt" onClick={() => onPick(o.id)}>
+              <span style={{ fontSize: 26, textAlign: 'center' }}>{o.icon}</span>
               <span>
-                <b style={{ display: 'block', font: '900 15px Inter, sans-serif' }}>{o.label}</b>
-                <small style={{ font: '600 12px/1.25 Inter, sans-serif', opacity: 0.8 }}>{o.text}</small>
+                <b>
+                  {o.label}
+                  <em style={{ color: riskColor[o.risk] }}>risco {o.risk}</em>
+                </b>
+                <small>{o.text}</small>
               </span>
-              <span style={{ font: '900 10px Inter, sans-serif', letterSpacing: '.6px', color: riskColor[o.risk], textTransform: 'uppercase' }}>risco {o.risk}</span>
             </button>
           ))}
         </div>

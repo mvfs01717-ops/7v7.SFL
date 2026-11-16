@@ -54,6 +54,8 @@ type Props = {
   restartKey?: number;
   // Fim do 1º tempo: o App liga `endHalfRef` e o campo manda a bola para fora (lateral); `deadBallRef` fica true enquanto a bola está parada fora de jogo
   endHalfRef?: { current: boolean };
+  // Jogada ensaiada em escolha: o campo inteiro congela (bola, jogadores e relógio das animações) até a decisão
+  hold?: boolean;
   deadBallRef?: { current: boolean };
   // Cansaço: o campo SOMA o esforço de cada jogador em `effort` (corrida, condução com a bola, sprints e desarmes)
   // e LÊ de `slow` (0 a ~0,25) o quanto cada um está mais lento por estar cansado. As chaves são `user-CM`, `bot-LF`...
@@ -239,7 +241,7 @@ const crowdCss = `
 .pc-bub.sad { color: #cbd5e1; font-style: italic; }
 .pc-bub.tense { border-color: rgba(245,184,0,.6); }
 .pc-db { position: absolute; top: 6px; left: 50%; transform: translateX(-50%); padding: 3px 10px; border-radius: 99px; font-size: 10px; font-weight: 900; letter-spacing: .1em; color: #F5B800; background: rgba(0,0,0,.6); border: 1px solid rgba(245,184,0,.35); pointer-events: none; font-variant-numeric: tabular-nums; }
-.pc-replay { position: absolute; right: 8px; bottom: 52px; width: min(46%, 380px); border-radius: 12px; overflow: hidden; border: 2px solid #F5B800; background: #000; box-shadow: 0 12px 40px rgba(0,0,0,.7), 0 0 26px rgba(245,184,0,.35); animation: pcRpIn .45s cubic-bezier(.2,1.2,.4,1) both; z-index: 5; }
+.pc-replay { visibility: visible; position: absolute; right: 8px; bottom: 52px; width: min(46%, 380px); border-radius: 12px; overflow: hidden; border: 2px solid #F5B800; background: #000; box-shadow: 0 12px 40px rgba(0,0,0,.7), 0 0 26px rgba(245,184,0,.35); animation: pcRpIn .45s cubic-bezier(.2,1.2,.4,1) both; z-index: 5; }
 .pc-rp-top { display: flex; align-items: center; gap: 8px; padding: 4px 8px; background: linear-gradient(90deg, rgba(0,0,0,.92), rgba(20,16,0,.85)); font-size: 11px; color: #fff; }
 .pc-rp-top b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; letter-spacing: .04em; }
 .pc-rp-top button { background: none; border: 0; color: rgba(255,255,255,.7); cursor: pointer; font-size: 13px; padding: 0 2px; }
@@ -248,6 +250,11 @@ const crowdCss = `
 .pc-rp-bar { height: 4px; background: rgba(255,255,255,.15); }
 .pc-rp-bar div { height: 100%; width: 0; background: #F5B800; }
 @keyframes pcRec { 50% { opacity: .15; } }
+/* Celular: o replay sai de cima do campo e fica no canto inferior da tela */
+@media (max-width: 720px) { .pc-replay { position: fixed; left: 8px; right: auto; bottom: calc(14px + env(safe-area-inset-bottom)); width: min(54vw, 230px); z-index: 80; }
+  .pc-replay .rp-ctl { padding: 4px; }
+  .pc-replay .rp-ctl .sp, .pc-replay .rp-ctl button:not(:last-child) { display: none; }
+  .pc-replay .rp-ctl button:last-child { width: 100%; } }
 @keyframes pcRpIn { 0% { transform: translateY(20px) scale(.9); opacity: 0; } 100% { transform: none; opacity: 1; } }
 @keyframes pcOla { 0%,100% { transform: none; } 35% { transform: translateY(-9px) scaleY(1.12); } }
 .pc-ola .pc-fan { animation: pcOla 1.1s ease-in-out both !important; animation-delay: calc(var(--fx) * 1.5s) !important; }
@@ -467,9 +474,17 @@ export type LiveSnap = {
   keys: string[];
   holder: number; // índice de quem está com a bola (-1 = ninguém)
   frozen: boolean; // intervalo/pausa
+  // Desarme em andamento: índices de quem dá o bote e de quem é desarmado, esticada do marcador e giro/pulo do outro
+  fx: { def: number; hold: number; stretch: number; hrot: number; hsc: number } | null;
 };
 
-export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = 'user', ambience, crowd, onClip, mapRef, club, opponent, userTeam, botTeam, events, onGoal, restartKey, workRef, endHalfRef, deadBallRef }: Props) {
+export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = 'user', ambience, crowd, onClip, mapRef, club, opponent, userTeam, botTeam, events, onGoal, restartKey, workRef, endHalfRef, deadBallRef, hold = false }: Props) {
+  const holdRef = useRef(false);
+  holdRef.current = hold;
+  // Tempo do campo: igual ao relógio do navegador, menos o tempo que ficou congelado
+  const heldTotal = useRef(0);
+  const heldSince = useRef(0);
+  const tnow = () => (heldSince.current || performance.now()) - heldTotal.current;
   // Modo otimizado (Configurações): menos efeitos para o campo rodar leve em celulares
   const lite = useLite();
   const { ball: ballSkin } = useCosmetics();
@@ -598,6 +613,11 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
   const dustNext = useRef(0);
   const motion = useRef<Record<string, { x: number; y: number; vx: number; vy: number; hx: number; hy: number; hAt: number; cool: number }>>({});
   const slideRef = useRef<Record<string, { until: number; fx: number; fy: number }>>({});
+  // Animação do desarme: o marcador estica no chão (carrinho) ou dá o bote, a bota aparece, o impacto pisca e o desarmado tropeça
+  const tackleFx = useRef<{ def: string; hold: string; t0: number; span: number; slide: boolean; win: boolean; ax: number; ay: number; contact: number } | null>(null);
+  const tkSnap = useRef<{ def: string; hold: string; stretch: number; hrot: number; hsc: number } | null>(null);
+  const bootNode = useRef<SVGGElement | null>(null);
+  const impactNode = useRef<SVGCircleElement | null>(null);
   const spin = useRef({ angle: 0, x: MID_X, y: MID_Y });
   const trailNodes = useRef<(SVGCircleElement | null)[]>([]);
   const trailPts = useRef<Point[]>([]);
@@ -669,7 +689,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
   function captureClip(eventId: number | undefined, kind: 'gol' | 'defesa' | 'quase', label: string, actorKey: string, delay = 450) {
     if (eventId === undefined || !onClipRef.current) return;
     const timer = window.setTimeout(() => {
-      const endT = performance.now();
+      const endT = tnow();
       const frames = rec.current.frames.filter((f) => f[0] >= endT - 6800).map((f) => f.map((v, i) => (i === 0 ? v : Math.round(v * 10) / 10)));
       if (frames.length < 20) return;
       onClipRef.current?.(eventId, {
@@ -693,7 +713,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     const goalX = dir > 0 ? FX1 : FX0;
     const run: Point | undefined =
       a && Math.random() < 0.6 ? { x: goalX - dir * 38, y: a.y < MID_Y ? FY0 + 34 : FY1 - 34 } : undefined;
-    st.celebrate = { side, actor: actorKey, until: performance.now() + 2200, run };
+    st.celebrate = { side, actor: actorKey, until: tnow() + 2200, run };
     st.holder = null;
     st.overrides = {};
     const who = a?.name ?? '';
@@ -709,7 +729,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     const caption = `${label} ${a?.name ?? ''}`.trim();
     r.timers.push(
       window.setTimeout(() => {
-        const endT = performance.now();
+        const endT = tnow();
         const frames = r.frames.filter((f) => f[0] >= endT - 6800);
         if (frames.length < 20) return;
         r.pending = {
@@ -746,7 +766,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
       dribble: true,
       caption: win ? `${h.name} dribla ${opp.name}` : `${h.name} tenta driblar ${opp.name}`,
       after: () => {
-        const t = performance.now();
+        const t = tnow();
         if (win) {
           // O marcador fica para trás, desequilibrado
           st.overrides[opp.key] = { x: opp.x, y: opp.y, until: t + 1000, speed: 0.18 };
@@ -1033,7 +1053,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         base.after =
           i === 0
             ? () => {
-                st.overrides[marker.key] = { x: marker.x, y: marker.y, until: performance.now() + 1000, speed: 0.18 };
+                st.overrides[marker.key] = { x: marker.x, y: marker.y, until: tnow() + 1000, speed: 0.18 };
               }
             : undefined;
         q.push(base);
@@ -1376,7 +1396,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     rec.current.pending = null;
     setReplay(null);
     const st = engine.current;
-    const now = performance.now();
+    const now = tnow();
     st.queue = [];
     st.active = null;
     st.celebrate = null;
@@ -1411,7 +1431,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
   // Loop de animação: move bolinhas e bola direto no SVG, sem re-renderizar o React
   useEffect(() => {
     let raf = 0;
-    let last = performance.now();
+    let last = tnow();
     engine.current.ambientAt = last + 1200;
     engine.current.runAt = last + 1500;
     // Começa o jogo com a bola parada no meio e cada time na sua metade
@@ -1420,7 +1440,18 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     engine.current.ballY = MID_Y;
     engine.current.kickoff = { side: 'user', until: last + 1600, maxUntil: last + 1600 };
 
-    const loop = (now: number) => {
+    const loop = (ts: number) => {
+      // Congelado: não anda nada e o relógio do campo não corre
+      if (holdRef.current) {
+        if (!heldSince.current) heldSince.current = ts;
+        raf = requestAnimationFrame(loop);
+        return;
+      }
+      if (heldSince.current) {
+        heldTotal.current += ts - heldSince.current;
+        heldSince.current = 0;
+      }
+      const now = ts - heldTotal.current;
       const dt = Math.min(64, now - last);
       last = now;
       const st = engine.current;
@@ -1583,6 +1614,12 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
             const dirH = dirOf(h.side);
             const slide = Math.random() < 0.25;
             st.tackleAt = now + 1000;
+            {
+              const ddx = h.x - dfn.x;
+              const ddy = h.y - dfn.y;
+              const dd = Math.hypot(ddx, ddy) || 1;
+              tackleFx.current = { def: dfn.key, hold: h.key, t0: now, span: slide ? 330 : 260, slide, win, ax: ddx / dd, ay: ddy / dd, contact: 0 };
+            }
             if (slide) slideRef.current[dfn.key] = { until: now + 360, fx: dfn.x, fy: dfn.y };
             // Desarme cansa: quem dá o bote gasta mais, quem perde a bola também
             const ledger = workRefLocal.current?.current.effort;
@@ -1600,8 +1637,11 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
                 ambient: true,
                 setup: [{ key: dfn.key, x: h.x, y: h.y, speed: slide ? 3 : 2.3 }],
                 after: () => {
-                  const t = performance.now();
+                  const t = tnow();
                   st.overrides = {};
+                  if (tackleFx.current) tackleFx.current.contact = t;
+                  // Quem ganha a bola faz ela pular para longe do desarmado
+                  if (win) bounce.current = { start: t, h: slide ? 11 : 7 };
                   if (win) {
                     // A bola é do marcador: quem perdeu fica desequilibrado, quem ganhou sai jogando
                     st.holder = dfn.key;
@@ -1611,7 +1651,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
                       x: clamp(dfn.x - dirH * 55, FX0 + 20, FX1 - 20),
                       y: clamp(dfn.y + rand(-30, 30), FY0 + 20, FY1 - 20),
                       until: t + 650,
-                      speed: 1.2,
+                      speed: slide ? 0.55 : 1.2,
                     };
                     st.ambientAt = t + 500;
                     setCaption(
@@ -1985,6 +2025,81 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         nodes.current[s.key]?.setAttribute('transform', `translate(${s.x.toFixed(1)} ${s.y.toFixed(1)})`);
       });
 
+      // Animação do desarme (carrinho ou bote em pé)
+      {
+        const fx = tackleFx.current;
+        const hideFx = () => {
+          bootNode.current?.setAttribute('display', 'none');
+          impactNode.current?.setAttribute('display', 'none');
+          tkSnap.current = null;
+        };
+        if (!fx) {
+          if (tkSnap.current) hideFx();
+        } else {
+          const age = now - fx.t0;
+          const post = fx.contact ? now - fx.contact : -1;
+          const tail = fx.slide ? 560 : 380;
+          if (post >= tail || (!fx.contact && age > fx.span + 900)) {
+            tackleFx.current = null;
+            hideFx();
+          } else {
+            const dEl = all.find((x) => x.key === fx.def);
+            const hEl = all.find((x) => x.key === fx.hold);
+            if (dEl && hEl) {
+              const a = clamp(age / fx.span, 0, 1);
+              const b = post < 0 ? 0 : clamp(post / tail, 0, 1);
+              const ease = (u: number) => u * u * (3 - 2 * u);
+              const peak = fx.slide ? 0.42 : 0.1;
+              let stretch: number;
+              if (post < 0) stretch = fx.slide ? peak * ease(clamp((a - 0.35) / 0.65, 0, 1)) : peak * a;
+              else stretch = fx.slide ? (b < 0.55 ? peak : peak * (1 - ease((b - 0.55) / 0.45))) : peak * (1 - b);
+              const angDeg = (Math.atan2(fx.ay, fx.ax) * 180) / Math.PI;
+              const lean = stretch * (fx.slide ? 9 : 4);
+              nodes.current[dEl.key]?.setAttribute(
+                'transform',
+                `translate(${(dEl.x + fx.ax * lean).toFixed(1)} ${(dEl.y + fx.ay * lean).toFixed(1)}) rotate(${angDeg.toFixed(1)}) scale(${(1 + stretch).toFixed(3)} ${(1 - stretch * 0.5).toFixed(3)}) rotate(${(-angDeg).toFixed(1)})`,
+              );
+              // Quem foi desarmado tropeça e perde o equilíbrio; quem escapou dá um pulinho por cima
+              let hrot = 0;
+              let hsc = 1;
+              let knock = 0;
+              if (post >= 0) {
+                if (fx.win) {
+                  hrot = Math.sin(b * Math.PI * 2.4) * (fx.slide ? 26 : 13) * (1 - b);
+                  hsc = 1 + 0.1 * Math.sin(b * Math.PI);
+                  knock = Math.sin(Math.min(1, b * 1.4) * Math.PI) * (fx.slide ? 7 : 4);
+                } else {
+                  hsc = 1 + 0.3 * Math.sin(clamp(b / 0.7, 0, 1) * Math.PI);
+                  hrot = -8 * Math.sin(b * Math.PI);
+                }
+                nodes.current[hEl.key]?.setAttribute(
+                  'transform',
+                  `translate(${(hEl.x + fx.ax * knock).toFixed(1)} ${(hEl.y + fx.ay * knock).toFixed(1)}) rotate(${hrot.toFixed(1)}) scale(${hsc.toFixed(3)})`,
+                );
+              }
+              // Bota esticada em direção à bola
+              const reach = post < 0 ? clamp((a - 0.5) * 2, 0, 1) : clamp(1 - b / 0.5, 0, 1);
+              if (reach > 0.02) {
+                const off = 13 + reach * (fx.slide ? 12 : 8);
+                bootNode.current?.setAttribute('transform', `translate(${(dEl.x + fx.ax * off).toFixed(1)} ${(dEl.y + fx.ay * off).toFixed(1)}) rotate(${angDeg.toFixed(1)})`);
+                bootNode.current?.setAttribute('display', 'inline');
+              } else bootNode.current?.setAttribute('display', 'none');
+              // Pisca do impacto
+              const im = impactNode.current;
+              if (im && !liteRef.current && post >= 0 && b < 0.4) {
+                const u = b / 0.4;
+                im.setAttribute('cx', ((dEl.x + hEl.x) / 2).toFixed(1));
+                im.setAttribute('cy', ((dEl.y + hEl.y) / 2).toFixed(1));
+                im.setAttribute('r', (5 + u * 20).toFixed(1));
+                im.setAttribute('opacity', (0.8 * (1 - u)).toFixed(2));
+                im.setAttribute('display', 'inline');
+              } else im?.setAttribute('display', 'none');
+              tkSnap.current = { def: fx.def, hold: fx.hold, stretch, hrot, hsc };
+            }
+          }
+        }
+      }
+
       // Marcas de chuteira e poeira: curvas fechadas e carrinhos arranham o gramado; onde ele já está gasto, sobe poeira
       if (!liteRef.current) {
         const live = !(endHalfRef && endHalfRef.current) && !(deadBallRef && deadBallRef.current);
@@ -2178,6 +2293,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
             keys: all.map((x) => x.key),
             holder: -1,
             frozen: false,
+            fx: null,
           };
         }
         snap.ball[0] = st.ballX;
@@ -2189,6 +2305,9 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         }
         snap.holder = st.holder ? snap.keys.indexOf(st.holder) : -1;
         snap.frozen = !!(endHalfRef && endHalfRef.current);
+        const tk = tkSnap.current;
+        snap.fx = tk ? { def: snap.keys.indexOf(tk.def), hold: snap.keys.indexOf(tk.hold), stretch: tk.stretch, hrot: tk.hrot, hsc: tk.hsc } : null;
+        if (snap.fx && (snap.fx.def < 0 || snap.fx.hold < 0)) snap.fx = null;
       }
       // Grava a jogada (≈25 quadros por segundo, últimos 7 s) para o replay do gol
       const rc = rec.current;
@@ -2632,6 +2751,13 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
             <circle key={i} ref={(el: SVGCircleElement | null) => { dustNodes.current[i] = el; }} r={4} cx={0} cy={0} display="none" opacity={0} />
           ))}
         </g>}
+        <g ref={bootNode} display="none" style={{ pointerEvents: 'none' }}>
+          <g transform="scale(1.55)">
+            <rect x={-3} y={-2.8} width={11} height={5.6} rx={2.8} fill="#f1f1f1" stroke="rgba(0,0,0,.4)" strokeWidth={0.6} />
+            <rect x={6} y={-3.6} width={8} height={7.2} rx={3.4} fill="#14181f" stroke="#F5B800" strokeWidth={0.8} />
+          </g>
+        </g>
+        <circle ref={impactNode} display="none" r={6} fill="none" stroke="#ffffff" strokeWidth={2.2} style={{ pointerEvents: 'none' }} />
         <g ref={ringNode} style={{ display: 'none' }}>
           <circle r={20} fill="none" stroke="#F5B800" strokeWidth={2.5} />
         </g>
