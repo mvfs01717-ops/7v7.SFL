@@ -69,8 +69,39 @@ function startBattery() {
 }
 if (typeof window !== 'undefined') startBattery();
 
+// Desempenho medido: se a partida roda a menos de ~35 quadros/s por alguns segundos, o modo "auto" liga o modo leve sozinho (vale até fechar a aba)
+let slowDevice = false;
+try {
+  slowDevice = typeof sessionStorage !== 'undefined' && sessionStorage.getItem('7v7-slow') === '1';
+} catch {
+  /* sem armazenamento */
+}
+let sampleSum = 0;
+let sampleN = 0;
+let slowStreak = 0;
+export function perfSample(dtMs: number) {
+  if (slowDevice || current !== 'auto' || typeof document === 'undefined' || document.hidden) return;
+  if (dtMs > 250) return; // aba em segundo plano ou pausa: não conta
+  sampleSum += dtMs;
+  sampleN += 1;
+  if (sampleN < 150) return; // janela de ~150 quadros
+  const avg = sampleSum / sampleN;
+  sampleSum = 0;
+  sampleN = 0;
+  slowStreak = avg > 29 ? slowStreak + 1 : 0;
+  if (slowStreak >= 2) {
+    slowDevice = true;
+    try {
+      sessionStorage.setItem('7v7-slow', '1');
+    } catch {
+      /* sem armazenamento */
+    }
+    listeners.forEach((fn) => fn());
+  }
+}
+
 export function isLite(mode: PerfMode = current): boolean {
-  return mode === 'on' || (mode === 'auto' && (looksLowEnd() || lowBattery));
+  return mode === 'on' || (mode === 'auto' && (looksLowEnd() || lowBattery || slowDevice));
 }
 
 const subscribe = (fn: () => void) => {

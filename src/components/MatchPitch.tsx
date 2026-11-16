@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createMatchMap, recordMapPass, recordMapSample, type MatchMapData } from '@/lib/game/matchMap';
 import type { Ambience } from '@/lib/game/ambience';
 import { mixHex, stadiumFor } from '@/lib/game/stadium';
-import { useLite } from '@/lib/settings';
+import { perfSample, useLite } from '@/lib/settings';
 import { useCosmetics } from '@/lib/cosmetics';
 import { ReplayPlayer, type ClipData } from '@/components/game/ReplayPlayer';
 
@@ -227,11 +227,14 @@ function GoalReplay({ data, club, opponent, onDone }: { data: ReplayData; club: 
 }
 
 const crowdCss = `
-.pc-fan { transform-box: fill-box; transform-origin: 50% 100%; animation: pcBob 1.2s ease-in-out infinite; }
+.pc-fan { transform-box: fill-box; transform-origin: 50% 100%; }
+/* Torcida parada: balança por grupo (poucas animações) em vez de uma por torcedor; por torcedor só em gol, tensão e ola */
+.pc-fgrp { animation: pcBob calc(1.2s * var(--beat, 1)) ease-in-out infinite; }
+.pc-half.hype .pc-fgrp, .pc-half.tense .pc-fgrp, .pc-half.sad .pc-fgrp, .pc-ola .pc-fgrp, .pc-lite .pc-fgrp { animation: none; }
 .pc-arms { opacity: 0; }
-.pc-half.hype .pc-fan { animation-name: pcJump; animation-duration: .38s !important; }
+.pc-half.hype .pc-fan { animation: pcJump .38s ease-in-out infinite; }
 .pc-half.hype .pc-arms { opacity: 1; }
-.pc-half.tense .pc-fan { animation-name: pcLean; }
+.pc-half.tense .pc-fan { animation: pcLean calc(var(--dur, 1.2s) * var(--beat, 1)) ease-in-out infinite; }
 .pc-half.sad .pc-fan { animation: none; transform: translateY(2px) scaleY(.93); filter: saturate(.55) brightness(.8); }
 .pc-glow { opacity: 0; transition: opacity .5s; }
 .pc-half.hype .pc-glow { opacity: .55; animation: pcFlash .5s ease-in-out infinite alternate; }
@@ -263,7 +266,6 @@ const crowdCss = `
 .pc-ola .pc-arms { opacity: 1; }
 .pc-ola.pc-ola-user .pc-half.pc-half-bot .pc-fan, .pc-ola.pc-ola-bot .pc-half.pc-half-user .pc-fan { animation: none !important; }
 .pc-half.hype .pc-fan { animation-delay: calc(var(--fx) * .12s) !important; }
-.pc-fan { animation-duration: calc(var(--dur, 1.2s) * var(--beat, 1)); }
 .pc-conf { transform-box: fill-box; transform-origin: 50% 50%; opacity: 0; animation: pcConf var(--cd, 1.8s) cubic-bezier(.2,.7,.4,1) var(--cl, 0s) both; }
 @keyframes pcConf { 0% { opacity: 1; transform: translate(0,0) rotate(0); } 100% { opacity: 0; transform: translate(var(--cx), var(--cy)) rotate(var(--cr)); } }
 .pc-flare { opacity: 0; animation: pcFlare 2.2s ease-out both; }
@@ -1460,6 +1462,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         heldSince.current = 0;
       }
       const now = ts - heldTotal.current;
+      perfSample(now - last);
       const dt = Math.min(64, now - last);
       last = now;
       const st = engine.current;
@@ -2470,6 +2473,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           <pattern id="pc-mesh" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
             <path d="M0 0 H4 M0 0 V4" stroke="#ffffff" strokeWidth={0.5} opacity={0.55} fill="none" />
           </pattern>
+          <radialGradient id="pc-sh"><stop offset="0" stopColor="#000" stopOpacity="1" /><stop offset=".55" stopColor="#000" stopOpacity=".7" /><stop offset="1" stopColor="#000" stopOpacity="0" /></radialGradient>
           <filter id="pc-soft" x="-30%" y="-80%" width="160%" height="260%">
             <feGaussianBlur stdDeviation="1.6" />
           </filter>
@@ -2603,15 +2607,22 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
               {[true, false].map((top) => (
                 <rect key={`glow-${top}`} className="pc-glow" x={side === 'user' ? 0 : MID_X} y={top ? -STAND : H} width={MID_X} height={STAND} fill={team.primary_color} />
               ))}
-              {fans
-                .filter((f, idx) => f.side === side && (side === home || idx % 2 === 0) && (!lite || idx % 2 === 1 || side !== home))
-                .map((f, i) => (
-                  <g key={i} className="pc-fan" style={{ animationDelay: `${f.delay}s`, ['--dur' as string]: `${f.dur}s`, ['--fx' as string]: (f.x / W).toFixed(3) }}>
-                    <rect x={f.x - 4.6} y={f.y + 3} width={9.2} height={10} rx={3} fill={f.body} stroke="rgba(0,0,0,.35)" strokeWidth={0.4} />
-                    <circle cx={f.x} cy={f.y} r={4} fill={f.skin} />
-                    <path className="pc-arms" d={`M${f.x - 4.4} ${f.y + 7} l-3 -8 M${f.x + 4.4} ${f.y + 7} l3 -8`} stroke={f.skin} strokeWidth={1.8} strokeLinecap="round" />
+              {(() => {
+                const list = fans.filter((f, idx) => f.side === side && (side === home || idx % 2 === 0) && (!lite || idx % 2 === 1 || side !== home));
+                const groups: (typeof list)[] = [];
+                for (let n = 0; n < list.length; n += 16) groups.push(list.slice(n, n + 16));
+                return groups.map((grp, gi) => (
+                  <g key={gi} className="pc-fgrp" style={{ animationDelay: `${-((gi * 0.37) % 1.2).toFixed(2)}s` }}>
+                    {grp.map((f, i) => (
+                      <g key={i} className="pc-fan" style={{ animationDelay: `${f.delay}s`, ['--dur' as string]: `${f.dur}s`, ['--fx' as string]: (f.x / W).toFixed(3) }}>
+                        <rect x={f.x - 4.6} y={f.y + 3} width={9.2} height={10} rx={3} fill={f.body} stroke="rgba(0,0,0,.35)" strokeWidth={0.4} />
+                        <circle cx={f.x} cy={f.y} r={4} fill={f.skin} />
+                        <path className="pc-arms" d={`M${f.x - 4.4} ${f.y + 7} l-3 -8 M${f.x + 4.4} ${f.y + 7} l3 -8`} stroke={f.skin} strokeWidth={1.8} strokeLinecap="round" />
+                      </g>
+                    ))}
                   </g>
-                ))}
+                ));
+              })()}
               {[0.2, 0.5, 0.8].map((f, i) => {
                 const fx = (side === 'user' ? 0 : MID_X) + MID_X * f;
                 return (
@@ -2754,10 +2765,10 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           const team = s.side === 'user' ? club : opponent;
           return (
             <g key={s.key} ref={(el: SVGGElement | null) => { nodes.current[s.key] = el; }} transform={`translate(${s.x.toFixed(1)} ${s.y.toFixed(1)})`}>
-              {amb.time === 'night' && <ellipse cx={-9} cy={11} rx={13} ry={4.2} fill="rgba(0,0,0,.14)" filter={soft} />}
-              {amb.time === 'night' && <ellipse cx={6} cy={12.5} rx={14} ry={4.6} fill="rgba(0,0,0,.34)" filter={soft} transform="rotate(8 6 12.5)" />}
-              {amb.time === 'day' && <ellipse cx={1} cy={13} rx={11} ry={3.6} fill={rain ? 'rgba(0,0,0,.14)' : 'rgba(0,0,0,.3)'} filter={soft} />}
-              {amb.time === 'afternoon' && <ellipse cx={15} cy={12} rx={23} ry={3.8} fill={rain ? 'rgba(0,0,0,.14)' : 'rgba(0,0,0,.3)'} filter={soft} transform="rotate(5 15 12)" />}
+              {amb.time === 'night' && <ellipse cx={-9} cy={11} rx={lite ? 13 : 17} ry={lite ? 4.2 : 6} fill={lite ? 'rgba(0,0,0,.14)' : 'url(#pc-sh)'} fillOpacity={lite ? 1 : 0.14} />}
+              {amb.time === 'night' && <ellipse cx={6} cy={12.5} rx={lite ? 14 : 18} ry={lite ? 4.6 : 6.4} fill={lite ? 'rgba(0,0,0,.34)' : 'url(#pc-sh)'} fillOpacity={lite ? 1 : 0.34} transform="rotate(8 6 12.5)" />}
+              {amb.time === 'day' && <ellipse cx={1} cy={13} rx={lite ? 11 : 14.5} ry={lite ? 3.6 : 5.2} fill={lite ? (rain ? 'rgba(0,0,0,.14)' : 'rgba(0,0,0,.3)') : 'url(#pc-sh)'} fillOpacity={lite ? 1 : rain ? 0.14 : 0.3} />}
+              {amb.time === 'afternoon' && <ellipse cx={15} cy={12} rx={lite ? 23 : 28} ry={lite ? 3.8 : 5.2} fill={lite ? (rain ? 'rgba(0,0,0,.14)' : 'rgba(0,0,0,.3)') : 'url(#pc-sh)'} fillOpacity={lite ? 1 : rain ? 0.14 : 0.3} transform="rotate(5 15 12)" />}
               {(() => {
                 const keeper = s.pos === 'GK';
                 const base = keeper ? keeperColor(club.primary_color, opponent.primary_color) : team.primary_color;
@@ -2832,7 +2843,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           <circle key={`trail-${i}`} ref={(el: SVGCircleElement | null) => { trailNodes.current[i] = el; }} r={5.5 - i * 0.6} fill="#ffffff" opacity={0} />
         ))}
         <g ref={ballNode} transform={`translate(${MID_X} ${MID_Y})`}>
-          <ellipse ref={ballShadow} cx={amb.time === 'afternoon' ? 5 : 1.5} cy={6.5} rx={6.5} ry={2.6} fill="rgba(0,0,0,.42)" filter={soft} />
+          <ellipse ref={ballShadow} cx={amb.time === 'afternoon' ? 5 : 1.5} cy={6.5} rx={lite ? 6.5 : 8.5} ry={lite ? 2.6 : 3.6} fill={lite ? 'rgba(0,0,0,.42)' : 'url(#pc-sh)'} fillOpacity={lite ? 1 : 0.42} />
           <g ref={liftNode}>
             <defs>
               <clipPath id="ball-clip">
