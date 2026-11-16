@@ -221,6 +221,9 @@ export function SubstitutionPanel({
         <div className="dr-bench-row">
           {bench.map((reserve, index) => {
             const taken = used.includes(reserve.id);
+            const outSlot = taken ? (Object.keys(picks) as Position[]).find((k) => picks[k] === reserve.id) : undefined;
+            const outgoing = outSlot ? starterAt(outSlot) : undefined;
+            const shownOnBench = outgoing ?? reserve;
             const gain = selected ? gainOf(selected, reserve) : null;
             const fits = selected ? fitsSlot(lite(reserve), selected) : true;
             return (
@@ -230,10 +233,23 @@ export function SubstitutionPanel({
                 style={{ '--i': index } as React.CSSProperties}
               >
                 <span className="dr-glow">
-                  <Card player={reserve} fluid onClick={() => chooseReserve(reserve)} />
+                  <Card
+                    player={shownOnBench}
+                    fluid
+                    onClick={() => {
+                      if (outSlot && !sent) {
+                        setPicks((current) => {
+                          const next = { ...current };
+                          delete next[outSlot];
+                          return next;
+                        });
+                        setSelected(null);
+                      } else chooseReserve(reserve);
+                    }}
+                  />
                 </span>
                 <i className={`dr-label ${selected && !taken && !fits ? 'oop' : ''}`}>
-                  {taken ? 'JÁ ESCOLHIDO' : selected && !fits ? 'FORA −5' : reserve.primary_position}
+                  {taken ? `SAIU · ${outSlot ?? ''}` : selected && !fits ? 'FORA −5' : reserve.primary_position}
                 </i>
                 {selected && !taken && gain !== null && (
                   <b className="ht-pct" style={{ color: gainColor(gain) }}>
@@ -274,7 +290,7 @@ const subsCss = `
 .ht-slot.ht-lock .dr-glow { filter: grayscale(.45) brightness(.85); }
 .ht-slot.ht-in .dr-glow { filter: drop-shadow(0 0 12px #22c55e); }
 .ht-slot.ht-in .dr-label { background: #14532d; color: #bbf7d0; }
-.ht-res.ht-taken { opacity: .4; pointer-events: none; }
+.ht-res.ht-taken { opacity: .6; filter: grayscale(.5); }
 .ht-actions { display: flex; gap: 10px; justify-content: center; margin-top: 34px; flex-wrap: wrap; }
 .ht-panel .dr-bench-row { padding-bottom: 8px; }
 .ht-slot, .ht-res { animation-delay: calc(var(--i) * 40ms) !important; }
