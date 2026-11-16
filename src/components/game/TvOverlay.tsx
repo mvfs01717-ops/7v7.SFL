@@ -29,7 +29,22 @@ const css = `
 .tv-l3 .tv-name { font-size: 20px; font-weight: 900; letter-spacing: .5px; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tv-l3 .tv-sub { font-size: 13px; opacity: .8; font-weight: 700; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tv-l3 .tv-min { display: grid; place-items: center; padding: 0 13px; font-weight: 900; font-size: 16px; background: rgba(255,255,255,.14); color: #fff; }
-@media (max-width: 560px) { .tv-press { width: 150px; top: 38px; } .tv-bug { font-size: 12px; } .tv-bug .tv-s { font-size: 16px; } .tv-l3 .tv-name { font-size: 15px; } .tv-l3 .tv-tag { font-size: 15px; padding: 0 10px; } }
+@media (max-width: 560px) {
+  .tv-press { width: 132px; top: 36px; }
+  .tv-press .tv-pl { font-size: 8px; letter-spacing: 1px; }
+  .tv-bug { font-size: 11px; left: 6px; top: 6px; }
+  .tv-bug .tv-t { padding: 5px 7px; gap: 5px; }
+  .tv-bug .tv-s { font-size: 15px; min-width: 24px; padding: 0 4px; }
+  .tv-bug .tv-clock { font-size: 12px; padding: 0 7px; }
+  /* Letreiro de lance: faixa pequena no canto de cima, sem cobrir o jogo */
+  .tv-l3 { bottom: auto; top: 40px; justify-content: flex-end; padding: 0 6px; }
+  .tv-l3 > div { border-radius: 3px 10px 3px 10px; box-shadow: 0 4px 12px rgba(0,0,0,.5); }
+  .tv-l3 .tv-tag { font-size: 10px; padding: 0 7px; letter-spacing: .5px; }
+  .tv-l3 .tv-txt { padding: 3px 8px 4px; max-width: 110px; }
+  .tv-l3 .tv-name { font-size: 11px; }
+  .tv-l3 .tv-sub { display: none; }
+  .tv-l3 .tv-min { font-size: 10px; padding: 0 7px; }
+}
 @media (prefers-reduced-motion: reduce) { .tv-l3 > div, .tv-bug .tv-s.pop { animation: none; } }
 `;
 

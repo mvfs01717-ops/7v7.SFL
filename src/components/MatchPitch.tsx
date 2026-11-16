@@ -282,6 +282,8 @@ const crowdCss = `
 @keyframes pcWave { 50% { transform: skewY(-9deg) rotate(5deg); } }
 @keyframes pcFlash { to { opacity: .22; } }
 @keyframes pcPop { 0% { transform: scale(.6) translateY(-6px); opacity: 0; } 100% { transform: none; opacity: 1; } }
+/* Celular: balões da torcida pequenos, de uma linha só, para não cobrirem o campo */
+@media (max-width: 560px) { .pc-bub { top: 3px; max-width: 36%; padding: 2px 7px; border-radius: 9px; font-size: 9.5px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: none; } .pc-bub.hype { box-shadow: 0 0 8px rgba(245,184,0,.4); } .pc-db { display: none; } }
 @media (prefers-reduced-motion: reduce) { .pc-replay, .pc-fan, .pc-flag, .pc-bub, .pc-glow, .pc-conf, .pc-flood, .pc-net-hit, .pc-drop, .pc-strike { animation: none !important; } }
 `;
 

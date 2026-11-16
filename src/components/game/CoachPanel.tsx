@@ -3,7 +3,7 @@ import { SHOUT_INFO, SHOUT_MINUTES, SHOUTS_PER_MATCH, SWITCH_COST, TACTICS, TACT
 import type { Tactic } from '@/lib/multiplayer';
 
 // Banco de reservas do técnico: troca o estilo no meio do jogo e dá gritos à beira do campo (só contra o bot)
-export function CoachPanel({ tactic, shoutsLeft, minute, activeUntil, activeShout, onTactic, onShout, delayNote }: { delayNote?: number; tactic: Tactic; shoutsLeft: number; minute: number; activeUntil: number; activeShout: Shout | null; onTactic: (t: Tactic) => void; onShout: (s: Shout) => void }) {
+export function CoachPanel({ tactic, shoutsLeft, minute, activeUntil, activeShout, onTactic, onShout, delayNote, inline = false }: { inline?: boolean; delayNote?: number; tactic: Tactic; shoutsLeft: number; minute: number; activeUntil: number; activeShout: Shout | null; onTactic: (t: Tactic) => void; onShout: (s: Shout) => void }) {
   const [open, setOpen] = useState<'tactic' | 'shout' | null>(null);
   const [toast, setToast] = useState('');
   useEffect(() => {
@@ -13,12 +13,12 @@ export function CoachPanel({ tactic, shoutsLeft, minute, activeUntil, activeShou
   }, [toast]);
   const active = !!activeShout && minute < activeUntil;
   const info = TACTIC_INFO[tactic];
-  const pill = (on: boolean): CSSProperties => ({ border: 0, cursor: 'pointer', padding: '6px 11px', borderRadius: 999, font: '800 11px Inter, sans-serif', background: on ? '#F5B800' : 'rgba(8,12,20,.85)', color: on ? '#111' : '#fff', boxShadow: '0 2px 8px rgba(0,0,0,.4)' });
+  const pill = (on: boolean): CSSProperties => ({ border: 0, cursor: 'pointer', padding: inline ? '9px 14px' : '6px 11px', borderRadius: 999, font: inline ? '800 12px Inter, sans-serif' : '800 11px Inter, sans-serif', background: on ? '#F5B800' : 'rgba(8,12,20,.85)', color: on ? '#111' : '#fff', boxShadow: '0 2px 8px rgba(0,0,0,.4)' });
   return (
-    <div style={{ position: 'absolute', left: 8, bottom: 8, zIndex: 6 }}>
+    <div style={inline ? { position: 'relative', display: 'flex', flexDirection: 'column-reverse' } : { position: 'absolute', left: 8, bottom: 8, zIndex: 6 }}>
       {toast && <div role="status" style={{ marginBottom: 6, padding: '6px 11px', borderRadius: 10, background: 'rgba(8,12,20,.92)', border: '1px solid #F5B800', color: '#fff', font: '800 11px Inter, sans-serif', maxWidth: 260 }}>{toast}</div>}
       {open && (
-        <div style={{ marginBottom: 6, width: open === 'tactic' ? 400 : 260, maxWidth: 'calc(100vw - 24px)', padding: 6, borderRadius: 12, background: 'rgba(8,12,20,.96)', border: '1px solid rgba(255,255,255,.2)', display: 'grid', gridTemplateColumns: open === 'tactic' ? '1fr 1fr' : '1fr', gap: 4 }}>
+        <div style={{ marginBottom: 6, width: inline ? '100%' : open === 'tactic' ? 400 : 260, maxWidth: 'calc(100vw - 24px)', padding: 6, borderRadius: 12, background: 'rgba(8,12,20,.96)', border: '1px solid rgba(255,255,255,.2)', display: 'grid', gridTemplateColumns: open === 'tactic' ? '1fr 1fr' : '1fr', gap: 4 }}>
           {open === 'tactic' && (
             <>
               <div style={{ gridColumn: '1 / -1', font: '700 10px Inter, sans-serif', opacity: 0.7, padding: '2px 6px' }}>Trocar o estilo custa {SWITCH_COST} pontos de fôlego do time.</div>

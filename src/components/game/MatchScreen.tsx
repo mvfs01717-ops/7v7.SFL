@@ -53,6 +53,21 @@ const matchCss = `
 @media (max-width: 560px) { .mt .scoreboard strong { font-size: 48px; } .mt .scoreboard { gap: 8px; } }
 `;
 
+// Tela de celular: botões de câmera e do técnico saem de cima do campo e ficam numa barra logo abaixo
+function useNarrow(max = 560) {
+  const query = `(max-width: ${max}px)`;
+  const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia(query).matches);
+  useEffect(() => {
+    if (!window.matchMedia) return undefined;
+    const mq = window.matchMedia(query);
+    const on = () => setNarrow(mq.matches);
+    on();
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, [query]);
+  return narrow;
+}
+
 export function MatchScreen({
   club: clubProp,
   opponent: opponentProp,
@@ -168,6 +183,7 @@ export function MatchScreen({
   }, [rainNow]);
   // Câmeras ao vivo (3D): a escolha fica salva no aparelho
   const liveRef = useRef<LiveSnap | null>(null);
+  const narrow = useNarrow();
   const [cam, setCam] = useState<LiveMode>(() => {
     try {
       const v = localStorage.getItem('7v7-cam') as LiveMode | null;
@@ -256,6 +272,7 @@ export function MatchScreen({
           onAbort={onAbort}
         />
       ) : (
+        <>
         <div style={{ position: 'relative', minHeight: pause === 'subs' ? 620 : undefined }}>
           <div ref={pitchWrapRef} style={{ visibility: cam === 'tatica' ? 'visible' : 'hidden' }}>
           <MatchPitch
@@ -282,7 +299,8 @@ export function MatchScreen({
           </div>
           {cam === 'tatica' && <StadiumFx liveRef={liveRef} club={club} opponent={opponent} home={homeSide} ambience={ambience} burst={crowd.burst} score={score} wrapRef={pitchWrapRef} />}
           {cam !== 'tatica' && <LiveCam grassFade={Math.min(1, Math.max(0, (minute - 35) / 55)) * 0.7} liveRef={liveRef} mode={cam} club={club} opponent={opponent} home={homeSide} ambience={ambience} burst={crowd.burst} score={score} />}
-          <div style={{ position: 'absolute', right: 8, bottom: 8, zIndex: 6, display: 'flex', gap: 2, padding: 3, borderRadius: 999, background: 'rgba(8,12,20,.8)' }}>
+          {!narrow && (
+            <div style={{ position: 'absolute', right: 8, bottom: 8, zIndex: 6, display: 'flex', gap: 2, padding: 3, borderRadius: 999, background: 'rgba(8,12,20,.8)' }}>
             {LIVE_MODES.map((m, i) => (
               <button
                 key={m.key}
@@ -293,7 +311,8 @@ export function MatchScreen({
                 {m.label}
               </button>
             ))}
-          </div>
+            </div>
+          )}
           {kitToast && kits.away && (
             <div role="status" style={{ position: 'absolute', left: '50%', top: 40, transform: 'translateX(-50%)', zIndex: 7, padding: '6px 14px', borderRadius: 999, background: 'rgba(8,12,20,.92)', border: '1px solid #F5B800', color: '#fff', font: '900 11px Inter, sans-serif', letterSpacing: '.5px' }}>
               👕 {(kits.away === 'user' ? club : opponent).abbreviation} JOGA DE CAMISA RESERVA (CORES PARECIDAS)
@@ -319,7 +338,7 @@ export function MatchScreen({
           {pause === 'subs' && (
             <SubstitutionPanel club={club} userTeam={userTeam} bench={bench} tactic={tactic} minute={minute} onConfirm={onSubs} limitSec={multiplayer ? SUBS_WINDOW_SEC : undefined} />
           )}
-          {coach && !pause && !penaltyPhase && !penaltyPrep && minute < 90 && <CoachPanel tactic={tactic} minute={minute} shoutsLeft={coach.shoutsLeft} activeUntil={coach.activeUntil} activeShout={coach.activeShout} onTactic={coach.onTactic} onShout={coach.onShout} delayNote={coach.delayNote} />}
+          {!narrow && coach && !pause && !penaltyPhase && !penaltyPrep && minute < 90 && <CoachPanel tactic={tactic} minute={minute} shoutsLeft={coach.shoutsLeft} activeUntil={coach.activeUntil} activeShout={coach.activeShout} onTactic={coach.onTactic} onShout={coach.onShout} delayNote={coach.delayNote} />}
           {(pause === 'setpiece' || setPiece?.floating) && setPiece && onSetPiece && <SetPiecePrep key={setPiece.minute} kind={setPiece.kind} minute={setPiece.minute} club={club} floating={!!setPiece.floating} onPick={onSetPiece} />}
           {rivalNote && (
             <div role="status" style={{ position: 'absolute', left: 8, top: 70, zIndex: 7, padding: '6px 12px', borderRadius: 10, background: 'rgba(8,12,20,.92)', border: '1px solid #ff6a4f', color: '#fff', font: '800 11px Inter, sans-serif' }}>
@@ -328,6 +347,26 @@ export function MatchScreen({
           )}
           {penaltyPrep && <PenaltyPrep club={club} opponent={opponent} score={score} />}
         </div>
+        {narrow && (
+          <div className="ms-bar" role="toolbar" aria-label="Câmera e técnico">
+            <style>{`
+              .ms-bar { display: grid; gap: 8px; margin: 8px 0 0; }
+              .ms-cams { display: flex; gap: 6px; overflow-x: auto; padding: 2px 0 4px; scrollbar-width: none; }
+              .ms-cams::-webkit-scrollbar { display: none; }
+              .ms-cams button { flex: none; border: 1px solid rgba(255,255,255,.18); cursor: pointer; padding: 9px 14px; border-radius: 999px; font: 800 12px Inter, sans-serif; background: rgba(8,12,20,.85); color: #fff; }
+              .ms-cams button.on { background: #F5B800; color: #111; border-color: #F5B800; }
+            `}</style>
+            <div className="ms-cams">
+              {LIVE_MODES.map((m) => (
+                <button key={m.key} className={cam === m.key ? 'on' : ''} onClick={() => pickCam(m.key)}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            {coach && !pause && !penaltyPhase && !penaltyPrep && minute < 90 && <CoachPanel inline tactic={tactic} minute={minute} shoutsLeft={coach.shoutsLeft} activeUntil={coach.activeUntil} activeShout={coach.activeShout} onTactic={coach.onTactic} onShout={coach.onShout} delayNote={coach.delayNote} />}
+          </div>
+        )}
+        </>
       )}
 
       {staminaOn && !penaltyPhase && (
