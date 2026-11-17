@@ -76,9 +76,19 @@ function CardFace({
         <span>{player.overall}</span>
         <span className="card-position">{player.primary_position}</span>
       </div>
-      <div className="player-avatar">{player.name.slice(0, 1).toUpperCase()}</div>
       <strong>{player.name}</strong>
-      <small>{player.team && isFreeAgent(player.team) ? 'SEM CLUBE' : (player.team?.abbreviation ?? '7V7')}</small>
+      <div className="card-base" aria-label={player.team && isFreeAgent(player.team) ? 'Sem clube' : (player.team?.abbreviation ?? '7V7')}>
+        <svg className="card-flag" viewBox="0 0 20 14" aria-hidden="true">
+          <rect width="20" height="14" fill="#009c3b" />
+          <path d="M10 1.6 18.2 7 10 12.4 1.8 7Z" fill="#ffdf00" />
+          <circle cx="10" cy="7" r="3.2" fill="#002776" />
+        </svg>
+        {!(player.team && isFreeAgent(player.team)) && (
+          <span className="card-crest" style={{ background: player.team?.secondary_color ?? '#F4F4F0', ['--cr' as string]: player.team?.primary_color ?? '#11161c', ['--ci' as string]: player.team?.secondary_color === '#F4F4F0' ? '#11161c' : '#fff' }}>
+            <i>{player.team?.abbreviation ?? '7V7'}</i>
+          </span>
+        )}
+      </div>
       <div className="card-alternates">
         {player.alternate_positions.length
           ? player.alternate_positions.join(' · ')
@@ -258,11 +268,11 @@ export const cardCss = `
   /* Fundo atrás do jogador (ouro polido, no estilo das cartas oficiais de coleção): arte em SVG + luz suave e sombra na base */
   --card-art: ${CARD_ART};
   --card-pat:
-    radial-gradient(ellipse 60% 40% at 56% 28%, rgba(255,250,215,.45), rgba(255,250,215,0) 72%),
-    linear-gradient(0deg, rgba(110,60,0,.26), rgba(0,0,0,0) 34%);
+    radial-gradient(ellipse 60% 40% at 56% 28%, rgba(255,247,222,.42), rgba(255,247,222,0) 72%),
+    linear-gradient(0deg, rgba(96,62,8,.3), rgba(0,0,0,0) 36%);
 }
-.cd-art { --a: #fbe48c; --b: #eab94a; --c: #c98a22; background: var(--card-art), var(--card-pat), linear-gradient(165deg, var(--a), var(--b) 56%, var(--c)); }
-.cd-art.special { --a: #fff0a6; --b: #f2c230; --c: #cf9a12; }
+.cd-art { --a: #f7e8bd; --b: #e9c875; --c: #b98a2e; background: var(--card-art), var(--card-pat), linear-gradient(165deg, var(--a), var(--b) 56%, var(--c)); }
+.cd-art.special { --a: #fbeeb4; --b: #efcb55; --c: #c4921a; }
 .cd-art.silver { --a: #f4f6f9; --b: #c3cad3; --c: #a3acb7; }
 .cd-art.bronze { --a: #f4bb8f; --b: #d7864f; --c: #b66a38; }
 button.player-card.player-card {
@@ -295,8 +305,8 @@ button.player-card.player-card::after {
 }
 button.player-card.player-card::before { background: var(--card-art), var(--card-pat), var(--face); }
 button.player-card.player-card::after { background: linear-gradient(118deg, rgba(255,255,255,.4) 0, rgba(255,255,255,0) 40%, rgba(255,255,255,.12) 64%, rgba(255,255,255,0) 78%); }
-button.player-card.player-card.gold { --frame: linear-gradient(160deg, #f7e39a, #a77a12); --face: linear-gradient(165deg, #fbe48c, #eab94a 40%, #dc9a2a 72%, #bd7a18); --ink: #2b1d00; }
-button.player-card.player-card.special { --frame: linear-gradient(160deg, #fff6c2, #c98a00); --face: linear-gradient(165deg, #fff0a6, #f2c230 52%, #cf9a12); --ink: #2b1d00; }
+button.player-card.player-card.gold { --frame: linear-gradient(160deg, #f6df9c, #8c6516 52%, #d9b255 78%, #7d5810); --face: linear-gradient(165deg, #f8ebc4, #efd48f 28%, #e6c066 56%, #c99a3a 82%, #a87a20); --ink: #2b1d00; }
+button.player-card.player-card.special { --frame: linear-gradient(160deg, #fff3b8, #a97a0a 55%, #e7c24a); --face: linear-gradient(165deg, #fbeeb4, #f2d060 36%, #e3b030 70%, #bf8e14); --ink: #2b1d00; }
 button.player-card.player-card.silver { --frame: linear-gradient(160deg, #f4f6f8, #808b97); }
 button.player-card.player-card.bronze { --frame: linear-gradient(160deg, #f6c096, #8a4a22); --face: linear-gradient(165deg, #f4bb8f, #d7864f 58%, #b66a38); --ink: #2a1408; }
 button.player-card.player-card:not(:disabled):hover { transform: translateY(-4px); filter: brightness(1.07); box-shadow: none; border-color: transparent; }
@@ -317,29 +327,31 @@ button.player-card.player-card .card-top {
   line-height: .9;
 }
 button.player-card.player-card .card-position { font-size: 12px; font-size: 11cqw; color: var(--ink); font-weight: 800; letter-spacing: .02em; }
-button.player-card.player-card .player-avatar {
-  left: 42%;
-  top: 10%;
-  width: 46%;
-  height: auto;
-  aspect-ratio: 1;
-  background: rgba(255,255,255,.34);
-  border: 2px solid rgba(0,0,0,.22);
-  color: var(--ink);
-  font-size: 30px;
-  font-size: 26cqw;
-}
 button.player-card.player-card strong {
-  left: 7%;
-  right: 7%;
-  top: 60%;
-  padding-top: 2.5cqw;
-  border-top: 1px solid rgba(0,0,0,.28);
+  left: 0;
+  right: 0;
+  top: 57%;
+  padding: 2.4cqw 6%;
+  background: linear-gradient(180deg, rgba(110,72,10,.14), rgba(110,72,10,.3));
+  border-top: 1px solid rgba(100,66,8,.5);
+  border-bottom: 1px solid rgba(255,244,205,.6);
   color: var(--ink);
-  font-size: 11px;
-  font-size: 10cqw;
-  letter-spacing: .02em;
+  font-family: 'Bebas Neue', Inter, sans-serif;
+  font-weight: 400;
+  font-size: 12px;
+  font-size: 12.5cqw;
+  line-height: 1;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 0 rgba(255,244,205,.55);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-button.player-card.player-card small { left: 0; right: 0; top: 72%; color: var(--ink); opacity: .75; font-size: 8px; font-size: 8cqw; margin: 0; }
-button.player-card.player-card .card-alternates { left: 8%; right: 8%; top: 81%; color: var(--ink); opacity: .6; font-size: 7px; font-size: 6.6cqw; margin: 0; }
+button.player-card.player-card .card-base { left: 0; right: 0; top: 71%; display: flex; align-items: center; justify-content: center; gap: 5cqw; }
+button.player-card.player-card .card-flag { width: 14cqw; height: 9.8cqw; border-radius: 1.1cqw; box-shadow: 0 0 0 .6cqw rgba(100,66,8,.55), 0 1px 2px rgba(0,0,0,.3); }
+button.player-card.player-card .card-crest { position: relative; width: 11cqw; height: 12.6cqw; clip-path: polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%); display: grid; place-items: center; }
+button.player-card.player-card .card-crest::before { content: ''; position: absolute; inset: .9cqw .9cqw 1cqw; clip-path: polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%); background: var(--cr); }
+button.player-card.player-card .card-crest i { position: relative; margin-top: -1.2cqw; font: 900 normal 3.9cqw/1 Inter, sans-serif; letter-spacing: 0; color: var(--ci); }
+button.player-card.player-card .card-alternates { left: 8%; right: 8%; top: 84.5%; color: var(--ink); opacity: .62; font-size: 6px; font-size: 6.2cqw; font-weight: 700; margin: 0; }
 `;
