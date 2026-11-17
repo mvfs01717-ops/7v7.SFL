@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { BENCH_SLOTS, positionNames, type BenchSlot, type DraftSlot, type Player, type Position, type Team } from '@/lib/game/types';
-import { Card, LogoMark, cardCss } from '@/components/game/Card';
+import { Card, cardCss } from '@/components/game/Card';
 import { stadiumCss } from '@/lib/game/stadiumCss';
 
 // ---------- Draft estilo campo: o campo aparece com as cartas escondidas e cada posição revela 3 cartas ----------
@@ -53,8 +53,11 @@ export const draftCss = `
   background: linear-gradient(160deg, #f7e39a, #a77a12);
   display: grid;
   place-items: center;
+  container-type: inline-size;
 }
-.dr-empty::before { content: ''; position: absolute; inset: 3px; clip-path: var(--shield); background: linear-gradient(165deg, #1a222b, #0a0e13); }
+.dr-empty::before { content: ''; position: absolute; inset: 2px; clip-path: var(--shield); background: radial-gradient(120% 90% at 50% 28%, #53c6df, #2a93b3 60%, #1e7090); }
+.dr-empty::after { content: ''; position: absolute; inset: 2px; clip-path: var(--shield); background: linear-gradient(115deg, transparent 38%, rgba(255,255,255,.2) 50%, transparent 62%); }
+.dr-empty .dr-ring { position: relative; z-index: 1; width: 54%; border-width: max(2px, 1.8cqw); font-size: 15cqw; margin-top: -6%; }
 .dr-logo { position: relative; display: block; width: 58%; margin-top: -8%; opacity: .95; filter: drop-shadow(0 0 6px rgba(245,184,0,.35)); }
 .dr-logo svg { width: 100% !important; height: auto !important; }
 .dr-label {
@@ -372,7 +375,7 @@ export function DraftScreen({
         ) : (
           <span className="dr-glow">
             <span className="dr-empty">
-              <span className="dr-logo"><LogoMark size={64} variant="full" /></span>
+              <span className="dr-ring">7V7</span>
             </span>
           </span>
         )}
