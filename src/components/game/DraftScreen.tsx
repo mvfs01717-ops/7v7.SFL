@@ -102,8 +102,8 @@ export const draftCss = `
 .dr-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 18px 0 14px; perspective: 1000px; }
 .dr-cardwrap {
   display: block;
-  animation: dr-flash 1.5s ease-out both;
-  animation-delay: calc(var(--i) * .18s + .75s);
+  animation: dr-flash 1.2s ease-out both;
+  animation-delay: calc(var(--i) * .3s + 1.05s);
   transition: transform .2s ease, filter .2s ease;
 }
 .dr-cardwrap:hover { transform: translateY(-6px) scale(1.03); filter: drop-shadow(0 0 14px rgba(245,184,0,.9)); }
@@ -111,8 +111,8 @@ export const draftCss = `
   position: relative;
   aspect-ratio: 0.74;
   transform-style: preserve-3d;
-  animation: dr-flipin .95s cubic-bezier(.2,.85,.25,1) both;
-  animation-delay: calc(var(--i) * .18s + .12s);
+  animation: dr-flipin 1.5s cubic-bezier(.3,.8,.25,1) both;
+  animation-delay: calc(var(--i) * .3s + .1s);
 }
 .dr-face { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
 .dr-back { transform: rotateY(180deg); }
@@ -120,13 +120,21 @@ export const draftCss = `
   width: 100%;
   height: 100%;
   clip-path: var(--shield);
-  background: linear-gradient(160deg, #f7e39a, #a77a12);
+  background: linear-gradient(160deg, #f1d98a, #8a6a20);
   display: grid;
   place-items: center;
   position: relative;
 }
-.dr-backcard::before { content: ''; position: absolute; inset: 3px; clip-path: var(--shield); background: linear-gradient(165deg, #1a222b, #0a0e13); }
-.dr-backcard > * { position: relative; }
+.dr-backcard::before { content: ''; position: absolute; inset: 2px; clip-path: var(--shield); background: radial-gradient(120% 90% at 50% 28%, #53c6df, #2a93b3 60%, #1e7090); }
+.dr-backcard::after { content: ''; position: absolute; inset: 2px; clip-path: var(--shield); background: linear-gradient(115deg, transparent 38%, rgba(255,255,255,.2) 50%, transparent 62%); }
+.dr-backcard > * { position: relative; z-index: 1; }
+.dr-ring { display: grid; place-items: center; width: 54%; aspect-ratio: 1; border-radius: 50%; border: 3px solid rgba(190,250,255,.75); box-shadow: 0 0 0 3px rgba(190,250,255,.22), inset 0 0 16px rgba(190,250,255,.25); font: 900 italic 24px/1 'Bebas Neue', Inter, sans-serif; color: #c9f8ff; text-shadow: 0 0 10px rgba(150,240,255,.9); }
+/* brilho de lente que passa pela borda antes de a carta virar */
+.dr-glint { position: absolute; left: 6%; bottom: 14%; width: 70%; aspect-ratio: 1; pointer-events: none; opacity: 0; z-index: 3; animation: dr-glint .7s ease-in-out both; animation-delay: calc(var(--i) * .3s + .45s); }
+.dr-glint::before, .dr-glint::after { content: ''; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); border-radius: 50%; background: radial-gradient(closest-side, #fff, rgba(255,235,150,.9) 30%, transparent); }
+.dr-glint::before { width: 100%; height: 3%; }
+.dr-glint::after { width: 3%; height: 56%; }
+@keyframes dr-glint { 0% { opacity: 0; transform: translate(-30%, 40%) scale(.2); } 45% { opacity: 1; transform: translate(10%, -5%) scale(1); } 100% { opacity: 0; transform: translate(50%, -50%) scale(.5); } }
 .dr-cardwrap.chosen { animation: dr-choose .55s ease-in-out both; z-index: 2; }
 .dr-cardwrap.other { animation: dr-out .45s ease-in both; pointer-events: none; }
 .dr-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
@@ -147,9 +155,11 @@ export const draftCss = `
 @keyframes dr-blur-out { to { opacity: 0; } }
 @keyframes dr-zoom { from { opacity: 0; transform: scale(.9); } to { opacity: 1; transform: none; } }
 @keyframes dr-flipin {
-  0% { opacity: 0; transform: translateY(70px) rotateY(180deg) scale(.7); }
-  25% { opacity: 1; }
-  100% { opacity: 1; transform: translateY(0) rotateY(0) scale(1); }
+  0% { transform: translateY(40px) rotateY(180deg) scale(.8); }
+  20% { transform: translateY(0) rotateY(180deg) scale(1); }
+  55% { transform: translateY(-3px) rotateY(180deg) scale(1.02); }
+  75% { transform: translateY(-10px) rotateY(90deg) scale(1.1); }
+  100% { transform: translateY(0) rotateY(0) scale(1); }
 }
 .dr-setup { max-width: 720px; margin: 22px auto 0; padding: 18px; animation: dr-up .5s cubic-bezier(.2,.8,.2,1) both; }
 @keyframes dr-up { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
@@ -236,9 +246,10 @@ export function DraftPicker({
                 </div>
                 <div className="dr-face dr-back" aria-hidden="true">
                   <div className="dr-backcard">
-                    <span className="dr-logo"><LogoMark size={64} variant="full" /></span>
+                    <span className="dr-ring">7V7</span>
                   </div>
                 </div>
+                <span className="dr-glint" aria-hidden="true" />
               </div>
             </div>
           ))}
