@@ -4,14 +4,16 @@ import type { PlanEntry } from '@/lib/game/helpers';
 
 export { TACTICS, TACTIC_INFO };
 export const SWITCH_COST = 3; // pontos de fôlego perdidos por todo o time ao mudar de estilo (o time se reorganiza)
-export const SHOUTS_PER_MATCH = 3;
-export const SHOUT_MINUTES = 6;
+export const SHOUTS_PER_MATCH = 9; // teto de segurança: o que limita de verdade é o tempo de espera
+export const SHOUT_MINUTES = 5; // quanto dura uma ordem
+export const SHOUT_COOLDOWN = 4; // minutos de espera depois que a ordem termina (vale para as três)
 
-export type Shout = 'motivar' | 'acalmar' | 'atacar';
+// Ordens ao vivo: mudam o plano dos próximos minutos e também a posição dos jogadores no campo
+export type Shout = 'pressionar' | 'recuar' | 'pontas';
 export const SHOUT_INFO: Record<Shout, { label: string; icon: string; text: string; toast: string }> = {
-  motivar: { label: 'Motivar', icon: '📣', text: 'Time ganha gás e finaliza com mais pontaria por 6 min.', toast: 'O técnico motiva o time!' },
-  acalmar: { label: 'Acalmar', icon: '🧊', text: 'Segura o jogo: o rival chega menos, mas você ataca menos por 6 min.', toast: 'O técnico pede calma e posse de bola.' },
-  atacar: { label: 'Mandar atacar', icon: '🔥', text: 'Time vai pra cima por 6 min, mas deixa espaço atrás.', toast: 'O técnico manda o time atacar!' },
+  pressionar: { label: 'Pressionar', icon: '⬆️', text: 'Linha alta e marcação em cima da bola: o rival erra mais, mas o contra-ataque dele fica perigoso.', toast: 'Time sobe a linha e pressiona!' },
+  recuar: { label: 'Recuar', icon: '🛡️', text: 'Time fecha atrás: o rival chega menos, mas você ataca menos.', toast: 'Time recua e fecha os espaços.' },
+  pontas: { label: 'Pelas pontas', icon: '↔️', text: 'Laterais e pontas abertos: mais cruzamentos e bolas na área, com o meio mais vazio.', toast: 'Time abre o jogo pelas pontas!' },
 };
 
 type RNG = () => number;
@@ -41,20 +43,21 @@ export function retuneForTactic(plan: PlanEntry[], from: number, oldT: Tactic, n
 export function applyShout(plan: PlanEntry[], from: number, shout: Shout, rng: RNG = Math.random): PlanEntry[] {
   return plan.map((e) => {
     if (e.minute <= from || e.minute > from + SHOUT_MINUTES) return e;
-    if (shout === 'motivar') {
-      if (e.side === 'user' && e.type === 'finalização' && rng() < 0.4) return entry(e, 'defesa');
-      if (e.side === 'user' && e.type === 'defesa' && rng() < 0.08) return entry(e, 'gol');
-    } else if (shout === 'acalmar') {
+    if (shout === 'pressionar') {
+      if (e.side === 'user' && e.type === 'posse' && rng() < 0.3) return entry(e, 'finalização');
+      if (e.side === 'bot' && e.type === 'finalização' && rng() < 0.3) return entry(e, 'posse');
+      if (e.side === 'bot' && e.type === 'defesa' && rng() < 0.1) return entry(e, 'gol'); // contra-ataque no espaço deixado
+    } else if (shout === 'recuar') {
       if (e.side === 'bot' && e.type === 'finalização' && rng() < 0.4) return entry(e, 'posse');
       if (e.side === 'bot' && e.type === 'gol' && rng() < 0.12) return entry(e, 'defesa');
-      if (e.side === 'user' && e.type === 'finalização' && rng() < 0.25) return entry(e, 'posse');
+      if (e.side === 'user' && e.type === 'finalização' && rng() < 0.3) return entry(e, 'posse');
     } else {
-      if (e.side === 'user' && e.type === 'posse' && rng() < 0.5) return entry(e, 'finalização');
-      if (e.side === 'bot' && e.type === 'defesa' && rng() < 0.12) return entry(e, 'gol');
-      if (e.side === 'bot' && e.type === 'posse' && rng() < 0.2) return entry(e, 'finalização');
+      if (e.side === 'user' && e.type === 'posse' && rng() < 0.25) return entry(e, 'finalização');
+      if (e.side === 'user' && e.type === 'defesa' && rng() < 0.1) return entry(e, 'gol'); // cruzamentos na área
+      if (e.side === 'bot' && e.type === 'posse' && rng() < 0.12) return entry(e, 'finalização'); // meio vazio
     }
     return e;
   });
 }
 // Ajuste imediato de fôlego do grito (pontos; negativo recupera)
-export const SHOUT_STAMINA: Record<Shout, number> = { motivar: -3, acalmar: -1, atacar: 2 };
+export const SHOUT_STAMINA: Record<Shout, number> = { pressionar: 2, recuar: -2, pontas: 1 };

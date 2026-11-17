@@ -1,10 +1,10 @@
 import { useEffect, useState, type CSSProperties } from 'react';
-import { SHOUT_INFO, SHOUT_MINUTES, SHOUTS_PER_MATCH, SWITCH_COST, TACTICS, TACTIC_INFO, type Shout } from '@/lib/game/coach';
+import { SHOUT_COOLDOWN, SHOUT_INFO, SWITCH_COST, TACTICS, TACTIC_INFO, type Shout } from '@/lib/game/coach';
 import type { Tactic } from '@/lib/multiplayer';
 
-// Banco de reservas do técnico: troca o estilo no meio do jogo e dá gritos à beira do campo (só contra o bot)
+// Banco do técnico: troca o estilo no meio do jogo e dá ordens ao vivo (pressionar, recuar, pelas pontas), com tempo de espera entre elas
 export function CoachPanel({ tactic, shoutsLeft, minute, activeUntil, activeShout, onTactic, onShout, delayNote, inline = false }: { inline?: boolean; delayNote?: number; tactic: Tactic; shoutsLeft: number; minute: number; activeUntil: number; activeShout: Shout | null; onTactic: (t: Tactic) => void; onShout: (s: Shout) => void }) {
-  const [open, setOpen] = useState<'tactic' | 'shout' | null>(null);
+  const [open, setOpen] = useState<'tactic' | null>(null);
   const [toast, setToast] = useState('');
   useEffect(() => {
     if (!toast) return undefined;
@@ -39,33 +39,37 @@ export function CoachPanel({ tactic, shoutsLeft, minute, activeUntil, activeShou
               ))}
             </>
           )}
-          {open === 'shout' &&
-            (Object.keys(SHOUT_INFO) as Shout[]).map((s) => (
-              <button
-                key={s}
-                disabled={shoutsLeft <= 0 || active}
-                onClick={() => {
-                  onShout(s);
-                  setToast(`${SHOUT_INFO[s].toast}${delayNote ? ` (vale em ${delayNote}')` : ''}`);
-                  setOpen(null);
-                }}
-                style={{ textAlign: 'left', cursor: shoutsLeft <= 0 || active ? 'not-allowed' : 'pointer', padding: '6px 8px', borderRadius: 8, border: '1px solid transparent', background: 'rgba(255,255,255,.07)', color: '#fff', opacity: shoutsLeft <= 0 || active ? 0.45 : 1 }}
-              >
-                <b style={{ font: '900 12px Inter, sans-serif' }}>{SHOUT_INFO[s].icon} {SHOUT_INFO[s].label}</b>
-                <small style={{ display: 'block', font: '600 10px/1.25 Inter, sans-serif', opacity: 0.8 }}>{SHOUT_INFO[s].text}</small>
-              </button>
-            ))}
         </div>
       )}
-      <div style={{ display: 'flex', gap: 4 }}>
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
         <button style={pill(open === 'tactic')} onClick={() => setOpen(open === 'tactic' ? null : 'tactic')} aria-label="Trocar estilo de jogo">
           {info.icon} {info.label}
         </button>
-        <button style={pill(open === 'shout' || active)} onClick={() => setOpen(open === 'shout' ? null : 'shout')} aria-label="Gritos do técnico">
-          {active && activeShout ? `${SHOUT_INFO[activeShout].icon} até ${activeUntil}'` : `📣 Grito ×${shoutsLeft}/${SHOUTS_PER_MATCH}`}
-        </button>
+        {(Object.keys(SHOUT_INFO) as Shout[]).map((k) => {
+          const on = active && activeShout === k;
+          const wait = !active && !!activeShout ? Math.max(0, activeUntil + SHOUT_COOLDOWN - minute) : 0;
+          const blocked = shoutsLeft <= 0 || active || wait > 0;
+          return (
+            <button
+              key={k}
+              disabled={blocked}
+              title={SHOUT_INFO[k].text}
+              aria-label={`${SHOUT_INFO[k].label}: ${SHOUT_INFO[k].text}`}
+              onClick={() => {
+                onShout(k);
+                setToast(`${SHOUT_INFO[k].toast}${delayNote ? ` (vale em ${delayNote}')` : ''}`);
+                setOpen(null);
+              }}
+              style={{ ...pill(on), opacity: blocked && !on ? 0.45 : 1, cursor: blocked ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, position: 'relative', overflow: 'hidden' }}
+            >
+              {SHOUT_INFO[k].icon}
+              {SHOUT_INFO[k].label}
+              {on && <small style={{ font: '800 9px Inter, sans-serif' }}>até {activeUntil}&apos;</small>}
+              {!on && wait > 0 && <small style={{ font: '800 9px Inter, sans-serif' }}>{Math.ceil(wait)}&apos;</small>}
+            </button>
+          );
+        })}
       </div>
-      {open === 'shout' && active && <span style={{ display: 'none' }}>{SHOUT_MINUTES}</span>}
     </div>
   );
 }

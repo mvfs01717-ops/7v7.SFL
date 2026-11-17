@@ -33,7 +33,7 @@ import { Squad } from '@/components/game/SquadScreen';
 import { addProgress } from '@/lib/cosmetics';
 import { pickAmbience, wetFromOf, type Ambience } from '@/lib/game/ambience';
 import { MP_DELAY, MP_LEAD, MP_SP_OPEN, decodeReqs, encodeReqs, mpSetPieces, retuneItems, seeded, shoutItems, type Req } from '@/lib/game/mpdyn';
-import { SHOUTS_PER_MATCH, SHOUT_MINUTES, SHOUT_STAMINA, SWITCH_COST, applyShout, retuneForTactic, type Shout } from '@/lib/game/coach';
+import { SHOUTS_PER_MATCH, SHOUT_COOLDOWN, SHOUT_MINUTES, SHOUT_STAMINA, SWITCH_COST, applyShout, retuneForTactic, type Shout } from '@/lib/game/coach';
 import { SHOUT_INFO } from '@/lib/game/coach';
 import { pickSetPieceMinutes, rollSetPiece, setPieceText, SET_OPTIONS, type SetKind, type SetOption } from '@/lib/game/setpiece';
 import { BenchPicker, PositionEditor, TacticPicker } from '@/components/game/TeamSetup';
@@ -1474,7 +1474,7 @@ function App() {
     setMatchTactics((current) => ({ ...current, user: next }));
   }
   function callShout(kind: Shout) {
-    if (roomRef.current || spectating || coach.shouts <= 0 || minute < coach.until) return;
+    if (roomRef.current || spectating || coach.shouts <= 0 || minute < coach.until + (coach.shout ? SHOUT_COOLDOWN : 0)) return;
     if (planRef.current) planRef.current = applyShout(planRef.current, minute, kind);
     setUserTeam((current) => current.map((player) => ({ ...player, carried: Math.max(0, (player.carried ?? 0) + SHOUT_STAMINA[kind]) })));
     setCoach({ shouts: coach.shouts - 1, until: minute + SHOUT_MINUTES, shout: kind });
@@ -2001,6 +2001,7 @@ function App() {
           if (!mine) setRivalNote(`${TACTIC_INFO[next].icon} Rival mudou para ${TACTIC_INFO[next].label}`);
         } else {
           const shout = r.v as Shout;
+          if (!SHOUT_INFO[shout]) return;
           setTeam((current) => current.map((player) => ({ ...player, carried: Math.max(0, (player.carried ?? 0) + SHOUT_STAMINA[shout]) })));
           if (!mine) setRivalNote(`${SHOUT_INFO[shout].icon} Técnico rival: ${SHOUT_INFO[shout].label}`);
         }
@@ -2411,7 +2412,7 @@ function App() {
                     delayNote: MP_DELAY,
                     onTactic: (t: Tactic) => mpSend({ k: 'tac', v: t, m: minute, e: minute + MP_DELAY }),
                     onShout: (shout: Shout) => {
-                      if (myShouts.length >= SHOUTS_PER_MATCH || (lastShout && minute < lastShout.e + SHOUT_MINUTES)) return;
+                      if (myShouts.length >= SHOUTS_PER_MATCH || (lastShout && minute < lastShout.e + SHOUT_MINUTES + SHOUT_COOLDOWN)) return;
                       mpSend({ k: 'shout', v: shout, m: minute, e: minute + MP_DELAY });
                     },
                   }

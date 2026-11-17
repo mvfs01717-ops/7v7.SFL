@@ -56,6 +56,8 @@ type Props = {
   endHalfRef?: { current: boolean };
   // Jogada ensaiada em escolha: o campo inteiro congela (bola, jogadores e relógio das animações) até a decisão
   hold?: boolean;
+  // Ordem ao vivo do técnico para o time do usuário: muda a linha e a largura do time (pressionar, recuar, pelas pontas)
+  order?: 'pressionar' | 'recuar' | 'pontas' | null;
   // Legenda e balões da torcida saem de cima do campo: quem usa o campo mostra esses textos em outro lugar
   hideOverlays?: boolean;
   onCaption?: (text: string) => void;
@@ -488,9 +490,11 @@ export type LiveSnap = {
   fx: { def: number; hold: number; stretch: number; hrot: number; hsc: number } | null;
 };
 
-export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = 'user', ambience, crowd, onClip, mapRef, club, opponent, userTeam, botTeam, events, onGoal, restartKey, workRef, endHalfRef, deadBallRef, hold = false, hideOverlays = false, onCaption }: Props) {
+export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = 'user', ambience, crowd, onClip, mapRef, club, opponent, userTeam, botTeam, events, onGoal, restartKey, workRef, endHalfRef, deadBallRef, hold = false, hideOverlays = false, onCaption, order = null }: Props) {
   const holdRef = useRef(false);
   holdRef.current = hold;
+  const orderRef = useRef<Props['order']>(null);
+  orderRef.current = order;
   // Tempo do campo: igual ao relógio do navegador, menos o tempo que ficou congelado
   const heldTotal = useRef(0);
   const heldSince = useRef(0);
@@ -1968,14 +1972,21 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           const inPoss = possSide === s.side;
           const prog = d > 0 ? (st.ballX - FX0) / (FX1 - FX0) : (FX1 - st.ballX) / (FX1 - FX0);
           const isFwd = FORWARDS.includes(s.pos);
+          // Ordem do técnico (só no time do usuário): sobe a linha, fecha atrás ou abre o time nas pontas
+          const ord = s.side === 'user' ? orderRef.current : null;
+          const wide = s.pos === 'LB' || s.pos === 'RB' || s.pos === 'LF' || s.pos === 'RF';
+          const ordDepth = ord === 'pressionar' ? 0.09 : ord === 'recuar' ? -0.12 : ord === 'pontas' && isFwd && inPoss ? 0.03 : 0;
           const f = clamp(
-            BASE[s.pos][0] + (prog - 0.5) * (inPoss ? 0.46 : 0.3) * SHAPE_FACTOR[s.pos] + (isFwd ? (inPoss ? 0.04 : -0.04) : 0),
+            BASE[s.pos][0] + (prog - 0.5) * (inPoss ? 0.46 : 0.3) * SHAPE_FACTOR[s.pos] + (isFwd ? (inPoss ? 0.04 : -0.04) : 0) + ordDepth,
             0.1,
             0.9,
           );
           const ballG = s.side === 'user' ? (st.ballY - FY0) / (FY1 - FY0) : 1 - (st.ballY - FY0) / (FY1 - FY0);
           const g0 = BASE[s.pos][1];
-          const g = clamp(inPoss ? 0.5 + (g0 - 0.5) * 1.18 : g0 + (ballG - g0) * 0.22, 0.07, 0.93);
+          let g = clamp(inPoss ? 0.5 + (g0 - 0.5) * 1.18 : g0 + (ballG - g0) * 0.22, 0.07, 0.93);
+          if (ord === 'pontas' && wide) g = clamp(0.5 + (g - 0.5) * 1.45, 0.04, 0.96);
+          else if (ord === 'pontas' && s.pos === 'CM') g = clamp(0.5 + (g - 0.5) * 0.6, 0.2, 0.8);
+          else if (ord === 'recuar') g = 0.5 + (g - 0.5) * 0.72;
           const shape = toPoint(s.side, f, g);
           tx = shape.x + s.jx;
           ty = shape.y + s.jy;
@@ -1986,10 +1997,10 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
               tx = (tx + holderSlot.x - d * 55) / 2;
               ty = (ty + holderSlot.y + (Math.sign(MID_Y - holderSlot.y) || 1) * 46) / 2;
             }
-          } else if (s.key === presserKey && presserDist < 260) {
+          } else if (s.key === presserKey && presserDist < (ord === 'pressionar' ? 420 : 260)) {
             tx = ref.x - d * 16;
             ty = ref.y;
-            speedMul = 1.12;
+            speedMul = ord === 'pressionar' ? 1.28 : 1.12;
           } else {
             const m = get(`${otherSide(s.side)}-${MARK[s.pos]}`);
             if (m) {

@@ -293,6 +293,7 @@ export function MatchScreen({
             grassFade={Math.min(1, Math.max(0, (minute - 35) / 55)) * 0.7}
             liveRef={liveRef}
             home={homeSide}
+            order={coach && coach.activeShout && minute < coach.activeUntil ? coach.activeShout : null}
             ambience={ambience}
             crowd={crowd}
             onClip={onClip}
