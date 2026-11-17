@@ -15,19 +15,23 @@ export const mvpCss = `
   radial-gradient(95% 62% at 58% 30%, color-mix(in srgb, var(--mv, #8a6a20) 38%, #6b5018) 0, transparent 70%),
   linear-gradient(180deg, #17130b, #0a0a0c 55%, #050506); }
 .mvc-shine { position: absolute; inset: -20% -60%; background: linear-gradient(105deg, transparent 43%, rgba(255,240,190,.35) 50%, transparent 57%); transform: translateX(-60%); animation: mvcShine 4s ease-in-out infinite; mix-blend-mode: soft-light; pointer-events: none; }
-.mvc-bust { position: absolute; right: -3cqw; top: 6cqw; width: 80cqw; height: 66cqw; }
-.mvc-bust svg { width: 100%; height: 100%; display: block; filter: drop-shadow(0 3px 5px rgba(0,0,0,.55)); }
-.mvc-bust img { width: 100%; height: 100%; object-fit: cover; object-position: top; -webkit-mask-image: linear-gradient(#000 72%, transparent); mask-image: linear-gradient(#000 72%, transparent); }
-.mvc-l { position: absolute; left: 8.5cqw; top: 8cqw; display: grid; justify-items: center; gap: 2cqw; width: 18cqw; }
-.mvc-ovr { font: 900 20cqw/.85 'Bebas Neue', Inter, sans-serif; color: #f6e2a4; text-shadow: 0 2px 0 rgba(0,0,0,.5); }
-.mvc-pos { font: 900 7.4cqw/1 'Bebas Neue', Inter, sans-serif; letter-spacing: .06em; color: #f6e2a4; border-top: .5cqw solid rgba(246,226,164,.7); border-bottom: .5cqw solid rgba(246,226,164,.7); padding: 1cqw 0; width: 100%; text-align: center; }
-.mvc-crest { width: 12cqw; aspect-ratio: 1; border-radius: 50%; display: grid; place-items: center; font: 900 3.6cqw Inter, sans-serif; letter-spacing: 0; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.7); box-shadow: 0 0 0 .8cqw rgba(246,226,164,.85), 0 0 0 1.4cqw rgba(0,0,0,.5); }
-.mvc-emb { width: 11cqw; aspect-ratio: 1; display: grid; place-items: center; border-radius: 50%; border: .6cqw solid #f6e2a4; font-size: 6.4cqw; color: #f6e2a4; background: rgba(0,0,0,.35); }
-.mvc-name { position: absolute; left: 5cqw; right: 5cqw; top: 70cqw; text-align: center; font: 900 11.5cqw/1 'Bebas Neue', Inter, sans-serif; letter-spacing: .05em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #f6e2a4; padding-bottom: 1.6cqw; border-bottom: .5cqw solid rgba(246,226,164,.55); text-shadow: 0 2px 0 rgba(0,0,0,.6); }
-.mvc-stats { position: absolute; left: 8cqw; right: 8cqw; top: 87cqw; display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; font: 800 4.6cqw Inter, sans-serif; letter-spacing: .08em; color: rgba(246,226,164,.8); }
+.mvc-top { position: absolute; left: 0; right: 0; top: 7cqw; display: flex; align-items: center; justify-content: center; gap: 3cqw; font: 900 4.6cqw Inter, sans-serif; letter-spacing: .3em; color: #f6e2a4; }
+.mvc-top::before, .mvc-top::after { content: ''; width: 12cqw; height: .5cqw; background: linear-gradient(90deg, transparent, rgba(246,226,164,.8)); }
+.mvc-top::after { transform: scaleX(-1); }
+.mvc-medal { position: absolute; left: 50%; top: 14cqw; width: 70cqw; aspect-ratio: 1; transform: translateX(-50%); }
+.mvc-laurel { position: absolute; inset: 0; width: 100%; height: 100%; filter: drop-shadow(0 2px 3px rgba(0,0,0,.6)); }
+.mvc-disc { position: absolute; left: 50%; top: 50%; width: 55%; aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%; display: grid; place-items: center; background: conic-gradient(from 210deg, #7a5a1c, #fff3c4, #c9a24a, #fff3c4, #7a5a1c, #e9cf86, #7a5a1c); box-shadow: 0 0 6cqw rgba(246,200,90,.35), 0 3px 8px rgba(0,0,0,.6); }
+.mvc-disc::before { content: ''; position: absolute; inset: 1.8cqw; border-radius: 50%; background: radial-gradient(circle at 50% 35%, #2a2110, #0c0a06 72%); }
+.mvc-num { position: relative; text-align: center; line-height: .82; font: 900 italic 21cqw 'Bebas Neue', Inter, sans-serif; background: linear-gradient(180deg, #fff6cc 0%, #e8c870 50%, #a8802c 100%); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 2px 2px rgba(0,0,0,.6)); }
+.mvc-num small { display: block; margin-top: 1.4cqw; font: 800 3.6cqw Inter, sans-serif; font-style: normal; letter-spacing: .3em; padding-left: .3em; color: #f6e2a4; -webkit-text-fill-color: #f6e2a4; }
+.mvc-star { position: absolute; left: 50%; top: -2.5cqw; transform: translateX(-50%); font-size: 9cqw; line-height: 1; color: #ffe27a; text-shadow: 0 0 10px rgba(255,200,80,.9); }
+.mvc-chips { position: absolute; left: 0; right: 0; top: 84cqw; display: flex; justify-content: center; gap: 3cqw; }
+.mvc-chip { display: inline-flex; align-items: center; gap: 1.6cqw; padding: .8cqw 3.2cqw; border-radius: 99px; border: .5cqw solid rgba(246,226,164,.65); background: rgba(0,0,0,.4); font: 900 5cqw Inter, sans-serif; letter-spacing: .08em; color: #f6e2a4; }
+.mvc-chip i { width: 4.4cqw; height: 4.4cqw; border-radius: 50%; box-shadow: 0 0 0 .5cqw rgba(246,226,164,.8); }
+.mvc-name { position: absolute; left: 5cqw; right: 5cqw; top: 94cqw; text-align: center; font: 900 12cqw/1 'Bebas Neue', Inter, sans-serif; letter-spacing: .05em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #fff0bd; text-shadow: 0 2px 0 rgba(0,0,0,.6); }
+.mvc-stats { position: absolute; left: 10cqw; right: 10cqw; top: 107.5cqw; display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; font: 800 3.8cqw Inter, sans-serif; letter-spacing: .1em; color: rgba(246,226,164,.8); border-top: .5cqw solid rgba(246,226,164,.5); padding-top: 1.6cqw; }
 .mvc-stats span + span { border-left: .4cqw solid rgba(246,226,164,.3); }
-.mvc-stats b { display: block; margin-top: .6cqw; font: 900 13cqw/1 'Bebas Neue', Inter, sans-serif; color: #fff2c4; letter-spacing: 0; }
-.mvc-tag { position: absolute; left: 0; right: 0; top: 112cqw; text-align: center; font: 900 4.2cqw Inter, sans-serif; letter-spacing: .28em; color: rgba(246,226,164,.8); }
+.mvc-stats b { display: block; margin-top: .4cqw; font: 900 10cqw/1 'Bebas Neue', Inter, sans-serif; color: #fff2c4; letter-spacing: 0; }
 @keyframes mvcHolo { 0% { background-position: 0% 50%; } 100% { background-position: 300% 50%; } }
 @keyframes mvcShine { 0%, 55% { transform: translateX(-60%); } 100% { transform: translateX(60%); } }
 @media (prefers-reduced-motion: reduce) { .mvc-frame, .mvc-shine { animation: none; } }
@@ -75,45 +79,51 @@ export const mvpCss = `
 
 type Info = { player: Player; team: Pick<Team, 'abbreviation' | 'primary_color'>; rating: number; goals: number; assists: number };
 
+const LEAVES = (() => {
+  const out: { x: number; y: number; r: number; k: number }[] = [];
+  for (let i = 0; i < 11; i += 1) {
+    const a = ((100 + i * 14.5) * Math.PI) / 180; // ramo esquerdo: de baixo até o alto
+    const rad = 42;
+    out.push({ x: 50 + rad * Math.cos(a), y: 50 + rad * Math.sin(a), r: (a * 180) / Math.PI + 90 - 38, k: i });
+    out.push({ x: 100 - (50 + rad * Math.cos(a)), y: 50 + rad * Math.sin(a), r: 180 - ((a * 180) / Math.PI + 90 - 38), k: i });
+  }
+  return out;
+})();
+
 export function MvpCard({ player, team, rating, goals, assists }: Info) {
   return (
     <div className="mvc" style={{ ['--mv' as string]: team.primary_color }} aria-label={`MVP: ${player.name}, nota ${rating.toFixed(1)}`}>
       <style>{mvpCss}</style>
       <div className="mvc-frame" />
       <div className="mvc-body">
-        <div className="mvc-bust">
-          {player.image_url ? (
-            <img src={player.image_url} alt="" />
-          ) : (
-            <svg viewBox="0 0 100 90" preserveAspectRatio="xMidYMax meet" aria-hidden="true">
-              <defs>
-                <linearGradient id="mvs-skin" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0" stopColor="#f6dfa6" />
-                  <stop offset="1" stopColor="#b98a3c" />
-                </linearGradient>
-                <linearGradient id="mvs-kit" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0" stopColor="#fff" stopOpacity=".28" />
-                  <stop offset=".5" stopColor="#fff" stopOpacity="0" />
-                  <stop offset="1" stopColor="#000" stopOpacity=".35" />
-                </linearGradient>
-              </defs>
-              <path d="M2 90 C2 68 22 60 50 60 C78 60 98 68 98 90 Z" style={{ fill: 'var(--mv)' }} />
-              <path d="M2 90 C2 68 22 60 50 60 C78 60 98 68 98 90 Z" fill="url(#mvs-kit)" />
-              <path d="M30 62 L26 90 M70 62 L74 90" stroke="#f6e2a4" strokeWidth="2.2" strokeOpacity=".75" fill="none" />
-              <rect x="42" y="46" width="16" height="22" rx="7" fill="url(#mvs-skin)" />
-              <path d="M36 61 L50 78 L64 61 C58 66 42 66 36 61 Z" fill="url(#mvs-skin)" />
-              <path d="M36 61 L50 78 L64 61" fill="none" stroke="#f6e2a4" strokeWidth="2.4" strokeLinejoin="round" />
-              <ellipse cx="50" cy="31" rx="16.5" ry="20" fill="url(#mvs-skin)" />
-              <path d="M33 30 C32 10 68 10 67 30 C62 21 56 18 50 18 C44 18 38 21 33 30 Z" fill="#2b1f10" />
-              <ellipse cx="44" cy="24" rx="5" ry="3" fill="#fff" opacity=".22" />
-            </svg>
-          )}
+        <div className="mvc-top">MVP DA PARTIDA</div>
+        <div className="mvc-medal">
+          <svg className="mvc-laurel" viewBox="0 0 100 100" aria-hidden="true">
+            <defs>
+              <linearGradient id="mvl-g" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stopColor="#fff3c4" />
+                <stop offset=".5" stopColor="#d9b45a" />
+                <stop offset="1" stopColor="#8a6a20" />
+              </linearGradient>
+            </defs>
+            {LEAVES.map((l, i) => (
+              <ellipse key={i} cx={l.x} cy={l.y} rx={6.4 - l.k * 0.2} ry={2.5} fill="url(#mvl-g)" transform={`rotate(${l.r.toFixed(1)} ${l.x.toFixed(1)} ${l.y.toFixed(1)})`} />
+            ))}
+          </svg>
+          <div className="mvc-disc">
+            <div className="mvc-num">
+              {rating.toFixed(1)}
+              <small>NOTA</small>
+            </div>
+          </div>
+          <div className="mvc-star">★</div>
         </div>
-        <div className="mvc-l">
-          <div className="mvc-ovr">{player.overall}</div>
-          <div className="mvc-pos">{player.primary_position}</div>
-          <div className="mvc-crest" style={{ background: team.primary_color }}>{team.abbreviation.slice(0, 3)}</div>
-          <div className="mvc-emb">★</div>
+        <div className="mvc-chips">
+          <span className="mvc-chip">{player.primary_position}</span>
+          <span className="mvc-chip">
+            <i style={{ background: team.primary_color }} />
+            {team.abbreviation}
+          </span>
         </div>
         <div className="mvc-name">{player.name}</div>
         <div className="mvc-stats">
@@ -124,11 +134,8 @@ export function MvpCard({ player, team, rating, goals, assists }: Info) {
             ASSIST.<b>{assists}</b>
           </span>
           <span>
-            NOTA<b>{rating.toFixed(1)}</b>
+            OVERALL<b>{player.overall}</b>
           </span>
-        </div>
-        <div className="mvc-tag">
-          ★ MVP DA PARTIDA ★
         </div>
         <div className="mvc-shine" />
       </div>
