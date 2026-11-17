@@ -5,6 +5,7 @@ import { positionNames, type Player, type Team } from '@/lib/game/types';
 import { Badge, Card, LogoMark, SHIELD_CLIP } from '@/components/game/Card';
 import { useNewsUnseen } from '@/components/game/WhatsNew';
 import { useLite } from '@/lib/settings';
+import { HomeExtras, useDesktop } from '@/components/game/HomeExtras';
 
 const headerCss = `
 .topbar.hd { height: 68px; gap: 28px; position: sticky; top: 0; z-index: 30; border-bottom: 0;
@@ -35,6 +36,45 @@ const headerCss = `
 .hd .m-menu button { display: flex; align-items: center; gap: 12px; padding: 13px 14px; border: 0; border-radius: 10px; background: transparent; color: #fff; font-weight: 800; letter-spacing: 1px; font-size: 13px; text-transform: uppercase; text-align: left; cursor: pointer; }
 .hd .m-menu button.on, .hd .m-menu button:hover { background: rgba(245,184,0,.14); color: #F5B800; }
 @media (min-width: 851px) { .hd .m-menu { display: none; } .hd .mobile-menu { display: none; } }
+.hd .pc, .hd-nb { display: none; }
+@media (min-width: 861px) {
+  .topbar.hd { height: 76px; gap: 34px; background: linear-gradient(180deg, rgba(2,5,14,.98), rgba(5,9,22,.9)); }
+  .topbar.hd::after { height: 2px; background: linear-gradient(90deg, rgba(245,184,0,0), rgba(245,184,0,.85) 14%, rgba(245,184,0,.2) 50%, rgba(245,184,0,.7) 86%, rgba(245,184,0,0)); box-shadow: 0 0 18px rgba(245,184,0,.35); }
+  .hd .brand { position: relative; padding-right: 8px; }
+  .hd .brand .logo-mark, .hd .brand svg { filter: drop-shadow(0 0 12px rgba(245,184,0,.55)); }
+  .hd .brand b { font-size: 32px; letter-spacing: 5px; background: linear-gradient(180deg, #fff6c8, #F5B800 60%, #c98a00); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .hd .brand small { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 9px; letter-spacing: 3.4px; color: rgba(255,255,255,.7); }
+  .hd .brand small::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, rgba(245,184,0,.7), transparent); }
+  .hd nav { gap: 4px; }
+  .hd nav button { display: inline-flex; align-items: center; gap: 8px; padding: 12px 20px; border-radius: 4px 12px 4px 12px; font-size: 13px; letter-spacing: 2px; transition: color .2s, background .25s, box-shadow .25s; }
+  .hd nav button::after { left: 20px; right: 20px; bottom: 5px; }
+  .hd nav button:hover { background: rgba(255,255,255,.05); }
+  .hd nav button.on { color: #ffe27a; background: linear-gradient(180deg, rgba(245,184,0,.16), rgba(245,184,0,.03)); box-shadow: inset 0 0 0 1px rgba(245,184,0,.28), 0 8px 24px -8px rgba(245,184,0,.45); }
+  .hd-nb { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; background: #22c55e; color: #04140a; font: 900 10px Inter, sans-serif; letter-spacing: 0; box-shadow: 0 0 10px rgba(34,197,94,.6); }
+  .hd-nb.warn { background: #ef4444; color: #fff; box-shadow: 0 0 10px rgba(239,68,68,.65); }
+  .hd .gear { width: 44px; height: 44px; border-radius: 4px 14px 4px 14px; background: linear-gradient(160deg, rgba(255,255,255,.08), rgba(255,255,255,.02)); transition: transform .2s, border-color .2s, box-shadow .2s, color .2s; }
+  .hd .gear:hover { transform: translateY(-2px); box-shadow: 0 8px 20px -6px rgba(245,184,0,.5); }
+  .hd-ping::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 1px solid #F5B800; animation: hdPing 1.8s ease-out infinite; }
+  @keyframes hdPing { from { transform: scale(.6); opacity: .9; } to { transform: scale(1.9); opacity: 0; } }
+  .hd .profile-button { padding: 5px 20px 5px 5px; gap: 12px; border-radius: 4px 20px 4px 20px; border-color: rgba(245,184,0,.5); background: linear-gradient(100deg, rgba(245,184,0,.2), rgba(255,255,255,.03)); box-shadow: inset 0 1px 0 rgba(255,255,255,.1); }
+  .hd .pv { width: 40px; height: 40px; font-size: 20px; font-family: 'Bebas Neue', Inter, sans-serif; box-shadow: 0 0 0 2px #05091a, 0 0 0 3.5px rgba(245,184,0,.85), 0 0 16px rgba(245,184,0,.45); }
+  .hd .pn { display: flex; flex-direction: column; line-height: 1.1; max-width: 150px; }
+  .hd .pnn { overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
+  .hd .pc { display: block; margin-top: 3px; font-size: 9px; font-weight: 800; letter-spacing: 2px; color: #F5B800; text-transform: uppercase; }
+}
+@media (min-width: 861px) and (max-width: 1279px) {
+  .topbar.hd { gap: 14px; padding: 0 16px; }
+  .hd .brand b { font-size: 26px; letter-spacing: 3px; }
+  .hd .brand small { display: none; }
+  .hd nav { gap: 0; }
+  .hd nav button { padding: 10px 9px; font-size: 11px; letter-spacing: 1px; gap: 5px; }
+  .hd nav button::after { left: 9px; right: 9px; }
+  .hd .gear { width: 38px; height: 38px; }
+  .hd .profile-button { gap: 8px; padding: 4px 12px 4px 4px; }
+  .hd .pv { width: 34px; height: 34px; font-size: 17px; }
+  .hd .pn { max-width: 96px; }
+  .hd .pc { display: none; }
+}
 @media (max-width: 850px) { .hd nav { display: none; } .hd .mobile-menu { display: grid; margin-left: 0; } .hd .gear { margin-left: auto; } .hd .profile-button { margin-left: 0; } }
 @media (max-width: 560px) { .topbar.hd { height: 58px; gap: 10px; padding: 0 12px; } .hd .brand b { font-size: 22px; } .hd .brand small { display: none; }
   .hd .profile-button { padding: 4px 10px 4px 4px; font-size: 12px; } .hd .pv { width: 28px; height: 28px; } .hd .pn { max-width: 80px; } }
@@ -54,6 +94,8 @@ export function Header({
   onNews,
   loggedIn,
   active,
+  friendsOnline = 0,
+  friendsPending = false,
 }: {
   nickname: string;
   isAdmin: boolean;
@@ -68,6 +110,8 @@ export function Header({
   onNews?: () => void;
   loggedIn: boolean;
   active: string;
+  friendsOnline?: number;
+  friendsPending?: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const newsUnseen = useNewsUnseen();
@@ -96,13 +140,16 @@ export function Header({
         {links.map((l) => (
           <button key={l.key} className={active === l.key ? 'on' : ''} onClick={l.run}>
             {l.label}
+            {l.key === 'friends' && (friendsPending || friendsOnline > 0) && (
+              <i className={`hd-nb ${friendsPending ? 'warn' : ''}`}>{friendsPending ? '!' : friendsOnline}</i>
+            )}
           </button>
         ))}
       </nav>
       {onNews && (
         <button className="gear" aria-label="O que há de novo" title="O que há de novo" onClick={onNews} style={{ position: 'relative' }}>
           <Sparkles size={18} />
-          {newsUnseen && <i style={{ position: 'absolute', top: 4, right: 4, width: 8, height: 8, borderRadius: 99, background: '#F5B800' }} />}
+          {newsUnseen && <i className="hd-ping" style={{ position: 'absolute', top: 4, right: 4, width: 8, height: 8, borderRadius: 99, background: '#F5B800' }} />}
         </button>
       )}
       {onSettings && (
@@ -112,7 +159,10 @@ export function Header({
       )}
       <button className="profile-button" onClick={loggedIn ? onProfile : onLogin}>
         <span className="pv">{(nickname || '?').slice(0, 1)}</span>
-        <span className="pn">{loggedIn ? nickname : 'Entrar'}</span>
+        <span className="pn">
+          <span className="pnn">{loggedIn ? nickname : 'Entrar'}</span>
+          <small className="pc">{loggedIn ? 'Conta ativa' : 'Convidado'}</small>
+        </span>
       </button>
       <button
         className="mobile-menu"
@@ -292,12 +342,82 @@ const homeCss = `
   .hm-item small { display: none; }
   .hm-item.on { transform: none; border-color: #F5B800; box-shadow: 0 0 0 1px #F5B800, 0 8px 22px rgba(245,184,0,.25); background: linear-gradient(180deg, rgba(245,184,0,.32), rgba(245,184,0,.06)); }
   .hm-item:hover { transform: none; }
-  .hm-item:last-child:nth-child(3n + 1) { grid-column: 1 / -1; flex-direction: row; min-height: 64px; gap: 10px; }
-  .hm-item:last-child:nth-child(3n + 1) small { display: none; }
+  .hm-item:last-of-type:nth-of-type(3n + 1) { grid-column: 1 / -1; flex-direction: row; min-height: 64px; gap: 10px; }
+  .hm-item:last-of-type:nth-of-type(3n + 1) small { display: none; }
   .hm-item.on svg { color: #F5B800; }
   .hm-badge { position: absolute; top: -7px; left: 50%; right: auto; transform: translateX(-50%); margin: 0; font-size: 9px; padding: 2px 7px; }
   .hm-dot { top: 8px; right: 10px; }
 }
+
+/* ===== DESKTOP (≥ 861px): visual cinematográfico inspirado no FC 27. O celular não usa nada daqui. ===== */
+.hm-fx, .hm-beam, .hm-streaks, .hm-floor, .hm-sep { display: none; }
+@media (min-width: 861px) {
+  .hm-fx { display: block; position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+  .hm-fx::before { content: ''; position: absolute; inset: 0; background: repeating-linear-gradient(-62deg, rgba(255,255,255,.022) 0 1px, transparent 1px 6px); }
+  .hm-fx::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 46%; background: radial-gradient(80% 100% at 50% 100%, rgba(34,170,92,.2), transparent 72%), linear-gradient(0deg, rgba(2,6,16,.55), transparent 60%); }
+  .hm-cone { position: absolute; top: -8%; height: 112%; width: 64vw; transform: translateX(-50%); mix-blend-mode: screen; opacity: .55; will-change: opacity; animation: hmCone 9s ease-in-out infinite alternate; }
+  .hm-cone.c1 { left: 8%;  background: conic-gradient(from 150deg at 50% 0, transparent 0, rgba(165,205,255,.26) 12deg, transparent 26deg, transparent 360deg); }
+  .hm-cone.c2 { left: 27%; background: conic-gradient(from 160deg at 50% 0, transparent 0, rgba(190,220,255,.34) 12deg, transparent 26deg, transparent 360deg); animation-delay: -3s; }
+  .hm-cone.c3 { left: 73%; background: conic-gradient(from 174deg at 50% 0, transparent 0, rgba(190,220,255,.34) 12deg, transparent 26deg, transparent 360deg); animation-delay: -5s; }
+  .hm-cone.c4 { left: 92%; background: conic-gradient(from 184deg at 50% 0, transparent 0, rgba(165,205,255,.26) 12deg, transparent 26deg, transparent 360deg); animation-delay: -1s; }
+  @keyframes hmCone { from { opacity: .35; } to { opacity: .7; } }
+  .hm-flare { position: absolute; top: 4%; width: 220px; height: 220px; margin: -110px 0 0 -110px; border-radius: 50%; background: radial-gradient(closest-side, rgba(255,255,255,.55), rgba(190,220,255,.18) 40%, transparent); mix-blend-mode: screen; }
+  .hm-flare.f1 { left: 27%; } .hm-flare.f2 { left: 73%; }
+  .hm-haze { position: absolute; left: 0; right: 0; top: 38%; height: 34%; background: linear-gradient(180deg, transparent, rgba(80,130,225,.13) 50%, transparent); }
+  .hm-grain { position: absolute; inset: 0; opacity: .08; mix-blend-mode: overlay; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E"); }
+  .hm-vignette { background: radial-gradient(95% 95% at 50% 42%, transparent 38%, rgba(0,0,0,.72)); }
+
+  .hm-wrap { grid-template-columns: clamp(300px, 21.5vw, 400px) 1fr; padding-bottom: 36px; }
+  .hm-side { gap: 7px; }
+  .hm-item { padding-left: 18px; border-radius: 4px 16px 4px 16px; border-color: rgba(255,255,255,.08); background: linear-gradient(100deg, rgba(14,24,48,.74), rgba(6,10,22,.62));
+    box-shadow: 0 6px 18px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.05); }
+  .hm-item svg { stroke-width: 1.9; }
+  .hm-item:hover { border-color: rgba(245,184,0,.42); background: linear-gradient(100deg, rgba(245,184,0,.12), rgba(8,14,30,.7)); }
+  .hm-item.on, .hm-item:focus-visible { border-color: rgba(245,184,0,.6); background: linear-gradient(100deg, rgba(245,184,0,.3), rgba(245,184,0,.08) 55%, rgba(6,10,22,.62));
+    box-shadow: inset 4px 0 0 #F5B800, 0 0 0 1px rgba(245,184,0,.3), 0 16px 36px rgba(0,0,0,.55), -14px 0 44px -10px rgba(245,184,0,.5); }
+  .hm-item.on .hm-ico::after { content: ''; position: absolute; inset: -6px; border-radius: 16px; border: 1px solid rgba(245,184,0,.55); animation: hmRing 2.2s ease-out infinite; pointer-events: none; }
+  @keyframes hmRing { from { transform: scale(.88); opacity: .9; } to { transform: scale(1.18); opacity: 0; } }
+  .hm-item.on .hm-ico { background: linear-gradient(160deg, #fff0a0, #F5B800 55%, #c98a00); }
+  .hm-item.on small { opacity: .85; color: #ffe9a8; }
+  .hm-sep { display: flex; align-items: center; gap: 12px; margin: 10px 4px 2px; font: 800 10px Inter, sans-serif; letter-spacing: 3.5px; color: rgba(255,255,255,.42); }
+  .hm-sep::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, rgba(245,184,0,.45), transparent); }
+  .hm-item.sec { padding-top: 8px; padding-bottom: 8px; gap: 12px; }
+  .hm-item.sec .hm-ico { width: 34px; height: 34px; border-radius: 9px; }
+  .hm-item.sec svg { width: 18px; height: 18px; }
+  .hm-item.sec b { font-size: 12.5px; letter-spacing: 1.4px; }
+  .hm-item.sec small { display: none; }
+
+  .hm-banner { border: 1px solid rgba(245,184,0,.2); border-radius: 6px 40px 6px 40px; padding-left: clamp(52px, 5.4vw, 104px);
+    background: linear-gradient(112deg, rgba(5,10,26,.9) 0%, rgba(8,16,38,.72) 50%, rgba(44,32,6,.5) 100%);
+    box-shadow: 0 44px 100px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.09), inset 0 0 140px rgba(0,0,0,.4); }
+  .hm-banner::after { content: ''; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+    background: radial-gradient(52% 85% at 77% 44%, rgba(245,184,0,.2), transparent 70%), linear-gradient(180deg, rgba(255,255,255,.05), transparent 26%); }
+  .hm-eyebrow { display: flex; align-items: center; gap: 8px; font-size: 12.5px; letter-spacing: 4px; }
+  .hm-eyebrow::after { content: ''; width: 72px; height: 1px; background: linear-gradient(90deg, #F5B800, transparent); margin-left: 8px; }
+  .hm-copy { container-type: inline-size; }
+  .hm-title { font-family: 'Bebas Neue', Inter, sans-serif; font-style: normal; font-weight: 400; font-size: min(clamp(64px, 7.2vw, 150px), 22cqw); line-height: .84; letter-spacing: .02em; margin: 12px 0 18px; text-shadow: 0 8px 36px rgba(0,0,0,.65); }
+  .hm-title em { font-style: normal; background: linear-gradient(180deg, #fff4b0 0%, #F5B800 52%, #c98a00 100%); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 0 26px rgba(245,184,0,.4)); }
+  .hm-text { font-size: clamp(16px, 1.1vw, 19px); line-height: 1.65; opacity: .78; max-width: clamp(380px, 28vw, 520px); margin-bottom: 38px; }
+  .hm-cta { gap: 18px; padding: 16px 20px 16px 52px; font-family: 'Bebas Neue', Inter, sans-serif; font-weight: 400; font-size: 34px; letter-spacing: 5px; clip-path: polygon(22px 0, 100% 0, calc(100% - 22px) 100%, 0 100%);
+    background: linear-gradient(180deg, #fff6bf 0%, #ffd84a 34%, #F5B800 62%, #cf9200 100%); box-shadow: inset 0 2px 0 rgba(255,255,255,.75), inset 0 -4px 0 rgba(120,70,0,.4); }
+  .hm-cta svg { width: 46px; height: 46px; padding: 9px; border-radius: 50%; background: #1a1200; color: #ffd84a; box-shadow: 0 0 0 3px rgba(26,18,0,.25); }
+  .hm-cta-wrap { margin-top: 2px; }
+  .hm-sub { font-size: 12px; letter-spacing: 3px; opacity: .55; }
+
+  .hm-hero { min-height: clamp(420px, 48vh, 680px); }
+  .hm-tilt { width: min(100%, clamp(250px, 19vw, 380px)); }
+  .hm-mark { -webkit-text-stroke: 2px rgba(245,184,0,.13); }
+  .hm-halo { width: 92%; background: radial-gradient(circle, rgba(245,184,0,.46), rgba(245,184,0,.1) 45%, transparent 68%); }
+  .hm-beam { display: block; position: absolute; z-index: 0; top: -22%; left: 50%; width: 150%; height: 128%; transform: translateX(-50%); pointer-events: none; mix-blend-mode: screen;
+    background: conic-gradient(from 163deg at 50% 0, transparent 0, rgba(255,238,175,.34) 17deg, transparent 34deg, transparent 360deg); -webkit-mask-image: linear-gradient(180deg, #000 10%, transparent 82%); mask-image: linear-gradient(180deg, #000 10%, transparent 82%); }
+  .hm-streaks { display: block; position: absolute; z-index: 0; inset: -14% -34%; pointer-events: none;
+    background: repeating-linear-gradient(-64deg, transparent 0 58px, rgba(245,184,0,.2) 58px 59px, transparent 59px 138px), repeating-linear-gradient(-64deg, transparent 0 170px, rgba(255,230,140,.26) 170px 172px, transparent 172px 340px);
+    -webkit-mask-image: radial-gradient(closest-side, #000 28%, transparent 100%); mask-image: radial-gradient(closest-side, #000 28%, transparent 100%); }
+  .hm-floor { display: block; position: absolute; z-index: 0; left: 50%; bottom: 14px; width: 96%; height: 70px; transform: translateX(-50%); pointer-events: none; background: radial-gradient(closest-side, rgba(245,184,0,.34), transparent); }
+  .hm-cap { color: #ffe27a; letter-spacing: 3px; font-size: 13px; }
+  .hm-cap b { font-family: 'Bebas Neue', Inter, sans-serif; font-weight: 400; font-size: 34px; letter-spacing: 1px; vertical-align: -5px; }
+}
+.hm-lite .hm-cone, .hm-lite .hm-item.on .hm-ico::after, .hm-lite .hd-ping::after { animation: none !important; }
 /* Modo otimizado: sem animações contínuas no menu */
 .hm-lite .hm-banner::before, .hm-lite .hm-cta::before, .hm-lite .hm-cta-wrap::before, .hm-lite .hm-mark, .hm-lite .hm-halo, .hm-lite .hm-float, .hm-lite .hm-ground, .hm-lite .hm-spark, .hm-lite .hm-fc.c .hm-shine, .hm-lite .hm-dot { animation: none !important; }
 .hm-lite .hm-spark { display: none; }
@@ -351,6 +471,7 @@ export function Home({
   install?: { canInstall: boolean; needsIosSteps: boolean; install: () => Promise<void> };
 }) {
   const lite = useLite();
+  const desktop = useDesktop();
   const [sel, setSel] = useState<HomeKey>('play');
   const [iosHelp, setIosHelp] = useState(false);
   const newsUnseen = useNewsUnseen();
@@ -432,6 +553,16 @@ export function Home({
       <style>{homeCss}</style>
       <div className="hm-bg" aria-hidden="true">
         <div className="hm-shade" />
+        <div className="hm-fx">
+          <i className="hm-cone c1" />
+          <i className="hm-cone c2" />
+          <i className="hm-cone c3" />
+          <i className="hm-cone c4" />
+          <i className="hm-flare f1" />
+          <i className="hm-flare f2" />
+          <i className="hm-haze" />
+          <i className="hm-grain" />
+        </div>
         <div className="hm-vignette" />
       </div>
       <div className="hm-flash" aria-hidden="true" />
@@ -458,8 +589,9 @@ export function Home({
               {!item.badge && item.dot && <i className="hm-dot" />}
             </button>
           ))}
+          <div className="hm-sep" aria-hidden="true">MAIS</div>
           {install && (install.canInstall || install.needsIosSteps) && (
-            <button className="hm-item" onClick={() => (install.canInstall ? void install.install() : setIosHelp(true))}>
+            <button className="hm-item sec" onClick={() => (install.canInstall ? void install.install() : setIosHelp(true))}>
               <span className="hm-ico"><Download size={22} /></span>
               <span>
                 <b>Instalar app</b>
@@ -469,7 +601,7 @@ export function Home({
             </button>
           )}
           {onNews && (
-            <button className="hm-item" onClick={onNews}>
+            <button className="hm-item sec" onClick={onNews}>
               <span className="hm-ico"><Sparkles size={22} /></span>
               <span>
                 <b>O que há de novo</b>
@@ -479,7 +611,7 @@ export function Home({
             </button>
           )}
           {onSettings && (
-            <button className="hm-item" onClick={onSettings}>
+            <button className="hm-item sec" onClick={onSettings}>
               <span className="hm-ico"><Settings size={22} /></span>
               <span>
                 <b>Configurações</b>
@@ -488,7 +620,7 @@ export function Home({
             </button>
           )}
           {isAdmin && (
-            <button className="hm-item" onClick={onAdmin}>
+            <button className="hm-item sec" onClick={onAdmin}>
               <span className="hm-ico"><Shield size={22} /></span>
               <span>
                 <b>Admin</b>
@@ -524,7 +656,10 @@ export function Home({
           </div>
           <div className="hm-hero">
             <div className="hm-mark" aria-hidden="true">7V7</div>
+            <i className="hm-beam" aria-hidden="true" />
+            <i className="hm-streaks" aria-hidden="true" />
             <div className="hm-halo" />
+            <i className="hm-floor" aria-hidden="true" />
             <div className="hm-tilt">
               {featured.length > 0 ? (
                 <div className="hm-fan">
@@ -556,6 +691,7 @@ export function Home({
           </div>
         </section>
       </div>
+      {desktop && <HomeExtras featured={featured} loggedIn={loggedIn} offline={offline} onLeaderboard={onLeaderboard} onTournament={onTournament} onNews={onNews} />}
       {iosHelp && (
         <div className="hm-ios" role="dialog" aria-label="Como instalar no iPhone" onClick={() => setIosHelp(false)}>
           <div onClick={(e) => e.stopPropagation()}>

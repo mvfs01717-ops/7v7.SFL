@@ -2171,6 +2171,8 @@ function App() {
         onLogin={() => setShowLogin(true)}
         loggedIn={!!userId}
         active={screen}
+        friendsOnline={friends.rows.filter((row) => row.status === 'accepted' && friends.online.has(row.user_id)).length}
+        friendsPending={friends.rows.some((row) => row.status === 'pending' && row.incoming)}
       />
 
       {mpNotice && (

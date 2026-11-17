@@ -16,6 +16,9 @@ function readSeen() {
 }
 let seen = typeof window === 'undefined' ? true : readSeen();
 
+// Novidades mais recentes (os primeiros itens da lista da versão), para a tela inicial
+export const newsHighlights = (n = 4) => NEWS.flatMap((g) => g.items.map((i) => ({ ...i, group: g.title }))).slice(0, n);
+
 export function markNewsSeen() {
   seen = true;
   try {

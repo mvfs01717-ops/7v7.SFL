@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { BarChart3, Crown, RefreshCw, Zap } from 'lucide-react';
 import { type Shootout } from '@/components/PenaltyShootout';
 import { slotOf } from '@/lib/game/helpers';
 import { type GoalRecord, type MatchEvent, type MatchStats, type Player, type Team } from '@/lib/game/types';
 import { TeamMark } from '@/components/game/Card';
 import { MvpCard, MvpReveal } from '@/components/game/Mvp';
+import { recordMvp } from '@/lib/mvpLog';
 import { EventIcon } from '@/components/game/MatchScreen';
 import { MatchMapPanel } from '@/components/game/MatchMapPanel';
 import type { MatchMapData } from '@/lib/game/matchMap';
@@ -127,6 +128,12 @@ export function ResultsScreen({
   const mvpTeam = mvpMine ? club : opponent;
   // A revelação do MVP entra um instante depois da tela de resultado e só aparece uma vez por partida
   const [mvpOpen, setMvpOpen] = useState(false);
+  const mvpKey = useRef(`${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`);
+  useEffect(() => {
+    // Guarda este MVP na lista da tela inicial (só neste aparelho)
+    if (mvp) recordMvp({ key: mvpKey.current, player: mvp.player, team: { abbreviation: mvpTeam.abbreviation, primary_color: mvpTeam.primary_color }, rating: mvp.rating, goals: mvp.info.goals, assists: mvp.info.assists, mine: mvpMine });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     if (!mvp) return undefined;
     const id = window.setTimeout(() => setMvpOpen(true), 1500);
