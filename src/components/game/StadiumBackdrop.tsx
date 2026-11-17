@@ -23,6 +23,11 @@ const css = `
   linear-gradient(180deg, rgba(4, 10, 30, .34) 0%, rgba(4, 10, 30, .16) 40%, rgba(3, 6, 16, .6) 100%),
   rgba(8, 20, 60, .16); }
 .bd-vig { position: absolute; inset: 0; background: radial-gradient(90% 90% at 50% 45%, transparent 40%, rgba(0, 0, 0, .62)); }
+/* Celular (vertical): enquadra o campo e as luzes do estádio no centro e escurece topo/base para os textos e a barra inferior */
+@media (max-width: 860px) {
+  .bd-cam { background-position: 56% 58%; }
+  .bd-shade { background: rgba(3, 7, 20, var(--dim)), linear-gradient(180deg, rgba(4, 10, 30, .5) 0%, rgba(4, 10, 30, .12) 28%, rgba(3, 6, 16, .35) 62%, rgba(2, 4, 12, .85) 100%), rgba(8, 20, 60, .14); }
+}
 @media (prefers-reduced-motion: reduce) { .bd-cam, .bd-shade { transition: none; } }
 .bd-lite .bd-cam, .bd-lite .bd-shade { transition: none; will-change: auto; }
 `;

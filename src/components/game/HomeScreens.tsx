@@ -5,7 +5,7 @@ import { positionNames, type Player, type Team } from '@/lib/game/types';
 import { Badge, Card, LogoMark, SHIELD_CLIP } from '@/components/game/Card';
 import { useNewsUnseen } from '@/components/game/WhatsNew';
 import { useLite } from '@/lib/settings';
-import { HomeExtras, useDesktop } from '@/components/game/HomeExtras';
+import { HomeExtras } from '@/components/game/HomeExtras';
 
 const headerCss = `
 .topbar.hd { height: 68px; gap: 28px; position: sticky; top: 0; z-index: 30; border-bottom: 0;
@@ -78,6 +78,20 @@ const headerCss = `
 @media (max-width: 850px) { .hd nav { display: none; } .hd .mobile-menu { display: grid; margin-left: 0; } .hd .gear { margin-left: auto; } .hd .profile-button { margin-left: 0; } }
 @media (max-width: 560px) { .topbar.hd { height: 58px; gap: 10px; padding: 0 12px; } .hd .brand b { font-size: 22px; } .hd .brand small { display: none; }
   .hd .profile-button { padding: 4px 10px 4px 4px; font-size: 12px; } .hd .pv { width: 28px; height: 28px; } .hd .pn { max-width: 80px; } }
+/* ===== CELULAR: cabeçalho compacto (a navegação fica na barra inferior) ===== */
+@media (max-width: 860px) {
+  .topbar.hd { height: 56px; gap: 8px; padding: 0 12px; background: linear-gradient(180deg, rgba(2,5,14,.99), rgba(5,9,22,.93)); }
+  .topbar.hd::after { height: 1.5px; background: linear-gradient(90deg, rgba(245,184,0,0), rgba(245,184,0,.8) 20%, rgba(245,184,0,.25) 60%, rgba(245,184,0,0)); box-shadow: 0 0 12px rgba(245,184,0,.3); }
+  .hd .brand { gap: 8px; margin-right: auto; }
+  .hd .brand .logo-mark, .hd .brand svg { filter: drop-shadow(0 0 8px rgba(245,184,0,.5)); }
+  .hd .brand > span:last-child { display: flex; flex-direction: column; }
+  .hd .brand b { font-size: 24px; letter-spacing: 3.5px; line-height: .9; background: linear-gradient(180deg, #fff6c8, #F5B800 62%, #c98a00); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .hd .brand small { display: block; margin-top: 2px; font-size: 7.5px; letter-spacing: 2.6px; color: rgba(255,255,255,.6); }
+  .hd .gear { width: 40px; height: 40px; margin-left: 0; border-radius: 12px; }
+  .hd .profile-button { margin-left: 0; padding: 3px; border-radius: 99px; gap: 0; }
+  .hd .pn { display: none; }
+  .hd .pv { width: 34px; height: 34px; font-size: 17px; font-family: 'Bebas Neue', Inter, sans-serif; box-shadow: 0 0 0 2px #05091a, 0 0 0 3px rgba(245,184,0,.85); }
+}
 `;
 
 export function Header({
@@ -421,6 +435,31 @@ const homeCss = `
 /* Modo otimizado: sem animações contínuas no menu */
 .hm-lite .hm-banner::before, .hm-lite .hm-cta::before, .hm-lite .hm-cta-wrap::before, .hm-lite .hm-mark, .hm-lite .hm-halo, .hm-lite .hm-float, .hm-lite .hm-ground, .hm-lite .hm-spark, .hm-lite .hm-fc.c .hm-shine, .hm-lite .hm-dot { animation: none !important; }
 .hm-lite .hm-spark { display: none; }
+/* ===== CELULAR (≤ 860px): interface própria, vertical e feita para o polegar. O computador não usa nada daqui. ===== */
+@media (max-width: 860px) {
+  .hm-wrap { gap: 14px; padding: 8px 12px 18px; }
+  .hm-banner { padding: 20px 16px 22px; border: 1px solid rgba(245,184,0,.3); border-radius: 8px 30px 8px 30px;
+    background: radial-gradient(80% 42% at 50% 14%, rgba(245,184,0,.3), transparent 72%), repeating-linear-gradient(-62deg, rgba(255,255,255,.028) 0 1px, transparent 1px 8px), linear-gradient(180deg, rgba(12,22,46,.9), rgba(3,6,14,.96));
+    box-shadow: 0 20px 44px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,226,122,.18); }
+  .hm-hero { padding: 26px 0 50px; }
+  .hm-tilt { width: 138px; }
+  .hm-copy { container-type: inline-size; }
+  .hm-title { font-family: 'Bebas Neue', Inter, sans-serif; font-style: normal; font-weight: 400; font-size: min(60px, 17.5cqw); line-height: .86; letter-spacing: .02em; margin: 8px 0 10px; text-shadow: 0 6px 24px rgba(0,0,0,.6); }
+  .hm-title em { font-style: normal; background: linear-gradient(180deg, #fff4b0 0%, #F5B800 52%, #c98a00 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .hm-cta { padding: 17px 20px; font-size: 21px; min-height: 58px; }
+  .hm-side { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .hm-item[data-k="squad"], .hm-item[data-k="rank"], .hm-item[data-k="profile"], .hm-item[data-k="news"], .hm-item[data-k="settings"] { display: none; }
+  .hm-item, .hm-item:last-of-type:nth-of-type(3n + 1) { flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; padding: 12px 12px; min-height: 76px; text-align: left; grid-column: auto;
+    border-radius: 6px 18px 6px 18px; border: 1px solid rgba(255,255,255,.1); background: linear-gradient(160deg, rgba(18,30,60,.82), rgba(6,10,22,.88)); box-shadow: 0 10px 24px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.06); }
+  .hm-item .hm-ico { width: 42px; height: 42px; border-radius: 12px; }
+  .hm-item svg { width: 22px; height: 22px; }
+  .hm-item b { font-size: 13px; letter-spacing: 1.2px; }
+  .hm-item small, .hm-item:last-of-type:nth-of-type(3n + 1) small { display: block; margin-top: 2px; font-size: 10.5px; line-height: 1.2; opacity: .55; }
+  .hm-item.on { transform: none; border-color: rgba(245,184,0,.6); background: linear-gradient(160deg, rgba(245,184,0,.2), rgba(6,10,22,.9)); box-shadow: 0 0 0 1px rgba(245,184,0,.5), 0 10px 26px rgba(245,184,0,.18); }
+  .hm-item:active { transform: scale(.97); }
+  .hm-item.sec { grid-column: 1 / -1; min-height: 60px; }
+  .hm-badge { top: 7px; right: 8px; left: auto; transform: none; font-size: 9px; padding: 2px 7px; }
+}
 @media (prefers-reduced-motion: reduce) { .hm *, .hm *::before, .hm-leave { animation: none !important; transition: none !important; } }
 `;
 
@@ -471,7 +510,6 @@ export function Home({
   install?: { canInstall: boolean; needsIosSteps: boolean; install: () => Promise<void> };
 }) {
   const lite = useLite();
-  const desktop = useDesktop();
   const [sel, setSel] = useState<HomeKey>('play');
   const [iosHelp, setIosHelp] = useState(false);
   const newsUnseen = useNewsUnseen();
@@ -572,6 +610,7 @@ export function Home({
           {items.map((item) => (
             <button
               key={item.key}
+              data-k={item.key}
               className={`hm-item ${sel === item.key ? 'on' : ''}`}
               onMouseEnter={() => setSel(item.key)}
               onFocus={() => setSel(item.key)}
@@ -601,7 +640,7 @@ export function Home({
             </button>
           )}
           {onNews && (
-            <button className="hm-item sec" onClick={onNews}>
+            <button className="hm-item sec" data-k="news" onClick={onNews}>
               <span className="hm-ico"><Sparkles size={22} /></span>
               <span>
                 <b>O que há de novo</b>
@@ -611,7 +650,7 @@ export function Home({
             </button>
           )}
           {onSettings && (
-            <button className="hm-item sec" onClick={onSettings}>
+            <button className="hm-item sec" data-k="settings" onClick={onSettings}>
               <span className="hm-ico"><Settings size={22} /></span>
               <span>
                 <b>Configurações</b>
@@ -691,7 +730,7 @@ export function Home({
           </div>
         </section>
       </div>
-      {desktop && <HomeExtras featured={featured} loggedIn={loggedIn} offline={offline} onLeaderboard={onLeaderboard} onTournament={onTournament} onNews={onNews} />}
+      {<HomeExtras featured={featured} loggedIn={loggedIn} offline={offline} onLeaderboard={onLeaderboard} onTournament={onTournament} onNews={onNews} />}
       {iosHelp && (
         <div className="hm-ios" role="dialog" aria-label="Como instalar no iPhone" onClick={() => setIosHelp(false)}>
           <div onClick={(e) => e.stopPropagation()}>

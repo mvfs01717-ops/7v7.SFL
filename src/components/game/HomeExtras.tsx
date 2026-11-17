@@ -72,6 +72,18 @@ export const homeExtrasCss = `
 .hx-news .ic { font-size: 22px; line-height: 1; } .hx-news b { display: block; font-size: 14px; } .hx-news p { margin: 3px 0 0; font-size: 12.5px; line-height: 1.45; opacity: .68; }
 .hx-news small { display: block; font: 800 9px Inter, sans-serif; letter-spacing: 1.6px; color: #F5B800; margin-bottom: 3px; }
 @media (max-width: 1180px) { .s7, .s5, .s6 { grid-column: span 12; } }
+@media (max-width: 860px) {
+  .hx { display: flex; flex-direction: column; gap: 12px; padding: 0 12px 22px; }
+  .hx-p { padding: 16px 14px; border-radius: 6px 18px 6px 18px; animation: none; box-shadow: 0 14px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.05); }
+  .hx-h { margin-bottom: 12px; } .hx-h h2 { font-size: 13px; letter-spacing: 2.4px; }
+  .hx-cards { flex-wrap: nowrap; overflow-x: auto; gap: 12px; margin: 0 -14px; padding: 2px 14px 8px; scroll-snap-type: x proximity; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .hx-cards::-webkit-scrollbar { display: none; }
+  .hx-card { flex: none; width: 132px; scroll-snap-align: start; } .hx-card.dc { width: 112px; }
+  .hx-card:hover { transform: none; }
+  .hx-rank li { gap: 10px; padding: 10px; }
+  .hx-m { grid-template-columns: 1fr auto 1fr; gap: 8px; font-size: 13px; } .hx-m small { grid-column: 1 / -1; text-align: center; }
+  .hx-news li { padding: 11px 12px; }
+}
 @media (prefers-reduced-motion: reduce) { .hx-p { animation: none; } }
 `;
 

@@ -16,6 +16,7 @@ import { cardCss } from '@/components/game/Card';
 import { DiceDraftScreen } from '@/components/game/DiceDraftScreen';
 import { DraftScreen } from '@/components/game/DraftScreen';
 import { ClubChoice, Header, Home } from '@/components/game/HomeScreens';
+import MobileNav from '@/components/game/MobileNav';
 import { LoadingScreen } from '@/components/game/LoadingScreen';
 import { Leaderboard } from '@/components/game/Leaderboard';
 import { ProfileScreen } from '@/components/game/ProfileScreen';
@@ -2091,8 +2092,10 @@ function App() {
   // Câmera do fundo do estádio: cada tela olha para um lugar (Home: campo; multiplayer: arquibancada...)
   const camera: BackdropCamera =
     screen === 'home' ? 'wide' : screen === 'club' ? 'left' : screen === 'lobby' || screen === 'tournament' ? 'stands' : screen === 'leaderboard' || screen === 'profile' || screen === 'squad' || screen === 'friends' ? 'right' : null;
+  // Barra inferior do celular: só nas telas de menu (no computador ela fica escondida por CSS)
+  const showMobileNav = !room && !spectating && ['home', 'squad', 'leaderboard', 'profile', 'friends', 'tournament', 'lobby'].includes(screen);
   return (
-    <div className="app-shell" data-theme={theme} data-lite={liteNow ? '1' : '0'}>
+    <div className={`app-shell ${showMobileNav ? 'mnav-on' : ''}`} data-theme={theme} data-lite={liteNow ? '1' : '0'}>
       <StadiumBackdrop camera={camera} />
       <style>{globalCss}</style>
       <style>{cardCss}</style>
@@ -2174,6 +2177,18 @@ function App() {
         friendsOnline={friends.rows.filter((row) => row.status === 'accepted' && friends.online.has(row.user_id)).length}
         friendsPending={friends.rows.some((row) => row.status === 'pending' && row.incoming)}
       />
+      {showMobileNav && (
+        <MobileNav
+          active={screen}
+          onHome={reset}
+          onSquad={() => navigate('squad')}
+          onFriends={openFriends}
+          onLeaderboard={() => navigate('leaderboard')}
+          onProfile={() => navigate('profile')}
+          friendsOnline={friends.rows.filter((row) => row.status === 'accepted' && friends.online.has(row.user_id)).length}
+          friendsPending={friends.rows.some((row) => row.status === 'pending' && row.incoming)}
+        />
+      )}
 
       {mpNotice && (
         <div
