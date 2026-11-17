@@ -251,15 +251,18 @@ export const cardCss = `
 
 :root {
   --shield: ${SHIELD_CLIP};
-  /* Fundo atrás do jogador: brilho central, anéis, faixas diagonais e sombra na base (original, estilo cartas de coleção) */
+  /* Fundo atrás do jogador (inspirado nas cartas de coleção de futebol): luz central, faixa de brilho diagonal,
+     painéis angulares de luz, textura fina em diagonal e bordas escurecidas */
   --card-pat:
-    radial-gradient(ellipse 70% 46% at 50% 34%, rgba(255,255,255,.62), rgba(255,255,255,0) 70%),
-    repeating-radial-gradient(circle at 50% 36%, rgba(255,255,255,.16) 0 1.5px, rgba(255,255,255,0) 1.5px 15px),
-    linear-gradient(118deg, rgba(255,255,255,0) 14%, rgba(255,255,255,.26) 14% 27%, rgba(255,255,255,0) 27% 100%),
-    linear-gradient(118deg, rgba(255,255,255,0) 58%, rgba(255,255,255,.16) 58% 66%, rgba(255,255,255,0) 66% 100%),
-    linear-gradient(0deg, rgba(0,0,0,.2), rgba(0,0,0,0) 38%);
+    radial-gradient(ellipse 62% 44% at 56% 30%, rgba(255,250,215,.72), rgba(255,250,215,0) 72%),
+    linear-gradient(112deg, rgba(255,255,255,0) 26%, rgba(255,255,255,.3) 40%, rgba(255,255,255,0) 54%),
+    linear-gradient(64deg, rgba(255,255,255,0) 56%, rgba(255,255,255,.2) 56% 74%, rgba(255,255,255,0) 74%),
+    linear-gradient(-64deg, rgba(255,255,255,0) 66%, rgba(255,255,255,.13) 66% 84%, rgba(255,255,255,0) 84%),
+    repeating-linear-gradient(135deg, rgba(0,0,0,.045) 0 1px, rgba(0,0,0,0) 1px 4px),
+    radial-gradient(ellipse 85% 70% at 50% 42%, rgba(0,0,0,0) 52%, rgba(70,38,0,.3) 100%),
+    linear-gradient(0deg, rgba(60,32,0,.28), rgba(0,0,0,0) 36%);
 }
-.cd-art { --a: #f7dd8a; --b: #dfae38; --c: #bb8a1d; background: var(--card-pat), linear-gradient(165deg, var(--a), var(--b) 58%, var(--c)); }
+.cd-art { --a: #f8e6a0; --b: #e3b94a; --c: #b8892a; background: var(--card-pat), linear-gradient(165deg, var(--a), var(--b) 58%, var(--c)); }
 .cd-art.special { --a: #fff0a6; --b: #f2c230; --c: #cf9a12; }
 .cd-art.silver { --a: #f4f6f9; --b: #c3cad3; --c: #a3acb7; }
 .cd-art.bronze { --a: #f4bb8f; --b: #d7864f; --c: #b66a38; }
@@ -293,7 +296,7 @@ button.player-card.player-card::after {
 }
 button.player-card.player-card::before { background: var(--card-pat), var(--face); }
 button.player-card.player-card::after { background: linear-gradient(118deg, rgba(255,255,255,.4) 0, rgba(255,255,255,0) 40%, rgba(255,255,255,.12) 64%, rgba(255,255,255,0) 78%); }
-button.player-card.player-card.gold { --frame: linear-gradient(160deg, #f7e39a, #a77a12); --face: linear-gradient(165deg, #f7dd8a, #dfae38 58%, #bb8a1d); --ink: #2b1d00; }
+button.player-card.player-card.gold { --frame: linear-gradient(160deg, #f7e39a, #a77a12); --face: linear-gradient(165deg, #f8e6a0, #e3b94a 56%, #b8892a); --ink: #2b1d00; }
 button.player-card.player-card.special { --frame: linear-gradient(160deg, #fff6c2, #c98a00); --face: linear-gradient(165deg, #fff0a6, #f2c230 52%, #cf9a12); --ink: #2b1d00; }
 button.player-card.player-card.silver { --frame: linear-gradient(160deg, #f4f6f8, #808b97); }
 button.player-card.player-card.bronze { --frame: linear-gradient(160deg, #f6c096, #8a4a22); --face: linear-gradient(165deg, #f4bb8f, #d7864f 58%, #b66a38); --ink: #2a1408; }
