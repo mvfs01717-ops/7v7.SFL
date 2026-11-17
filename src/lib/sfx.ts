@@ -102,10 +102,10 @@ export function playMvp(volume = 0.2) {
     osc.start(t + start);
     osc.stop(t + start + dur + 0.05);
   };
-  tone(150, 0.15, 0.6, 'sine', 1.6, 45);
-  [523.25, 659.25, 783.99].forEach((f, i) => tone(f, 1.0 + i * 0.28, 0.3, 'triangle', 0.5));
+  tone(150, 1.95, 0.6, 'sine', 1.6, 45);
+  [523.25, 659.25, 783.99].forEach((f, i) => tone(f, 0.85 + i * 0.3, 0.3, 'triangle', 0.35));
   [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {
-    tone(f, 2.0, 1.4, 'triangle', 0.45 - i * 0.05);
-    tone(f * 2, 2.0, 0.9, 'sine', 0.12);
+    tone(f, 1.95, 1.4, 'triangle', 0.45 - i * 0.05);
+    tone(f * 2, 1.95, 0.9, 'sine', 0.12);
   });
 }
