@@ -35,6 +35,15 @@ const css = `
 .pf-m { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: center; padding: 10px 6px; border-top: 1px solid rgba(255,255,255,.07); font-size: 14px; }
 .pf-m b:first-child { text-align: right; }
 .pf-sc { padding: 3px 12px; border-radius: 8px; background: rgba(255,255,255,.08); font-weight: 800; }
+/* Celular: painéis escuros opacos para o texto não se perder sobre a arquibancada */
+@media (max-width: 860px) {
+  .pf-hero { background: linear-gradient(135deg, rgba(245,184,0,.24), rgba(6,10,22,.4) 75%), #0a1226; box-shadow: 0 14px 32px rgba(0,0,0,.4); }
+  .pf-stat { background: linear-gradient(165deg, rgba(14,24,48,.94), rgba(5,9,20,.96)); border-color: rgba(255,255,255,.1); box-shadow: 0 8px 20px rgba(0,0,0,.3); }
+  .pf-panel { padding: 14px 14px 8px; margin-top: 4px; border-radius: 6px 18px 6px 18px; background: linear-gradient(165deg, rgba(14,24,48,.94), rgba(5,9,20,.96)); border: 1px solid rgba(255,255,255,.1); box-shadow: 0 14px 32px rgba(0,0,0,.4); }
+  .pf-panel h3 { margin: 4px 0 10px; opacity: .85; color: #F5B800; }
+  .pf-panel h3 ~ h3 { margin-top: 18px; }
+  .pf-m:first-of-type { border-top: 0; }
+}
 @media (max-width: 520px) { .pf-grid { grid-template-columns: repeat(2, 1fr); } .pf-name { font-size: 21px; } }
 `;
 
@@ -131,7 +140,7 @@ export function ProfileScreen({
               <div className="pf-stat"><b>{s.gf - s.ga > 0 ? '+' : ''}{s.gf - s.ga}</b><span>SALDO</span></div>
             </div>
             {s.form.length > 0 && (
-              <>
+              <div className="pf-panel">
                 <h3>ÚLTIMOS JOGOS</h3>
                 <div className="pf-form">
                   {s.form.map((r, i) => (
@@ -146,7 +155,7 @@ export function ProfileScreen({
                     <b>{m.b}</b>
                   </div>
                 ))}
-              </>
+              </div>
             )}
             {s.games === 0 && <p style={{ opacity: 0.75 }}>Nenhuma partida multiplayer ainda. Jogue online para subir de nível!</p>}
           </>
