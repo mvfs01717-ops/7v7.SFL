@@ -4,10 +4,11 @@ import { ArrowLeft, ArrowRight, CircleUserRound, Database, Download, Menu, Setti
 import { positionNames, type Player, type Team } from '@/lib/game/types';
 import { Badge, Card, LogoMark, SHIELD_CLIP } from '@/components/game/Card';
 import { useNewsUnseen } from '@/components/game/WhatsNew';
+import { useLite } from '@/lib/settings';
 
 const headerCss = `
 .topbar.hd { height: 68px; gap: 28px; position: sticky; top: 0; z-index: 30; border-bottom: 0;
-  background: linear-gradient(180deg, rgba(3,5,9,.96), rgba(5,8,14,.72)); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+  background: linear-gradient(180deg, rgba(3,5,9,.98), rgba(5,8,14,.9)); }
 .topbar.hd::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 1px;
   background: linear-gradient(90deg, transparent, rgba(245,184,0,.7) 20%, rgba(245,184,0,.15) 55%, transparent); }
 .hd .brand { gap: 10px; }
@@ -30,7 +31,7 @@ const headerCss = `
 .hd .pn { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hd .mobile-menu { width: 40px; height: 40px; border-radius: 12px; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.05); color: #fff; place-items: center; }
 .hd .m-menu { position: absolute; top: calc(100% + 8px); right: 12px; z-index: 50; min-width: 220px; display: grid; gap: 4px; padding: 8px; border-radius: 16px;
-  background: rgba(10,15,24,.96); backdrop-filter: blur(14px); border: 1px solid rgba(245,184,0,.3); box-shadow: 0 18px 40px rgba(0,0,0,.65); animation: hmFade .2s ease both; }
+  background: rgba(10,15,24,.98); border: 1px solid rgba(245,184,0,.3); box-shadow: 0 18px 40px rgba(0,0,0,.65); animation: hmFade .2s ease both; }
 .hd .m-menu button { display: flex; align-items: center; gap: 12px; padding: 13px 14px; border: 0; border-radius: 10px; background: transparent; color: #fff; font-weight: 800; letter-spacing: 1px; font-size: 13px; text-transform: uppercase; text-align: left; cursor: pointer; }
 .hd .m-menu button.on, .hd .m-menu button:hover { background: rgba(245,184,0,.14); color: #F5B800; }
 @media (min-width: 851px) { .hd .m-menu { display: none; } .hd .mobile-menu { display: none; } }
@@ -153,7 +154,7 @@ const homeCss = `
 .hm-side { display: grid; gap: 8px; align-content: start; animation: hmSlide .6s cubic-bezier(.2,.8,.2,1) both; }
 @keyframes hmSlide { from { opacity: 0; transform: translateX(-26px); } to { opacity: 1; transform: none; } }
 .hm-item { position: relative; display: flex; align-items: center; gap: 14px; padding: clamp(10px, 1.1vh, 16px) 16px; border-radius: 6px 16px 6px 16px; border: 1px solid rgba(255,255,255,.1);
-  background: linear-gradient(100deg, rgba(255,255,255,.07), rgba(255,255,255,.02)); color: #fff; text-align: left; cursor: pointer; backdrop-filter: blur(6px);
+  background: linear-gradient(100deg, rgba(255,255,255,.07), rgba(255,255,255,.02)); color: #fff; text-align: left; cursor: pointer;
   transition: transform .25s cubic-bezier(.2,.8,.2,1), background .25s, border-color .25s, box-shadow .25s; animation: hmSlide .6s cubic-bezier(.2,.8,.2,1) both; }
 .hm-item:nth-child(2) { animation-delay: .05s; } .hm-item:nth-child(3) { animation-delay: .1s; } .hm-item:nth-child(4) { animation-delay: .15s; }
 .hm-item:nth-child(5) { animation-delay: .2s; } .hm-item:nth-child(6) { animation-delay: .25s; } .hm-item:nth-child(7) { animation-delay: .3s; }
@@ -178,7 +179,7 @@ const homeCss = `
 .hm-item:has(.hm-badge)::after { display: none; }
 .hm-badge { margin-left: auto; padding: 3px 8px; border-radius: 999px; font-size: 10px; font-weight: 900; letter-spacing: .8px; background: #ef4444; color: #fff; white-space: nowrap; }
 .hm-badge.gold { background: #F5B800; color: #1a1200; }
-.hm-ios { position: fixed; inset: 0; z-index: 400; background: rgba(3,6,12,.8); backdrop-filter: blur(6px); display: grid; place-items: center; padding: 16px; }
+.hm-ios { position: fixed; inset: 0; z-index: 400; background: rgba(3,6,12,.88); display: grid; place-items: center; padding: 16px; }
 .hm-ios > div { width: min(420px, 100%); background: #0f1622; border: 1px solid rgba(245,184,0,.5); border-radius: 16px; padding: 22px; box-shadow: 0 24px 70px rgba(0,0,0,.6); }
 .hm-ios h3 { margin: 0 0 12px; font-size: 20px; font-weight: 900; color: #F5B800; }
 .hm-ios ol { margin: 0 0 16px; padding-left: 20px; display: grid; gap: 9px; line-height: 1.4; color: rgba(255,255,255,.9); }
@@ -187,7 +188,7 @@ const homeCss = `
 @keyframes hmPing { 70% { box-shadow: 0 0 0 10px rgba(239,68,68,0); } 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); } }
 
 .hm-banner { position: relative; min-height: clamp(460px, calc(100vh - 170px), 820px); border-radius: 22px; overflow: hidden; padding: clamp(44px, 4vw, 72px) clamp(48px, 5vw, 96px); display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr); gap: 56px; align-items: center;
-  border: 1px solid rgba(255,255,255,.14); background: linear-gradient(120deg, rgba(10,16,32,.78), rgba(245,184,0,.1)); backdrop-filter: blur(4px);
+  border: 1px solid rgba(255,255,255,.14); background: linear-gradient(120deg, rgba(10,16,32,.78), rgba(245,184,0,.1)); 
   box-shadow: 0 30px 70px rgba(0,0,0,.55); animation: hmRise .7s cubic-bezier(.2,.8,.2,1) both; perspective: 900px; }
 @keyframes hmRise { from { opacity: 0; transform: translateY(24px) scale(.98); } to { opacity: 1; transform: none; } }
 .hm-banner::before { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(115deg, transparent 35%, rgba(255,255,255,.1) 48%, transparent 60%); transform: translateX(-120%); animation: hmShine 6s 1.2s infinite; }
@@ -199,7 +200,9 @@ const homeCss = `
 .hm-title { margin: 8px 0 10px; font-size: clamp(44px, 6.2vw, 120px); line-height: .92; font-weight: 900; font-style: italic; letter-spacing: -1px; text-transform: uppercase; }
 .hm-title em { color: #F5B800; font-style: italic; }
 .hm-text { max-width: clamp(400px, 30vw, 560px); margin: 0 0 34px; font-size: clamp(16px, 1.15vw, 20px); line-height: 1.6; opacity: .82; }
-.hm-cta-wrap { display: inline-block; position: relative; filter: drop-shadow(0 0 16px rgba(245,184,0,.5)) drop-shadow(0 14px 18px rgba(0,0,0,.5)); animation: hmFade .45s ease both, hmGlow 2.4s 1s ease-in-out infinite; }
+.hm-cta-wrap { display: inline-block; position: relative; isolation: isolate; animation: hmFade .45s ease both; }
+.hm-cta-wrap::before { content: ''; position: absolute; z-index: -1; inset: -16px -26px; border-radius: 50%; background: radial-gradient(closest-side, rgba(245,184,0,.55), rgba(245,184,0,0)); opacity: .55; animation: hmGlow 2.4s 1s ease-in-out infinite; pointer-events: none; will-change: opacity; }
+.hm-cta-wrap::after { content: ''; position: absolute; z-index: -1; left: 6%; right: 6%; bottom: -10px; height: 22px; border-radius: 50%; background: radial-gradient(closest-side, rgba(0,0,0,.55), rgba(0,0,0,0)); pointer-events: none; }
 .hm-cta { position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: 14px; padding: 22px 48px 22px 44px; border: 0; cursor: pointer; font-weight: 900; font-size: 24px; letter-spacing: 2.5px; white-space: nowrap; text-transform: uppercase;
   color: #1a1200; background: linear-gradient(180deg, #fff0a8, #F5B800 55%, #d99a00); clip-path: polygon(18px 0, 100% 0, calc(100% - 18px) 100%, 0 100%);
   transition: transform .22s cubic-bezier(.2,1.4,.4,1), filter .2s; }
@@ -209,18 +212,18 @@ const homeCss = `
 .hm-cta:hover svg { transform: translateX(6px); }
 .hm-cta:active { transform: scale(.98); }
 @keyframes hmCtaShine { 0% { transform: translateX(-120%); } 40%, 100% { transform: translateX(120%); } }
-@keyframes hmGlow { 50% { filter: drop-shadow(0 0 28px rgba(245,184,0,.85)) drop-shadow(0 14px 18px rgba(0,0,0,.5)); } }
+@keyframes hmGlow { 50% { opacity: 1; } }
 .hm-sub { margin-top: 12px; font-size: 12px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; opacity: .6; }
 .hm-hint { margin-top: 14px; font-size: 13px; opacity: .75; }
 .hm-hint button { background: none; border: 0; color: #F5B800; font-weight: 800; cursor: pointer; padding: 0; text-decoration: underline; }
 
 .hm-hero { position: relative; z-index: 1; display: grid; place-items: center; min-height: clamp(360px, 40vh, 600px); padding: 0 0 36px; }
-.hm-halo { position: absolute; width: 78%; aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle, rgba(245,184,0,.5), transparent 68%); filter: blur(8px); animation: hmHalo 4s ease-in-out infinite alternate; }
+.hm-halo { position: absolute; width: 78%; aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle, rgba(245,184,0,.5), transparent 68%); animation: hmHalo 4s ease-in-out infinite alternate; will-change: transform, opacity; }
 @keyframes hmHalo { from { transform: scale(.9); opacity: .6; } to { transform: scale(1.08); opacity: 1; } }
 .hm-tilt { position: relative; width: min(100%, clamp(250px, 20vw, 400px)); transform-style: preserve-3d; transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); transition: transform .15s ease-out; }
 .hm-float { position: relative; animation: hmFloat 5.2s ease-in-out infinite; transform-style: preserve-3d; }
 @keyframes hmFloat { 0%, 100% { transform: translateY(0) rotate(-.6deg); } 50% { transform: translateY(-14px) rotate(.6deg); } }
-.hm-float > :first-child { filter: drop-shadow(0 10px 10px rgba(0,0,0,.5)) drop-shadow(0 0 20px rgba(245,184,0,.3)); }
+.hm-float { will-change: transform; }
 /* brilho dourado passando pela superfície da carta (recortado no formato do escudo) */
 .hm-shine { position: absolute; inset: 0; pointer-events: none; opacity: 0; mix-blend-mode: screen;
   background: linear-gradient(112deg, transparent 38%, rgba(255,214,90,.0) 42%, rgba(255,226,122,.75) 50%, rgba(255,214,90,.0) 58%, transparent 62%); background-size: 280% 100%; background-position: 160% 0; }
@@ -228,7 +231,7 @@ const homeCss = `
 @keyframes hmShineCard { 0% { background-position: 160% 0; } 45%, 100% { background-position: -60% 0; } }
 /* sombra no chão: some e fica difusa quando a carta sobe, volta nítida quando ela desce */
 .hm-ground { position: absolute; left: 50%; bottom: -26px; width: 78%; height: 26px; transform: translateX(-50%); border-radius: 50%; z-index: 0; pointer-events: none;
-  background: radial-gradient(ellipse at center, rgba(0,0,0,.75) 0, rgba(0,0,0,.35) 45%, transparent 72%); filter: blur(5px); animation: hmGround 5.2s ease-in-out infinite; }
+  background: radial-gradient(ellipse at center, rgba(0,0,0,.75) 0, rgba(0,0,0,.35) 45%, transparent 72%); animation: hmGround 5.2s ease-in-out infinite; }
 @keyframes hmGround { 0%, 100% { transform: translateX(-50%) scale(1); opacity: .95; } 50% { transform: translateX(-50%) scale(.78); opacity: .55; } }
 .hm-capn { display: none; }
 .hm-cap { position: absolute; left: -40px; right: -40px; bottom: -30px; text-align: center; font-size: 11px; font-weight: 900; letter-spacing: 2px; color: #F5B800; text-shadow: 0 2px 8px #000; }
@@ -240,7 +243,7 @@ const homeCss = `
 .hm-title { animation: hmSlam .75s cubic-bezier(.2,1.4,.3,1) both !important; }
 @keyframes hmSlam { 0% { opacity: 0; transform: scale(1.7) translateY(-14px); filter: blur(10px); } 100% { opacity: 1; transform: none; filter: none; } }
 .hm-mark { position: absolute; z-index: 0; right: -4%; top: 50%; transform: translateY(-52%); font-size: clamp(180px, 26vw, 360px); line-height: 1; font-weight: 900; font-style: italic; letter-spacing: -8px;
-  color: transparent; -webkit-text-stroke: 2px rgba(245,184,0,.22); text-shadow: 0 0 60px rgba(245,184,0,.12); animation: hmDrift 8s ease-in-out infinite alternate; pointer-events: none; user-select: none; }
+  color: transparent; -webkit-text-stroke: 2px rgba(245,184,0,.22); text-shadow: 0 0 60px rgba(245,184,0,.12); animation: hmDrift 8s ease-in-out infinite alternate; pointer-events: none; user-select: none; will-change: transform; }
 @keyframes hmDrift { from { transform: translate(-14px,-52%); } to { transform: translate(14px,-52%); } }
 .hm-fan { position: relative; width: 100%; aspect-ratio: .74; margin: 0 auto; transform-style: preserve-3d; }
 .hm-fc { position: absolute; inset: 0; transition: transform .8s cubic-bezier(.2,.8,.2,1), opacity .8s, filter .8s; }
@@ -295,6 +298,9 @@ const homeCss = `
   .hm-badge { position: absolute; top: -7px; left: 50%; right: auto; transform: translateX(-50%); margin: 0; font-size: 9px; padding: 2px 7px; }
   .hm-dot { top: 8px; right: 10px; }
 }
+/* Modo otimizado: sem animações contínuas no menu */
+.hm-lite .hm-banner::before, .hm-lite .hm-cta::before, .hm-lite .hm-cta-wrap::before, .hm-lite .hm-mark, .hm-lite .hm-halo, .hm-lite .hm-float, .hm-lite .hm-ground, .hm-lite .hm-spark, .hm-lite .hm-fc.c .hm-shine, .hm-lite .hm-dot { animation: none !important; }
+.hm-lite .hm-spark { display: none; }
 @media (prefers-reduced-motion: reduce) { .hm *, .hm *::before, .hm-leave { animation: none !important; transition: none !important; } }
 `;
 
@@ -344,6 +350,7 @@ export function Home({
   offline?: boolean;
   install?: { canInstall: boolean; needsIosSteps: boolean; install: () => Promise<void> };
 }) {
+  const lite = useLite();
   const [sel, setSel] = useState<HomeKey>('play');
   const [iosHelp, setIosHelp] = useState(false);
   const newsUnseen = useNewsUnseen();
@@ -421,7 +428,7 @@ export function Home({
   };
 
   return (
-    <main className="hm">
+    <main className={`hm ${lite ? 'hm-lite' : ''}`}>
       <style>{homeCss}</style>
       <div className="hm-bg" aria-hidden="true">
         <div className="hm-shade" />
