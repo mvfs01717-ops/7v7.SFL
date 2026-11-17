@@ -5,34 +5,32 @@ import { playMvp } from '@/lib/sfx';
 
 // Carta de MVP (visual próprio: moldura holográfica dourada) e a animação que revela o melhor em campo.
 
-const shield = 'polygon(6% 0, 94% 0, 100% 5%, 100% 82%, 93% 90%, 50% 100%, 7% 90%, 0 82%, 0 5%)';
+const shield = 'polygon(0 5%, 5% 0, 36% 0, 40% 2.2%, 60% 2.2%, 64% 0, 95% 0, 100% 5%, 100% 81%, 91% 90%, 58% 97%, 50% 100%, 42% 97%, 9% 90%, 0 81%)';
+
+const MVP_ART_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 139" preserveAspectRatio="none"><defs><linearGradient id="a" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#f3d58a" stop-opacity="0"/><stop offset=".5" stop-color="#f3d58a" stop-opacity=".9"/><stop offset="1" stop-color="#f3d58a" stop-opacity="0"/></linearGradient><radialGradient id="b" cx=".62" cy=".3" r=".5"><stop offset="0" stop-color="#e9c46a" stop-opacity=".42"/><stop offset="1" stop-color="#e9c46a" stop-opacity="0"/></radialGradient><linearGradient id="c" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff2c0" stop-opacity=".16"/><stop offset="1" stop-color="#fff2c0" stop-opacity="0"/></linearGradient></defs><rect width="100" height="139" fill="url(#b)"/><path d="M-5 118 C 25 96, 60 70, 105 20 L105 44 C 64 86, 28 112, -5 134 Z" fill="url(#c)"/><path d="M-5 60 C 22 44, 50 30, 105 -6 L105 8 C 56 40, 26 56, -5 72 Z" fill="url(#c)" opacity=".7"/><line x1="-10" y1="139" x2="68" y2="-8" stroke="url(#a)" stroke-width="0.22" stroke-opacity="0.8"/><line x1="4" y1="139" x2="82" y2="-8" stroke="url(#a)" stroke-width="0.5" stroke-opacity="0.9"/><line x1="14" y1="139" x2="92" y2="-8" stroke="url(#a)" stroke-width="0.2" stroke-opacity="0.6"/><line x1="48" y1="139" x2="126" y2="-8" stroke="url(#a)" stroke-width="0.2" stroke-opacity="0.55"/><line x1="70" y1="139" x2="148" y2="-8" stroke="url(#a)" stroke-width="0.35" stroke-opacity="0.8"/><line x1="82" y1="139" x2="160" y2="-8" stroke="url(#a)" stroke-width="0.2" stroke-opacity="0.6"/><line x1="96" y1="139" x2="174" y2="-8" stroke="url(#a)" stroke-width="0.45" stroke-opacity="0.9"/><line x1="108" y1="139" x2="186" y2="-8" stroke="url(#a)" stroke-width="0.2" stroke-opacity="0.5"/><g stroke="#e9c46a" stroke-opacity=".08" stroke-width=".22"><line x1="-40.0" y1="139" x2="38.0" y2="-8"/><line x1="-36.8" y1="139" x2="41.2" y2="-8"/><line x1="-33.6" y1="139" x2="44.4" y2="-8"/><line x1="-30.4" y1="139" x2="47.6" y2="-8"/><line x1="-27.2" y1="139" x2="50.8" y2="-8"/><line x1="-24.0" y1="139" x2="54.0" y2="-8"/><line x1="-20.8" y1="139" x2="57.2" y2="-8"/><line x1="-17.6" y1="139" x2="60.4" y2="-8"/><line x1="-14.4" y1="139" x2="63.6" y2="-8"/><line x1="-11.2" y1="139" x2="66.8" y2="-8"/><line x1="-8.0" y1="139" x2="70.0" y2="-8"/><line x1="-4.8" y1="139" x2="73.2" y2="-8"/><line x1="-1.6" y1="139" x2="76.4" y2="-8"/><line x1="1.6" y1="139" x2="79.6" y2="-8"/><line x1="4.8" y1="139" x2="82.8" y2="-8"/><line x1="8.0" y1="139" x2="86.0" y2="-8"/><line x1="11.2" y1="139" x2="89.2" y2="-8"/><line x1="14.4" y1="139" x2="92.4" y2="-8"/><line x1="17.6" y1="139" x2="95.6" y2="-8"/><line x1="20.8" y1="139" x2="98.8" y2="-8"/><line x1="24.0" y1="139" x2="102.0" y2="-8"/><line x1="27.2" y1="139" x2="105.2" y2="-8"/><line x1="30.4" y1="139" x2="108.4" y2="-8"/><line x1="33.6" y1="139" x2="111.6" y2="-8"/><line x1="36.8" y1="139" x2="114.8" y2="-8"/><line x1="40.0" y1="139" x2="118.0" y2="-8"/><line x1="43.2" y1="139" x2="121.2" y2="-8"/><line x1="46.4" y1="139" x2="124.4" y2="-8"/><line x1="49.6" y1="139" x2="127.6" y2="-8"/><line x1="52.8" y1="139" x2="130.8" y2="-8"/><line x1="56.0" y1="139" x2="134.0" y2="-8"/><line x1="59.2" y1="139" x2="137.2" y2="-8"/><line x1="62.4" y1="139" x2="140.4" y2="-8"/><line x1="65.6" y1="139" x2="143.6" y2="-8"/><line x1="68.8" y1="139" x2="146.8" y2="-8"/><line x1="72.0" y1="139" x2="150.0" y2="-8"/><line x1="75.2" y1="139" x2="153.2" y2="-8"/><line x1="78.4" y1="139" x2="156.4" y2="-8"/><line x1="81.6" y1="139" x2="159.6" y2="-8"/><line x1="84.8" y1="139" x2="162.8" y2="-8"/><line x1="88.0" y1="139" x2="166.0" y2="-8"/><line x1="91.2" y1="139" x2="169.2" y2="-8"/><line x1="94.4" y1="139" x2="172.4" y2="-8"/><line x1="97.6" y1="139" x2="175.6" y2="-8"/><line x1="100.8" y1="139" x2="178.8" y2="-8"/><line x1="104.0" y1="139" x2="182.0" y2="-8"/></g><circle cx="26.4" cy="67.1" r="0.32" fill="#fff3c4" opacity="0.76"/><circle cx="47.7" cy="71.4" r="0.4" fill="#fff3c4" opacity="0.36"/><circle cx="80.4" cy="34.1" r="0.25" fill="#fff3c4" opacity="0.44"/><circle cx="69.5" cy="66.8" r="0.4" fill="#fff3c4" opacity="0.56"/><circle cx="62.5" cy="21.5" r="0.4" fill="#fff3c4" opacity="0.42"/><circle cx="88.3" cy="49.2" r="0.25" fill="#fff3c4" opacity="0.65"/><circle cx="10.8" cy="92.0" r="0.4" fill="#fff3c4" opacity="0.37"/><circle cx="75.2" cy="99.5" r="0.32" fill="#fff3c4" opacity="0.56"/><circle cx="69.7" cy="105.9" r="0.4" fill="#fff3c4" opacity="0.70"/><circle cx="43.4" cy="88.5" r="0.4" fill="#fff3c4" opacity="0.55"/><circle cx="89.2" cy="105.9" r="0.25" fill="#fff3c4" opacity="0.37"/><circle cx="49.5" cy="33.9" r="0.4" fill="#fff3c4" opacity="0.55"/><circle cx="61.4" cy="38.9" r="0.4" fill="#fff3c4" opacity="0.73"/><circle cx="56.7" cy="66.0" r="0.32" fill="#fff3c4" opacity="0.61"/></svg>';
+const MVP_ART = `url("data:image/svg+xml,${encodeURIComponent(MVP_ART_SVG)}") 0 0 / 100% 100% no-repeat`;
 
 export const mvpCss = `
 .mvc { container-type: inline-size; position: relative; width: 100%; aspect-ratio: .72; color: #f3dca0; filter: drop-shadow(0 16px 22px rgba(0,0,0,.65)); user-select: none; }
-.mvc-frame { position: absolute; inset: 0; clip-path: ${shield}; background: linear-gradient(120deg, #7a5a1c, #e9cf86 22%, #fff3c4 34%, #a9812f 50%, #e9cf86 66%, #7a5a1c 84%, #e9cf86); background-size: 300% 300%; animation: mvcHolo 6s linear infinite; }
-.mvc-body { position: absolute; inset: 1.6cqw; clip-path: ${shield}; overflow: hidden; background:
-  linear-gradient(112deg, transparent 0 26%, rgba(205,160,60,.34) 27% 30.5%, transparent 31.5% 47%, rgba(205,160,60,.2) 48% 58%, transparent 59% 78%, rgba(205,160,60,.16) 79% 83%, transparent 84%),
-  radial-gradient(95% 62% at 58% 30%, color-mix(in srgb, var(--mv, #8a6a20) 38%, #6b5018) 0, transparent 70%),
-  linear-gradient(180deg, #17130b, #0a0a0c 55%, #050506); }
-.mvc-shine { position: absolute; inset: -20% -60%; background: linear-gradient(105deg, transparent 43%, rgba(255,240,190,.35) 50%, transparent 57%); transform: translateX(-60%); animation: mvcShine 4s ease-in-out infinite; mix-blend-mode: soft-light; pointer-events: none; }
-.mvc-top { position: absolute; left: 0; right: 0; top: 7cqw; display: flex; align-items: center; justify-content: center; gap: 3cqw; font: 900 4.6cqw Inter, sans-serif; letter-spacing: .3em; color: #f6e2a4; }
-.mvc-top::before, .mvc-top::after { content: ''; width: 12cqw; height: .5cqw; background: linear-gradient(90deg, transparent, rgba(246,226,164,.8)); }
-.mvc-top::after { transform: scaleX(-1); }
-.mvc-medal { position: absolute; left: 50%; top: 14cqw; width: 70cqw; aspect-ratio: 1; transform: translateX(-50%); }
-.mvc-laurel { position: absolute; inset: 0; width: 100%; height: 100%; filter: drop-shadow(0 2px 3px rgba(0,0,0,.6)); }
-.mvc-disc { position: absolute; left: 50%; top: 50%; width: 55%; aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%; display: grid; place-items: center; background: conic-gradient(from 210deg, #7a5a1c, #fff3c4, #c9a24a, #fff3c4, #7a5a1c, #e9cf86, #7a5a1c); box-shadow: 0 0 6cqw rgba(246,200,90,.35), 0 3px 8px rgba(0,0,0,.6); }
-.mvc-disc::before { content: ''; position: absolute; inset: 1.8cqw; border-radius: 50%; background: radial-gradient(circle at 50% 35%, #2a2110, #0c0a06 72%); }
-.mvc-num { position: relative; text-align: center; line-height: .82; font: 900 italic 21cqw 'Bebas Neue', Inter, sans-serif; background: linear-gradient(180deg, #fff6cc 0%, #e8c870 50%, #a8802c 100%); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 2px 2px rgba(0,0,0,.6)); }
-.mvc-num small { display: block; margin-top: 1.4cqw; font: 800 3.6cqw Inter, sans-serif; font-style: normal; letter-spacing: .3em; padding-left: .3em; color: #f6e2a4; -webkit-text-fill-color: #f6e2a4; }
-.mvc-star { position: absolute; left: 50%; top: -2.5cqw; transform: translateX(-50%); font-size: 9cqw; line-height: 1; color: #ffe27a; text-shadow: 0 0 10px rgba(255,200,80,.9); }
-.mvc-chips { position: absolute; left: 0; right: 0; top: 84cqw; display: flex; justify-content: center; gap: 3cqw; }
-.mvc-chip { display: inline-flex; align-items: center; gap: 1.6cqw; padding: .8cqw 3.2cqw; border-radius: 99px; border: .5cqw solid rgba(246,226,164,.65); background: rgba(0,0,0,.4); font: 900 5cqw Inter, sans-serif; letter-spacing: .08em; color: #f6e2a4; }
-.mvc-chip i { width: 4.4cqw; height: 4.4cqw; border-radius: 50%; box-shadow: 0 0 0 .5cqw rgba(246,226,164,.8); }
-.mvc-name { position: absolute; left: 5cqw; right: 5cqw; top: 94cqw; text-align: center; font: 900 12cqw/1 'Bebas Neue', Inter, sans-serif; letter-spacing: .05em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #fff0bd; text-shadow: 0 2px 0 rgba(0,0,0,.6); }
-.mvc-stats { position: absolute; left: 10cqw; right: 10cqw; top: 107.5cqw; display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; font: 800 3.8cqw Inter, sans-serif; letter-spacing: .1em; color: rgba(246,226,164,.8); border-top: .5cqw solid rgba(246,226,164,.5); padding-top: 1.6cqw; }
-.mvc-stats span + span { border-left: .4cqw solid rgba(246,226,164,.3); }
-.mvc-stats b { display: block; margin-top: .4cqw; font: 900 10cqw/1 'Bebas Neue', Inter, sans-serif; color: #fff2c4; letter-spacing: 0; }
-@keyframes mvcHolo { 0% { background-position: 0% 50%; } 100% { background-position: 300% 50%; } }
+.mvc-frame { position: absolute; inset: 0; clip-path: ${shield}; background: linear-gradient(120deg, #6a4c14, #e9cf86 20%, #fff3c4 32%, #a9812f 48%, #e9cf86 64%, #6a4c14 82%, #e9cf86); background-size: 300% 300%; animation: mvcHolo 6s linear infinite; }
+.mvc-body { position: absolute; inset: 1.5cqw; clip-path: ${shield}; background: #0b0a08; }
+.mvc-ring { position: absolute; inset: 3.4cqw; clip-path: ${shield}; background: linear-gradient(160deg, #f3dd9a, #8a6820 55%, #d9b45a); }
+.mvc-core { position: absolute; inset: 3.9cqw; clip-path: ${shield}; overflow: hidden; background: ${MVP_ART}, radial-gradient(90% 60% at 62% 28%, color-mix(in srgb, var(--mv, #8a6a20) 22%, #1a1408), transparent 75%), linear-gradient(170deg, #1c1810, #0c0b09 50%, #050505); }
+.mvc-top { position: absolute; left: 0; right: 0; top: 4cqw; text-align: center; font: 900 3.4cqw Inter, sans-serif; letter-spacing: .34em; padding-left: .34em; color: #e9cf86; }
+.mvc-rate { position: absolute; left: 7cqw; top: 11cqw; font: 900 21cqw/.85 'Bebas Neue', Inter, sans-serif; letter-spacing: -.01em; background: linear-gradient(180deg, #fff6cc 0%, #ecc968 52%, #a07a22 100%); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 2px 2px rgba(0,0,0,.7)); }
+.mvc-meta { position: absolute; left: 7cqw; top: 34cqw; width: 22cqw; display: flex; flex-direction: column; align-items: center; gap: 1.6cqw; font: 900 6.4cqw/1 'Bebas Neue', Inter, sans-serif; letter-spacing: .06em; color: #f6e2a4; }
+.mvc-meta::before, .mvc-meta::after { content: ''; width: 14cqw; height: .5cqw; background: linear-gradient(90deg, transparent, rgba(233,207,134,.8), transparent); }
+.mvc-meta span { display: flex; align-items: center; gap: 1.6cqw; font-size: 5.4cqw; }
+.mvc-meta i { width: 4cqw; height: 4cqw; border-radius: 50%; box-shadow: 0 0 0 .5cqw rgba(246,226,164,.85); }
+.mvc-hero { position: absolute; left: 42cqw; top: 14cqw; width: 44cqw; aspect-ratio: 1; display: grid; place-items: center; border-radius: 50%; background: radial-gradient(circle at 50% 38%, rgba(255,236,170,.30), rgba(255,236,170,0) 68%); }
+.mvc-hero::before { content: ''; position: absolute; inset: 3cqw; border-radius: 50%; border: .6cqw solid rgba(233,207,134,.55); box-shadow: inset 0 0 6cqw rgba(233,196,106,.25), 0 0 8cqw rgba(233,196,106,.28); }
+.mvc-hero b { font: 900 italic 27cqw/1 'Bebas Neue', Inter, sans-serif; background: linear-gradient(180deg, #fff6cc, #d9b45a 60%, #8a6a20); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 3px 4px rgba(0,0,0,.7)); }
+.mvc-star { position: absolute; left: 50%; top: -3.4cqw; transform: translateX(-50%); font-size: 8cqw; line-height: 1; color: #ffe27a; text-shadow: 0 0 10px rgba(255,200,80,.9); }
+.mvc-name { position: absolute; left: 6cqw; right: 6cqw; top: 79cqw; text-align: center; font: 900 12.5cqw/1 'Bebas Neue', Inter, sans-serif; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: linear-gradient(180deg, #fff6cc, #e9cf86 60%, #b58d33); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 2px 0 rgba(0,0,0,.65)); }
+.mvc-stats { position: absolute; left: 12cqw; right: 12cqw; top: 95cqw; display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; font: 800 3.3cqw Inter, sans-serif; letter-spacing: .14em; color: rgba(233,207,134,.85); border-top: .5cqw solid; border-image: linear-gradient(90deg, transparent, rgba(233,207,134,.8), transparent) 1; padding-top: 2cqw; }
+.mvc-stats span + span { border-left: .4cqw solid rgba(233,207,134,.28); }
+.mvc-stats b { display: block; margin-top: .6cqw; font: 900 10cqw/1 'Bebas Neue', Inter, sans-serif; color: #fff2c4; letter-spacing: 0; }
+.mvc-shine { position: absolute; inset: -20% -60%; background: linear-gradient(105deg, transparent 43%, rgba(255,240,190,.3) 50%, transparent 57%); transform: translateX(-60%); animation: mvcShine 4s ease-in-out infinite; mix-blend-mode: soft-light; pointer-events: none; }
 @keyframes mvcShine { 0%, 55% { transform: translateX(-60%); } 100% { transform: translateX(60%); } }
 @media (prefers-reduced-motion: reduce) { .mvc-frame, .mvc-shine { animation: none; } }
 
@@ -79,51 +77,26 @@ export const mvpCss = `
 
 type Info = { player: Player; team: Pick<Team, 'abbreviation' | 'primary_color'>; rating: number; goals: number; assists: number };
 
-const LEAVES = (() => {
-  const out: { x: number; y: number; r: number; k: number }[] = [];
-  for (let i = 0; i < 11; i += 1) {
-    const a = ((100 + i * 14.5) * Math.PI) / 180; // ramo esquerdo: de baixo até o alto
-    const rad = 42;
-    out.push({ x: 50 + rad * Math.cos(a), y: 50 + rad * Math.sin(a), r: (a * 180) / Math.PI + 90 - 38, k: i });
-    out.push({ x: 100 - (50 + rad * Math.cos(a)), y: 50 + rad * Math.sin(a), r: 180 - ((a * 180) / Math.PI + 90 - 38), k: i });
-  }
-  return out;
-})();
-
 export function MvpCard({ player, team, rating, goals, assists }: Info) {
   return (
     <div className="mvc" style={{ ['--mv' as string]: team.primary_color }} aria-label={`MVP: ${player.name}, nota ${rating.toFixed(1)}`}>
       <style>{mvpCss}</style>
       <div className="mvc-frame" />
-      <div className="mvc-body">
+      <div className="mvc-body" />
+      <div className="mvc-ring" />
+      <div className="mvc-core">
         <div className="mvc-top">MVP DA PARTIDA</div>
-        <div className="mvc-medal">
-          <svg className="mvc-laurel" viewBox="0 0 100 100" aria-hidden="true">
-            <defs>
-              <linearGradient id="mvl-g" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0" stopColor="#fff3c4" />
-                <stop offset=".5" stopColor="#d9b45a" />
-                <stop offset="1" stopColor="#8a6a20" />
-              </linearGradient>
-            </defs>
-            {LEAVES.map((l, i) => (
-              <ellipse key={i} cx={l.x} cy={l.y} rx={6.4 - l.k * 0.2} ry={2.5} fill="url(#mvl-g)" transform={`rotate(${l.r.toFixed(1)} ${l.x.toFixed(1)} ${l.y.toFixed(1)})`} />
-            ))}
-          </svg>
-          <div className="mvc-disc">
-            <div className="mvc-num">
-              {rating.toFixed(1)}
-              <small>NOTA</small>
-            </div>
-          </div>
-          <div className="mvc-star">★</div>
-        </div>
-        <div className="mvc-chips">
-          <span className="mvc-chip">{player.primary_position}</span>
-          <span className="mvc-chip">
+        <div className="mvc-rate">{rating.toFixed(1)}</div>
+        <div className="mvc-meta">
+          {player.primary_position}
+          <span>
             <i style={{ background: team.primary_color }} />
             {team.abbreviation}
           </span>
+        </div>
+        <div className="mvc-hero">
+          <b>{player.name.trim().charAt(0).toUpperCase()}</b>
+          <div className="mvc-star">★</div>
         </div>
         <div className="mvc-name">{player.name}</div>
         <div className="mvc-stats">
