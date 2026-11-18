@@ -48,7 +48,7 @@ export const draftCss = `
 .dr-glow { transition: transform .2s ease, filter .2s ease; }
 .dr-empty {
   position: relative;
-  aspect-ratio: 0.74;
+  aspect-ratio: 0.84;
   clip-path: var(--shield);
   background: linear-gradient(160deg, #f7e39a, #a77a12);
   display: grid;
@@ -112,7 +112,7 @@ export const draftCss = `
 .dr-cardwrap:hover { transform: translateY(-6px) scale(1.03); filter: drop-shadow(0 0 14px rgba(245,184,0,.9)); }
 .dr-flip {
   position: relative;
-  aspect-ratio: 0.74;
+  aspect-ratio: 0.84;
   transform-style: preserve-3d;
   animation: dr-flipin 1.5s cubic-bezier(.3,.8,.25,1) both;
   animation-delay: calc(var(--i) * .3s + .1s);
