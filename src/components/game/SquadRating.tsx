@@ -120,29 +120,38 @@ export function SquadRatingPanel({ club, stats, squad }: { club: Team; stats: Re
   const mainPreset = tacticStore.presets[tacticStore.main] ?? tacticStore.presets[0]!;
   const pct = stats.chemMax ? Math.round((stats.chem / stats.chemMax) * 100) : 0;
   const level = pct >= 75 ? 'Excelente' : pct >= 50 ? 'Boa' : pct >= 25 ? 'Em formação' : 'Baixa';
+  const groups = new Map<string, { team?: Team; n: number }>();
+  Object.values(squad ?? {}).forEach((p) => {
+    if (!p) return;
+    const g = groups.get(p.team_id) ?? { team: p.team ?? (p.team_id === club.id ? club : undefined), n: 0 };
+    g.n += 1;
+    groups.set(p.team_id, g);
+  });
+  const clubs = [...groups.values()].sort((x, y) => y.n - x.n);
+  const pips = (n: number) => <span className="fc-pips">{[0, 1, 2].map((i) => <u key={i} className={i < n ? 'on' : ''} />)}</span>;
   return (
-    <section className="sq-panel sq-rate" aria-label="Avaliação do elenco">
-      <div className="sq-team">
+    <section className="sq-rate fc-rate" aria-label="Avaliação do elenco">
+      <div className="fc-head">
         <Badge team={club} />
-        <div>
-          <small>GESTÃO DO ELENCO</small>
-          <b>{club.name}</b>
-        </div>
-      </div>
-      <div className="sq-score">
-        <div className="sq-ovr"><strong key={stats.avg}>{stats.count ? avg : '--'}</strong><span>Overall médio</span></div>
-        <div className="sq-starbox">
+        <div className="fc-info">
+          <b className="fc-name">{club.name}</b>
           <Stars value={stats.stars} />
-          <span>{stats.count ? `${stats.stars.toString().replace('.', ',')} de 5 estrelas` : 'Escolha jogadores'}</span>
+          <div className="fc-rating">Overall <strong key={stats.avg}>{stats.count ? avg : '--'}</strong></div>
         </div>
       </div>
-      <div className="sq-chem">
-        <div className="sq-chem-h"><span>ENTROSAMENTO</span><b><em>{stats.chem}</em>/{stats.chemMax}</b></div>
-        <div className="sq-bar" role="progressbar" aria-valuemin={0} aria-valuemax={stats.chemMax} aria-valuenow={stats.chem}><i style={{ width: `${pct}%` }} /></div>
-        <div className="sq-chem-f"><span>{level}</span><span>{stats.links.length} {stats.links.length === 1 ? 'ligação' : 'ligações'} entre jogadores</span></div>
+      <div className="fc-mgmt">Gestão do elenco</div>
+      <div className="fc-chem" title={level}>Entrosamento total <b>{stats.chem}/{stats.chemMax}</b></div>
+      <div className="fc-list" role="list" aria-label="Nacionalidades e clubes">
+        <div className="fc-row" role="listitem"><Flag />{pips(Math.min(3, stats.count))}<i className="fc-dia" /></div>
+        {clubs.map((g, i) => (
+          <div className="fc-row" role="listitem" key={g.team?.id ?? i} title={g.team?.name}>
+            {g.team ? <span className="fc-mini"><Badge team={g.team} /></span> : <span className="fc-mini" />}
+            {pips(Math.min(3, g.n))}<i className="fc-dia" />
+          </div>
+        ))}
       </div>
-      <button type="button" className="sq-tactic" onClick={() => setTacticsOpen(true)}>
-        <span>⚙ TÁTICAS</span>
+      <button type="button" className="fc-tactic" onClick={() => setTacticsOpen(true)} aria-label="Configurações táticas">
+        <span>⚙ Táticas</span>
         <b>{presetName(tacticStore.main)} · {TACTIC_INFO[deriveTactic(mainPreset)].label}</b>
       </button>
       {tacticsOpen && <TacticalSettings onClose={() => setTacticsOpen(false)} squad={squad} />}
@@ -196,6 +205,32 @@ export const squadRatingCss = `
 .sq-formation small { font-size: 10px; letter-spacing: 3px; opacity: .65; }
 .sq-formation b { font-family: 'Bebas Neue', Inter, sans-serif; font-size: 34px; line-height: 1; letter-spacing: 3px; color: #fff; text-shadow: 0 0 18px rgba(245,184,0,.45); }
 .sq-panel { text-align: left; color: #fff; border-radius: 14px; padding: 14px; background: linear-gradient(160deg, rgba(14,30,66,.92), rgba(7,14,34,.94)); border: 1px solid rgba(245,184,0,.28); box-shadow: 0 10px 30px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.08); backdrop-filter: blur(6px); }
+.fc-rate { text-align: left; color: #fff; min-width: 0; }
+.fc-head { display: flex; align-items: center; gap: 10px; }
+.fc-head .club-badge { flex: none; width: 46px; height: 46px; font-size: 16px; }
+.fc-info { min-width: 0; }
+.fc-name { display: block; font-size: 17px; line-height: 1.1; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fc-info .sq-stars { gap: 2px; margin: 3px 0; }
+.fc-info .sq-stars svg { width: 15px; height: 15px; }
+.fc-rating { font-size: 14px; opacity: .92; }
+.fc-rating strong { font-size: 18px; margin-left: 6px; color: #F5B800; font-weight: 800; animation: sq-pop .5s cubic-bezier(.2,.9,.3,1.3); display: inline-block; }
+.fc-mgmt { margin: 10px 0 2px; padding-left: 2px; font-size: 14px; font-weight: 600; opacity: .95; }
+.fc-chem { font-size: 12px; opacity: .9; padding-left: 2px; }
+.fc-chem b { margin-left: 8px; font-size: 13px; }
+.fc-list { margin-top: 10px; border-radius: 10px; background: rgba(7,14,34,.72); border: 1px solid rgba(255,255,255,.1); max-height: 232px; overflow-y: auto; scrollbar-width: thin; }
+.fc-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,.07); }
+.fc-row:last-child { border-bottom: 0; }
+.fc-row .sq-flag { width: 22px; height: 15px; }
+.fc-mini { flex: none; width: 22px; height: 22px; display: grid; place-items: center; }
+.fc-mini .club-badge { width: 22px; height: 22px; font-size: 7px; border-width: 1px; }
+.fc-pips { display: flex; gap: 3px; flex: 1; }
+.fc-pips u { width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 8px solid rgba(255,255,255,.2); }
+.fc-pips u.on { border-bottom-color: #3b8bff; filter: drop-shadow(0 0 3px rgba(59,139,255,.8)); }
+.fc-dia { flex: none; width: 8px; height: 8px; transform: rotate(45deg); background: #3b8bff; box-shadow: 0 0 5px rgba(59,139,255,.8); }
+.fc-tactic { width: 100%; margin-top: 10px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 7px 10px; border-radius: 10px; cursor: pointer; color: #fff; border: 1px solid rgba(245,184,0,.4); background: rgba(245,184,0,.08); font-size: 11px; font-weight: 800; }
+.fc-tactic:hover { background: rgba(245,184,0,.18); }
+.fc-tactic span { color: #F5B800; letter-spacing: 1px; text-transform: uppercase; }
+.fc-tactic b { font-size: 10px; font-weight: 600; opacity: .85; text-align: left; }
 .sq-team { display: flex; align-items: center; gap: 12px; }
 .sq-team .club-badge { width: 46px; height: 46px; font-size: 17px; }
 .sq-team small { display: block; font-size: 9px; letter-spacing: 2.5px; color: #F5B800; font-weight: 800; }
@@ -246,10 +281,22 @@ export const squadRatingCss = `
   .sq-list { order: 3; }
 }
 @media (max-width: 999px) {
-  .sq-rate { order: -1; }
-  .sq-list { order: 2; }
-  .sq-ovr strong { font-size: 54px; }
-  .sq-stars svg { width: 22px; height: 22px; }
+  .sq-layout { grid-template-columns: 104px minmax(0, 1fr); gap: 8px; }
+  .sq-rate { grid-column: 1; grid-row: 1; position: sticky; top: 70px; z-index: 2; }
+  .sq-center { grid-column: 2; grid-row: 1; }
+  .sq-list { grid-column: 1 / -1; grid-row: 2; }
+  .fc-head { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .fc-head .club-badge { width: 34px; height: 34px; font-size: 12px; }
+  .fc-name { font-size: 12px; white-space: normal; }
+  .fc-info { width: 100%; }
+  .fc-info .sq-stars { gap: 1px; } .fc-info .sq-stars svg { width: 11px; height: 11px; }
+  .fc-rating { font-size: 11px; } .fc-rating strong { font-size: 15px; margin-left: 4px; }
+  .fc-mgmt { font-size: 11px; margin-top: 8px; }
+  .fc-chem { font-size: 10px; } .fc-chem b { display: block; margin: 0; font-size: 12px; }
+  .fc-list { max-height: 190px; } .fc-row { gap: 5px; padding: 5px 5px; }
+  .fc-row .sq-flag { width: 18px; height: 12px; } .fc-mini, .fc-mini .club-badge { width: 18px; height: 18px; font-size: 6px; }
+  .fc-pips { gap: 2px; } .fc-pips u { border-left-width: 3px; border-right-width: 3px; border-bottom-width: 6px; } .fc-dia { width: 6px; height: 6px; }
+  .fc-tactic { padding: 6px 6px; font-size: 10px; } .fc-tactic b { font-size: 9px; }
 }
 @media (max-width: 420px) { .sq-score { gap: 12px; } .sq-formation b { font-size: 28px; } }
 @media (prefers-reduced-motion: reduce) { .sq-ovr strong, .sq-stars svg.on, .sq-links line { animation: none; } .sq-bar i { transition: none; } }
