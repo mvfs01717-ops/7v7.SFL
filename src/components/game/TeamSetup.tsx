@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { average, getPlayerPositions } from '@/lib/game/helpers';
 import { positions, type Player, type Position, type Team } from '@/lib/game/types';
-import { CAPTAIN_SELF_BONUS, SUBS_MAX, TACTICS, TACTIC_INFO, captainTeamBonus, type Tactic } from '@/lib/multiplayer';
+import { CAPTAIN_SELF_BONUS, SUBS_MAX, TACTIC_INFO, captainTeamBonus, type Tactic } from '@/lib/multiplayer';
 import { TeamMark } from '@/components/game/Card';
 import { TacticalSettings } from '@/components/game/TacticalSettings';
 import { deriveTactic, hasSavedTactics, loadTactics, presetName } from '@/lib/tacticsProfile';
