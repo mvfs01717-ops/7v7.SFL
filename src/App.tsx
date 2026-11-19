@@ -3,8 +3,6 @@ import AdminScreen from '@/components/AdminScreen';
 import { type Shootout } from '@/components/PenaltyShootout';
 import StadiumBackdrop, { type BackdropCamera } from '@/components/game/StadiumBackdrop';
 import { globalCss } from '@/lib/game/globalCss';
-import { VarCheck } from '@/components/game/VarCheck';
-import { getVarConfig, loadVarConfig, logVarDecision, seedOf, varReview } from '@/lib/var';
 import { isFreeAgent, HALFTIME_MS, HT_BREAK_MS, HT_RETURN_MS, HT_RETURN_NO_SUBS_MS, LINEUP_REVEAL_MS, MINUTE_MS, PENALTY_PREP_MS, SHOOTOUT_CHANCE, average, forceDrawPlan, getPlayerPositions, pickByRoll, pickShooter, slotOf, type PlanEntry } from '@/lib/game/helpers';
 import { BENCH_SLOTS, emptyStats, positions, slotPositionsOf, type BenchSlot, type DraftSlot, type GoalRecord, type MatchEvent, type MatchStats, type Player, type Position, type Screen, type Team } from '@/lib/game/types';
 import { BENCH_KEYS, SUBS_MAX, SUBS_WINDOW_SEC, autoSubstitutions, encodeSubs, hasBench, subsDecided, subsOf, createRoom, effortLoss, fetchRoom, pingRoom, fitsSlot, generatePlan, isRoomLive, listLiveRooms, joinRoom, openRoomChat, patchRoom, recordResult, reshapeSecondHalf, setWetFrom, saveActiveRoom, clearActiveRoom, loadActiveRoom, slowdown, staminaAt, tacticOf, TACTIC_INFO, type ChatMessage, type FieldLite, type PlanItem, type Room, type Tactic } from '@/lib/multiplayer';
@@ -153,11 +151,6 @@ function App() {
   // Placar mostrado na tela: só sobe quando a bola entra no gol na animação
   const [shownScore, setShownScore] = useState({ user: 0, bot: 0 });
   const [shownGoalIds, setShownGoalIds] = useState<number[]>([]);
-  // VAR: lance em revisão (a tela CHECKING GOAL fica aberta até a decisão), gols anulados da partida e chave do histórico
-  const [varCheck, setVarCheck] = useState<{ event: MatchEvent; side: 'user' | 'bot' } | null>(null);
-  const varPending = useRef<Set<number>>(new Set());
-  const varAnnulled = useRef(0);
-  const varMatchKey = useRef('');
   const [skipped, setSkipped] = useState(false);
   const eventSeq = useRef(0);
   const halftimeDone = useRef(false);
@@ -200,7 +193,6 @@ function App() {
 
   useEffect(() => {
     void loadData();
-    void loadVarConfig();
   }, []);
 
   // Voltou a internet depois de abrir offline: baixa os dados atuais
@@ -1272,11 +1264,6 @@ function App() {
     setSkipped(false);
     eventSeq.current = 0;
     shownRef.current = new Set();
-    setVarCheck(null);
-    varPending.current = new Set();
-    varAnnulled.current = 0;
-    varMatchKey.current = `solo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-    void loadVarConfig();
     navigate('match', true);
   }
 
@@ -1330,7 +1317,6 @@ function App() {
   const goesToShootout = score.user === score.bot;
   useEffect(() => {
     if (screen !== 'match' || minute < 90) return;
-    if (varCheck && !skipped) return; // VAR revisando um gol: espera a decisão
     if (!skipped && extra < stoppageFor(2)) return; // ainda nos acréscimos
     if (goesToShootout && (penaltyPhase || shootout)) return; // pênaltis em andamento
     const allShown = shownScore.user === score.user && shownScore.bot === score.bot;
@@ -1340,13 +1326,13 @@ function App() {
     const timer = window.setTimeout(() => {
       // Passou do limite sem a bola entrar: confirma os gols que faltam para o placar ficar certo
       eventsRef.current.forEach((event) => {
-        if (event.type === 'gol' && !shownRef.current.has(event.id)) handleGoal(event.id, event.team, true);
+        if (event.type === 'gol' && !shownRef.current.has(event.id)) handleGoal(event.id, event.team);
       });
       if (goesToShootout) setPenaltyPhase(true);
       else navigate('results', true);
     }, wait);
     return () => window.clearTimeout(timer);
-  }, [screen, minute, extra, skipped, shownScore, score, penaltyPhase, shootout, varCheck]);
+  }, [screen, minute, extra, skipped, shownScore, score, penaltyPhase, shootout]);
   eventsRef.current = events;
   // Progresso para desbloquear bolas, chuteiras e comemorações (conta uma vez por partida jogada, fora espectador)
   useEffect(() => {
@@ -1416,7 +1402,7 @@ function App() {
       endHalfRef.current = false;
       // Se a bola ainda não entrou, o gol é confirmado agora (o intervalo cobre o campo)
       eventsRef.current.forEach((event) => {
-        if (event.type === 'gol' && !shownRef.current.has(event.id)) handleGoal(event.id, event.team, true);
+        if (event.type === 'gol' && !shownRef.current.has(event.id)) handleGoal(event.id, event.team);
       });
       halftimeDone.current = true;
       setExtra(0);
@@ -1507,62 +1493,12 @@ function App() {
     setPause((current) => (current === 'setpiece' ? null : current));
   }
 
-  // Chave da partida para o VAR: a sala (igual para quem joga e para quem assiste) ou, no solo, uma chave sorteada
-  const varKey = () => roomRef.current?.id ?? spectating?.roomId ?? varMatchKey.current;
-  function commitGoal(id: number, side: 'user' | 'bot') {
+  function handleGoal(id: number, side: 'user' | 'bot') {
     if (shownRef.current.has(id)) return;
     shownRef.current.add(id);
     setShownGoalIds((current) => [...current, id]);
     setShownScore((current) => ({ ...current, [side]: current[side] + 1 }));
     if (side === 'user' && !spectating && !catchingUp.current) addProgress({ goals: 1 });
-  }
-  // Fim da revisão do VAR: confirmado soma no placar; anulado só mostra o lance (sem gol) e guarda o motivo
-  function resolveVar(event: MatchEvent, side: 'user' | 'bot') {
-    const verdict = event.varCheck;
-    varPending.current.delete(event.id);
-    if (!verdict || shownRef.current.has(event.id)) return;
-    const squad = side === 'user' ? userTeam : botTeam;
-    const scorer = squad.find((player) => player.name === event.actor)?.name ?? event.actor ?? 'Atacante';
-    const mine = selectedClub?.abbreviation ?? '';
-    const rival = opponentTeam?.abbreviation ?? '';
-    void logVarDecision({
-      matchKey: varKey(),
-      minute: event.minute,
-      side: side === 'user' ? mine : rival,
-      home: mine,
-      away: rival,
-      scorer,
-      outcome: verdict.outcome,
-      reason: verdict.reason,
-    });
-    if (verdict.outcome === 'confirmado') {
-      commitGoal(event.id, side);
-      setEvents((current) => current.map((item) => (item.id === event.id ? { ...item, text: `${item.text} VAR: ${verdict.reason}.` } : item)));
-      return;
-    }
-    shownRef.current.add(event.id);
-    const text = `VAR: gol anulado de ${scorer} (${event.minute}'). ${verdict.reason}.`;
-    const asShot = (item: MatchEvent): MatchEvent => (item.id === event.id ? { ...item, type: 'finalização', text } : item);
-    setEvents((current) => current.map(asShot));
-    setHighlights((current) => current.map(asShot));
-    setShownGoalIds((current) => [...current, event.id]);
-  }
-  function handleGoal(id: number, side: 'user' | 'bot', instant = false) {
-    if (shownRef.current.has(id)) return;
-    const event = eventsRef.current.find((item) => item.id === id);
-    if (!event?.varCheck) {
-      commitGoal(id, side);
-      return;
-    }
-    // Reconstrução (espectador), intervalo, fim de jogo e "pular partida": decide na hora, sem tela
-    if (instant || catchingUp.current || skipped) {
-      setVarCheck((current) => (current?.event.id === id ? null : current));
-      resolveVar(event, side);
-      return;
-    }
-    if (varPending.current.has(id)) return;
-    varPending.current.add(id);
-    setVarCheck({ event, side });
   }
 
   function createEvent(currentMinute: number, forced?: PlanEntry, setPieceInfo?: { kind: SetKind; option: SetOption }) {
@@ -1596,14 +1532,6 @@ function App() {
       (forced?.keeper ? defenseSquad.find((player) => player.name === forced.keeper) : undefined) ??
       defenseSquad.find((player) => slotOf(player) === 'GK') ??
       defenseSquad[0];
-    // VAR: a simulação decide se o lance é revisado e o resultado (veja lib/var.ts). Gol anulado entra como um gol na
-    // animação e só vira "chute sem gol" depois da decisão; o plano (e o placar final) não muda.
-    const verdict =
-      forced && !setPieceInfo && !forced.spk
-        ? varReview({ seed: seedOf(varKey()), minute: currentMinute, planType: forced.type, shooterPos: attackPlayer ? slotOf(attackPlayer) : 'CF', shooter: attackPlayer?.name ?? 'O atacante', annulledSoFar: varAnnulled.current })
-        : null;
-    if (verdict?.outcome === 'anulado') varAnnulled.current += 1;
-    const evType: MatchEvent['type'] = verdict?.outcome === 'anulado' ? 'gol' : type;
     const club =
       side === 'user'
         ? selectedClub?.abbreviation
@@ -1616,7 +1544,7 @@ function App() {
     const choose = <T,>(list: T[], salt: number): T => list[Math.floor(roll(salt) * list.length) % list.length];
     // Assistência sorteada na hora do gol (igual nos dois lados do multiplayer)
     let assist: Player | undefined;
-    if (evType === 'gol' && attackPlayer) {
+    if (type === 'gol' && attackPlayer) {
       const mates = attackSquad.filter((player) => player.id !== attackPlayer.id && slotOf(player) !== 'GK');
       const assistRoll = Math.abs(Math.sin(currentMinute * 39.3468 + 11.135) * 24634.6345) % 1;
       assist = assistRoll < 0.75 ? pickByRoll(mates, (player) => player.overall, assistRoll / 0.75) : undefined;
@@ -1693,11 +1621,11 @@ function App() {
       `Bola longa de ${middle?.name ?? club}, mas ${mate?.name ?? 'o atacante'} não alcança.`,
     ];
     const baseText =
-      evType === 'gol'
+      type === 'gol'
         ? goalText
-        : evType === 'finalização'
+        : type === 'finalização'
           ? choose(shotTexts, 2)
-          : evType === 'defesa'
+          : type === 'defesa'
             ? choose(saveTexts, 3)
             : choose(possessionTexts, 4);
     const spInfo = setPieceInfo ?? (forced?.spk && forced.spo ? { kind: forced.spk, option: forced.spo } : undefined);
@@ -1711,13 +1639,16 @@ function App() {
       : baseText;
     eventSeq.current += 1;
     const id = eventSeq.current;
-    const created: MatchEvent = { id, minute: currentMinute, type: evType, text, team: side, actor: attackPlayer?.name, assist: assist?.name, ...(verdict ? { varCheck: verdict } : {}) };
-    setEvents((current) => [created, ...current].slice(0, 18));
-    if (evType !== 'posse') {
-      setHighlights((current) => (current.some((item) => item.id === id) ? current : [...current, created]));
+    setEvents((current) =>
+      [{ id, minute: currentMinute, type, text, team: side, actor: attackPlayer?.name, assist: assist?.name }, ...current].slice(0, 18),
+    );
+    if (type !== 'posse') {
+      setHighlights((current) =>
+        current.some((item) => item.id === id)
+          ? current
+          : [...current, { id, minute: currentMinute, type, text, team: side, actor: attackPlayer?.name, assist: assist?.name }],
+      );
     }
-    // Reconstrução de partida em andamento: gol anulado já aconteceu, decide na hora
-    if (catchingUp.current && verdict?.outcome === 'anulado') resolveVar(created, side);
     // Toda finalização, defesa ou gol é um chute do time que ataca.
     // No alvo = defesa do goleiro ou gol. "Finalização" simples é o chute que sai para fora.
     const isShot = type === 'finalização' || type === 'defesa' || type === 'gol';
@@ -2468,19 +2399,6 @@ function App() {
         <div className="lobby-error" style={{ maxWidth: 560, margin: '8px auto', borderColor: '#F5B800', background: 'rgba(245,184,0,.1)', color: '#F5B800' }}>
           👁 Assistindo: {spectating.host} x {spectating.guest}
         </div>
-      )}
-
-      {screen === 'match' && varCheck?.event.varCheck && (
-        <VarCheck
-          key={varCheck.event.id}
-          verdict={varCheck.event.varCheck}
-          scorer={varCheck.event.actor ?? 'Atacante'}
-          minute={varCheck.event.minute}
-          club={varCheck.side === 'user' ? selectedClub?.abbreviation : opponentTeam?.abbreviation}
-          seconds={getVarConfig().durationSec}
-          onDecision={() => resolveVar(varCheck.event, varCheck.side)}
-          onDone={() => setVarCheck(null)}
-        />
       )}
 
       {screen === 'match' && selectedClub && opponentTeam && !lineupReveal && (

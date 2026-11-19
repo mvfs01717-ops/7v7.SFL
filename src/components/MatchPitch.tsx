@@ -1443,8 +1443,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
   }, [restartKey]);
 
   const latest = events[0];
-  // Pela id do lance (o VAR pode trocar o texto/tipo de um lance já animado; isso não deve refazer a jogada)
-  const latestKey = latest ? (latest.id !== undefined ? `id:${latest.id}` : `${latest.minute}|${latest.type}|${latest.team}|${latest.text}`) : '';
+  const latestKey = latest ? `${latest.minute}|${latest.type}|${latest.team}|${latest.text}` : '';
   useEffect(() => {
     if (!latest || engine.current.lastKey === latestKey) return;
     engine.current.lastKey = latestKey;
