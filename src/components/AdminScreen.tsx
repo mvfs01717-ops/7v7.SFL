@@ -1,5 +1,6 @@
 import { DEFAULT_STYLE, MASTERY, ROLE_STYLES, SECTOR_LABEL, cleanMastery, rolesForPositions, type Mastery } from '@/lib/playerRoles';
 import { ColorField } from '@/components/game/ColorField';
+import { VarAdmin } from '@/components/game/VarAdmin';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import {
@@ -336,7 +337,7 @@ export default function AdminScreen({
   const [sort, setSort] = useState('overall');
   const [editing, setEditing] = useState<Player | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [tab, setTab] = useState<'players' | 'clubs' | 'data' | 'history'>('players');
+  const [tab, setTab] = useState<'players' | 'clubs' | 'data' | 'history' | 'var'>('players');
   const [audit, setAudit] = useState<AuditRow[]>([]);
   const [auditError, setAuditError] = useState('');
   const [auditLoading, setAuditLoading] = useState(false);
@@ -804,6 +805,9 @@ export default function AdminScreen({
         <button role="tab" className={tab === 'history' ? 'ad-tab on' : 'ad-tab'} onClick={() => setTab('history')}>
           <Check size={15} /> Histórico
         </button>
+        <button role="tab" className={tab === 'var' ? 'ad-tab on' : 'ad-tab'} onClick={() => setTab('var')}>
+          <Check size={15} /> VAR
+        </button>
       </div>
 
       {tab === 'players' && (
@@ -1089,6 +1093,8 @@ export default function AdminScreen({
           </section>
         </div>
       )}
+
+      {tab === 'var' && <VarAdmin />}
 
       {tab === 'history' && (
         <section className="ad-card">

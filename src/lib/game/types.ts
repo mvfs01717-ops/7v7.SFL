@@ -36,6 +36,8 @@ export type MatchEvent = {
   // Quem finalizou e quem deu o passe: a animação do campo usa isso para encenar a jogada certa
   actor?: string;
   assist?: string;
+  // VAR: lance revisado (decisão definida pela simulação). Gol anulado vira chute sem gol depois da decisão.
+  varCheck?: { outcome: 'confirmado' | 'anulado'; kind: 'impedimento' | 'falta' | 'mao'; reason: string };
 };
 
 export type MatchStats = {
