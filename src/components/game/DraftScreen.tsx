@@ -3,6 +3,7 @@ import { ArrowLeft } from 'lucide-react';
 import { BENCH_SLOTS, positionNames, type BenchSlot, type DraftSlot, type Player, type Position, type Team } from '@/lib/game/types';
 import { Card, cardCss } from '@/components/game/Card';
 import { stadiumCss } from '@/lib/game/stadiumCss';
+import { SquadLinksLayer, SquadListPanel, SquadRatingPanel, formationLabel, squadRatingCss, squadStats } from '@/components/game/SquadRating';
 
 // ---------- Draft estilo campo: o campo aparece com as cartas escondidas e cada posição revela 3 cartas ----------
 export const FIELD_SPOTS: Record<Position, { x: number; y: number }> = {
@@ -317,6 +318,7 @@ export function DraftScreen({
       setSwapFrom(null);
     }
   }
+  const stats = squadStats(club, positionList, selected);
   const startersFilled = positionList.filter((position) => selected[position]).length;
 
   const benchFilled = BENCH_SLOTS.filter((slot) => bench[slot.id]).length;
@@ -388,6 +390,7 @@ export function DraftScreen({
       <style>{stadiumCss}</style>
       <style>{cardCss}</style>
       <style>{draftCss}</style>
+      <style>{squadRatingCss}</style>
       <div className="dr-stage">
         <div className="draft-head">
           <button className="back-button" onClick={onBack}>
@@ -414,8 +417,13 @@ export function DraftScreen({
             </>
           )}
         </p>
+        <div className="sq-layout">
+          <SquadRatingPanel club={club} stats={stats} />
+          <div className="sq-center">
+            <div className="sq-formation"><small>FORMAÇÃO</small><b>{formationLabel(positionList)}</b></div>
         <div className="dr-field">
           <DraftField />
+          <SquadLinksLayer links={stats.links} />
           {positionList.map((position, index) =>
             slotView(position, position, index, { left: `${FIELD_SPOTS[position].x}%`, top: `${FIELD_SPOTS[position].y}%` }),
           )}
@@ -430,6 +438,9 @@ export function DraftScreen({
             </div>
           </div>
         )}
+          </div>
+          <SquadListPanel stats={stats} bench={bench} withBench={withBench} />
+        </div>
         <div className="dr-confirm">
           <button type="button" className={`gold-button large cta-slant ${ready ? 'ready' : ''}`} disabled={!ready} onClick={onConfirm}>
             {ready ? 'Confirmar escalação' : `Faltam ${total - filled} para completar`}
