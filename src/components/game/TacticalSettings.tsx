@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { TACTIC_DRAIN, TACTIC_INFO, TACTIC_QUALITY, TACTIC_SHOTS, type Tactic } from '@/lib/multiplayer';
 import { positionNames, type Player, type Position } from '@/lib/game/types';
 import {
@@ -98,7 +99,7 @@ export function TacticalSettings({ onClose, onUse, squad }: { onClose: () => voi
     TACTIC_QUALITY[tactic] > 0.03 ? { ok: true, text: 'Chutes muito perigosos' } : TACTIC_QUALITY[tactic] < 0 ? { ok: false, text: 'Chutes menos incisivos' } : { ok: true, text: 'Perigo do chute normal' },
   ];
 
-  return (
+  return createPortal(
     <div className="ts-overlay" role="dialog" aria-modal="true" aria-label="Tactical Settings">
       <style>{tacticalCss}</style>
       <div className="ts-wrap">
@@ -216,7 +217,8 @@ export function TacticalSettings({ onClose, onUse, squad }: { onClose: () => voi
           </section>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
