@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { type BenchSlot, BENCH_SLOTS, type Player, type Position, type Team } from '@/lib/game/types';
 import { Badge } from '@/components/game/Card';
+import { TacticalSettings } from '@/components/game/TacticalSettings';
+import { deriveTactic, loadTactics, presetName } from '@/lib/tacticsProfile';
+import { TACTIC_INFO } from '@/lib/multiplayer';
 
 // Painel de avaliação do elenco (inspirado na tela de gestão do Ultimate Team).
 // Tudo vem dos jogadores já escolhidos no draft: nada é fixo ou inventado.
@@ -101,6 +104,9 @@ export function SquadLinksLayer({ links }: { links: [Position, Position][] }) {
 
 export function SquadRatingPanel({ club, stats }: { club: Team; stats: ReturnType<typeof squadStats> }) {
   const avg = useCountUp(stats.avg);
+  const [tacticsOpen, setTacticsOpen] = useState(false);
+  const tacticStore = loadTactics();
+  const mainPreset = tacticStore.presets[tacticStore.main] ?? tacticStore.presets[0]!;
   const pct = stats.chemMax ? Math.round((stats.chem / stats.chemMax) * 100) : 0;
   const level = pct >= 75 ? 'Excelente' : pct >= 50 ? 'Boa' : pct >= 25 ? 'Em formação' : 'Baixa';
   return (
@@ -124,6 +130,11 @@ export function SquadRatingPanel({ club, stats }: { club: Team; stats: ReturnTyp
         <div className="sq-bar" role="progressbar" aria-valuemin={0} aria-valuemax={stats.chemMax} aria-valuenow={stats.chem}><i style={{ width: `${pct}%` }} /></div>
         <div className="sq-chem-f"><span>{level}</span><span>{stats.links.length} {stats.links.length === 1 ? 'ligação' : 'ligações'} entre jogadores</span></div>
       </div>
+      <button type="button" className="sq-tactic" onClick={() => setTacticsOpen(true)}>
+        <span>⚙ TÁTICAS</span>
+        <b>{presetName(tacticStore.main)} · {TACTIC_INFO[deriveTactic(mainPreset)].label}</b>
+      </button>
+      {tacticsOpen && <TacticalSettings onClose={() => setTacticsOpen(false)} />}
     </section>
   );
 }
@@ -191,6 +202,10 @@ export const squadRatingCss = `
 .sq-bar { height: 10px; margin: 6px 0; border-radius: 99px; background: rgba(255,255,255,.1); overflow: hidden; }
 .sq-bar i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, #c98a00, #F5B800 60%, #fff2b0); box-shadow: 0 0 12px rgba(245,184,0,.6); transition: width .7s cubic-bezier(.2,.8,.2,1); }
 .sq-chem-f { display: flex; justify-content: space-between; gap: 8px; font-size: 10px; opacity: .75; }
+.sq-tactic { width: 100%; margin-top: 12px; display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 10px; cursor: pointer; color: #fff; border: 1px solid rgba(245,184,0,.4); background: rgba(245,184,0,.08); font-size: 11px; letter-spacing: 1.5px; font-weight: 800; transition: all .2s; }
+.sq-tactic:hover { background: rgba(245,184,0,.18); }
+.sq-tactic span { color: #F5B800; }
+.sq-tactic b { font-size: 11px; letter-spacing: 0; text-align: right; }
 .sq-list-h { display: flex; justify-content: space-between; font-size: 10px; letter-spacing: 2.5px; color: #F5B800; margin-bottom: 8px; }
 .sq-list-h span { opacity: .75; letter-spacing: 1px; color: #fff; }
 .sq-bench-h { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.1); }

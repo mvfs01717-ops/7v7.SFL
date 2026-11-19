@@ -3,6 +3,8 @@ import { average, getPlayerPositions } from '@/lib/game/helpers';
 import { positions, type Player, type Position, type Team } from '@/lib/game/types';
 import { CAPTAIN_SELF_BONUS, SUBS_MAX, TACTICS, TACTIC_INFO, captainTeamBonus, type Tactic } from '@/lib/multiplayer';
 import { TeamMark } from '@/components/game/Card';
+import { TacticalSettings } from '@/components/game/TacticalSettings';
+import { deriveTactic, hasSavedTactics, loadTactics, presetName } from '@/lib/tacticsProfile';
 
 // Escolha do banco depois do draft (só contra o bot): o jogador monta os 3 reservas que podem entrar no intervalo
 export function BenchPicker({ candidates, onConfirm }: { candidates: Player[]; onConfirm: (bench: Player[]) => void }) {
@@ -116,6 +118,11 @@ export const setupCss = `
 .tc-t small { font-size: 11px; line-height: 1.3; opacity: .7; }
 .tc-t.on { border-color: #F5B800; background: linear-gradient(180deg, rgba(245,184,0,.3), rgba(245,184,0,.05)); box-shadow: 0 0 0 1px #F5B800, 0 8px 24px rgba(245,184,0,.25); }
 .tc-t.on b { color: #F5B800; }
+.tc-presets { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
+.tc-p { padding: 8px 12px; border-radius: 999px; font-size: 11px; font-weight: 800; letter-spacing: .5px; cursor: pointer; color: #f4f4f0; border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.05); transition: all .2s; }
+.tc-p i { font-style: normal; color: #F5B800; margin-right: 4px; }
+.tc-p.on { border-color: #F5B800; background: rgba(245,184,0,.22); box-shadow: 0 0 0 1px #F5B800; }
+.tc-p.edit { border-style: dashed; color: #F5B800; }
 .tc-caps { display: flex; flex-wrap: wrap; gap: 8px; }
 .tc-c { display: flex; align-items: center; gap: 8px; padding: 8px 12px 8px 8px; border-radius: 999px; cursor: pointer; color: #f4f4f0; min-width: 0;
   border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.05); transition: transform .2s, border-color .2s, box-shadow .2s; }
@@ -149,6 +156,8 @@ export function TacticCaptainPanel({
   onTactic: (tactic: Tactic) => void;
   onCaptain: (id: string) => void;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [store, setStore] = useState(() => loadTactics());
   const members = positions.flatMap((position) => (squad[position] ? [{ position, player: squad[position] as Player }] : []));
   const chosenCaptain = members.find((member) => member.player.id === captain)?.player;
   return (
@@ -159,6 +168,26 @@ export function TacticCaptainPanel({
           <b>TÁTICA</b>
           <span>O rival só descobre a sua na apresentação.</span>
         </div>
+        <div className="tc-presets">
+          {store.presets.map((preset, index) =>
+            preset ? (
+              <button key={index} type="button" className={`tc-p ${tactic === deriveTactic(preset) ? 'on' : ''}`} onClick={() => onTactic(deriveTactic(preset))} title={TACTIC_INFO[deriveTactic(preset)].text}>
+                {store.main === index && <i>★</i>}
+                {presetName(index)} · {TACTIC_INFO[deriveTactic(preset)].label}
+              </button>
+            ) : null,
+          )}
+          <button type="button" className="tc-p edit" onClick={() => setEditing(true)}>⚙ TACTICAL SETTINGS</button>
+        </div>
+        {editing && (
+          <TacticalSettings
+            onClose={() => {
+              setEditing(false);
+              setStore(loadTactics());
+            }}
+            onUse={onTactic}
+          />
+        )}
         <div className="tc-tactics">
           {TACTICS.map((item) => {
             const info = TACTIC_INFO[item];
@@ -207,7 +236,11 @@ export function TacticPicker({
   squad: Partial<Record<Position, Player>>;
   onPick: (tactic: Tactic, captain: string) => void;
 }) {
-  const [chosen, setChosen] = useState<Tactic>('equilibrada');
+  const [chosen, setChosen] = useState<Tactic>(() => {
+    if (!hasSavedTactics()) return 'equilibrada';
+    const saved = loadTactics();
+    return deriveTactic(saved.presets[saved.main] ?? saved.presets[0]!);
+  });
   const [captain, setCaptain] = useState<string>(bestCaptainId(squad));
   return (
     <div
