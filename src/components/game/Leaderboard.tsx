@@ -16,7 +16,12 @@ export type MatchRow = {
 export type RankRow = { id: string; nick: string; games: number; wins: number; draws: number; losses: number };
 
 export const leaderboardCss = `
-.lb-head, .lb-row { display: grid; grid-template-columns: 38px 1fr 40px 40px 40px 40px 62px; }
+.lb-head, .lb-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) 40px 40px 40px 40px 62px; }
+.lb-row .rank-player { min-width: 0; }
+.lb-name { min-width: 0; }
+.lb-sub { display: none; }
+.lb-row .rank-player b { min-width: 0; }
+.leaderboard-panel { overflow: hidden; }
 .lb-head, .lb-row { gap: 6px; align-items: center; padding: 12px 16px; }
 .lb-head { font-size: 11px; letter-spacing: 1.2px; opacity: .6; }
 .lb-head span:nth-child(n+3), .lb-row > :nth-child(n+3) { text-align: center; }
@@ -46,7 +51,18 @@ export const leaderboardCss = `
 .lb-match b:first-child { text-align: right; }
 .lb-score { padding: 3px 12px; border-radius: 8px; background: rgba(255,255,255,.08); font-weight: 800; }
 @media (max-width: 560px) {
-  .lb-head, .lb-row { grid-template-columns: 28px 1fr 32px 32px 32px 32px 50px; padding: 10px; gap: 4px; }
+  .leaderboard-panel { padding: 12px 6px; }
+  .lb-head, .lb-row { grid-template-columns: 26px minmax(0, 1fr) 52px; padding: 10px 6px; gap: 8px; font-size: 14px; }
+  .lb-head { font-size: 10px; letter-spacing: .8px; }
+  .lb-head span:nth-child(n+3):not(:last-child), .lb-row > :nth-child(n+3):not(:last-child) { display: none; }
+  .lb-head span:last-child, .lb-row > :last-child { text-align: right; font-weight: 800; }
+  .lb-row > * { min-width: 0; }
+  .lb-row .rank-player { gap: 9px; }
+  .lb-row .rank-player > span { width: 30px; height: 30px; font-size: 13px; flex: none; }
+  .lb-row .rank-player b { font-size: 14px; }
+  .lb-row .lb-sub { display: block; font-size: 11px; opacity: .8; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lb-row .lb-sub i { font-style: normal; }
+  .lb-row strong.rank { font-size: 18px; }
 }
 `;
 
@@ -133,7 +149,12 @@ export function Leaderboard({ onBack }: { onBack: () => void }) {
               <strong className={`rank rank-${index + 1}`}>{index + 1}</strong>
               <div className="rank-player">
                 <span>{row.nick.slice(0, 1)}</span>
-                <b>{row.nick}</b>
+                <div className="lb-name">
+                  <b>{row.nick}</b>
+                  <small className="lb-sub">
+                    {row.games} J · <i className="lb-win">{row.wins} V</i> · {row.draws} E · <i className="lb-loss">{row.losses} D</i>
+                  </small>
+                </div>
               </div>
               <span>{row.games}</span>
               <strong className="lb-win">{row.wins}</strong>
