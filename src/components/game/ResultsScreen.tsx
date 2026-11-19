@@ -62,6 +62,33 @@ const resultsCss = `
 .rs .result-actions .gold-button { clip-path: polygon(12px 0, 100% 0, calc(100% - 12px) 100%, 0 100%); border: 0; padding: 18px 38px; font-size: 14px; letter-spacing: 3px; text-transform: uppercase;
   background: linear-gradient(180deg, #ffe27a, #F5B800 60%, #d99a00); box-shadow: 0 0 30px rgba(245,184,0,.35); }
 .rs .result-actions .outline-button { border-radius: 4px; padding: 17px 28px; letter-spacing: 2px; text-transform: uppercase; }
+.ms-head { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 4px 0 14px; font-size: 14px; }
+.ms-head b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-head b:first-child { text-align: right; }
+.ms-score { font-size: 30px; font-weight: 800; font-style: italic; letter-spacing: 2px; } .ms-score i { margin: 0 6px; opacity: .6; font-style: normal; }
+.ms-body { display: grid; grid-template-columns: 130px minmax(0, 1fr) 130px; gap: 16px; align-items: center; }
+.ms-side { display: grid; gap: 14px; justify-items: center; }
+.ms-gauge { text-align: center; width: 112px; }
+.ms-gauge svg { width: 100%; display: block; }
+.ms-g-bg { fill: none; stroke: rgba(255,255,255,.14); stroke-width: 3; }
+.ms-g-fg { fill: none; stroke-width: 4; stroke-linecap: round; transition: stroke-dasharray .8s ease; }
+.ms-gauge.user .ms-g-fg { stroke: #38a8ff; } .ms-gauge.bot .ms-g-fg { stroke: #4ade80; }
+.ms-g-t { fill: #fff; font-size: 24px; font-weight: 700; }
+.ms-gauge span { display: block; margin-top: 4px; font-size: 9.5px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; opacity: .9; }
+.ms-table { display: grid; }
+.ms-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; padding: 8px 6px; border-bottom: 1px solid rgba(255,255,255,.08); font-size: 13px; }
+.ms-l { text-align: center; font-weight: 700; font-size: 12px; }
+.ms-v { font-weight: 600; } .ms-v.r { text-align: right; }
+.ms-v.lead-u { box-shadow: inset 3px 0 0 #38a8ff; padding-left: 8px; font-weight: 800; }
+.ms-v.lead-b { box-shadow: inset -3px 0 0 #4ade80; padding-right: 8px; font-weight: 800; }
+@media (max-width: 720px) {
+  .ms-body { grid-template-columns: 1fr 1fr; }
+  .ms-table { grid-column: 1 / -1; grid-row: 2; }
+  .ms-side { grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .ms-gauge { width: 100%; max-width: 84px; } .ms-gauge span { font-size: 8px; }
+  .ms-g-t { font-size: 26px; }
+  .ms-head { font-size: 12px; gap: 8px; } .ms-score { font-size: 24px; }
+}
 @media (max-width: 560px) {
   .rs .result-score > strong { font-size: 54px; } .rs .result-score { padding: 10px 14px; gap: 10px; }
   .rs-mvp { gap: 12px; padding: 14px; } .rs-mvp-card { width: 96px; } .rs-mvp h3 { font-size: 20px; } .rs-mvp-r { font-size: 38px; }
@@ -266,10 +293,7 @@ export function ResultsScreen({
             </div>
             <BarChart3 />
           </div>
-          <ResultBar label="Posse de bola" user={stats.userPossession} bot={stats.botPossession} suffix="%" />
-          <ResultBar label="Finalizações" user={stats.userShots} bot={stats.botShots} />
-          <ResultBar label="No alvo" user={stats.userTarget} bot={stats.botTarget} />
-          <ResultBar label="Defesas" user={stats.userSaves} bot={stats.botSaves} />
+          <MatchSummary club={club} opponent={opponent} score={score} stats={stats} goalLog={goalLog} />
           {goalLog.length > 0 && (
             <div style={{ marginTop: 18 }}>
               <span className="eyebrow">GOLS DA PARTIDA</span>
@@ -356,6 +380,69 @@ export function ResultsScreen({
         </button>
       </div>
     </main>
+  );
+}
+
+const pctOf = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 100) : 0);
+
+function Gauge({ value, label, side }: { value: number; label: string; side: 'user' | 'bot' }) {
+  const R = 44;
+  const C = 2 * Math.PI * R;
+  return (
+    <div className={`ms-gauge ${side}`}>
+      <svg viewBox="0 0 100 100" role="img" aria-label={`${label}: ${value}%`}>
+        <circle cx="50" cy="50" r={R} className="ms-g-bg" />
+        {value > 0 && <circle cx="50" cy="50" r={R} className="ms-g-fg" strokeDasharray={`${(C * value) / 100} ${C}`} transform="rotate(-90 50 50)" />}
+        <text x="50" y="58" textAnchor="middle" className="ms-g-t">{value}%</text>
+      </svg>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+// Resumo da partida (estilo tela de estatísticas do FC). Só usa números que o jogo realmente registra.
+function MatchSummary({ club, opponent, score, stats, goalLog }: { club: Team; opponent: Team; score: { user: number; bot: number }; stats: MatchStats; goalLog: GoalRecord[] }) {
+  const assists = (side: 'user' | 'bot') => goalLog.filter((g) => g.side === side && g.assistId).length;
+  const gauges = (side: 'user' | 'bot') => {
+    const shots = side === 'user' ? stats.userShots : stats.botShots;
+    const target = side === 'user' ? stats.userTarget : stats.botTarget;
+    const goals = side === 'user' ? score.user : score.bot;
+    const poss = side === 'user' ? stats.userPossession : stats.botPossession;
+    return [
+      { v: poss, l: 'Posse de bola' },
+      { v: pctOf(target, shots), l: 'Precisão de chute' },
+      { v: pctOf(goals, shots), l: 'Conversão em gol' },
+    ].map((g) => <Gauge key={g.l} value={g.v} label={g.l} side={side} />);
+  };
+  const rows: [string, number, number, string?][] = [
+    ['Posse de bola', stats.userPossession, stats.botPossession, '%'],
+    ['Gols', score.user, score.bot],
+    ['Finalizações', stats.userShots, stats.botShots],
+    ['Finalizações no alvo', stats.userTarget, stats.botTarget],
+    ['Defesas', stats.userSaves, stats.botSaves],
+    ['Assistências', assists('user'), assists('bot')],
+  ];
+  return (
+    <div className="ms">
+      <div className="ms-head">
+        <b>{club.name}</b>
+        <span className="ms-score">{score.user}<i>:</i>{score.bot}</span>
+        <b>{opponent.name}</b>
+      </div>
+      <div className="ms-body">
+        <div className="ms-side">{gauges('user')}</div>
+        <div className="ms-table" role="table" aria-label="Resumo da partida">
+          {rows.map(([label, u, b, suf]) => (
+            <div className="ms-row" role="row" key={label}>
+              <span className={`ms-v ${u > b ? 'lead-u' : ''}`}>{u}{suf}</span>
+              <span className="ms-l">{label}</span>
+              <span className={`ms-v r ${b > u ? 'lead-b' : ''}`}>{b}{suf}</span>
+            </div>
+          ))}
+        </div>
+        <div className="ms-side">{gauges('bot')}</div>
+      </div>
+    </div>
   );
 }
 
