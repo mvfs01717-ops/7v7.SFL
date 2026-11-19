@@ -418,7 +418,7 @@ export function DraftScreen({
           )}
         </p>
         <div className="sq-layout">
-          <SquadRatingPanel club={club} stats={stats} />
+          <SquadRatingPanel club={club} stats={stats} squad={selected} />
           <div className="sq-center">
             <div className="sq-formation"><small>FORMAÇÃO</small><b>{formationLabel(positionList)}</b></div>
         <div className="dr-field">

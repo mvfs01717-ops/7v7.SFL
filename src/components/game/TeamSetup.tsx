@@ -186,20 +186,10 @@ export function TacticCaptainPanel({
               setStore(loadTactics());
             }}
             onUse={onTactic}
+            squad={squad}
           />
         )}
-        <div className="tc-tactics">
-          {TACTICS.map((item) => {
-            const info = TACTIC_INFO[item];
-            return (
-              <button key={item} type="button" className={`tc-t ${tactic === item ? 'on' : ''}`} aria-pressed={tactic === item} onClick={() => onTactic(item)}>
-                <span className="ic" aria-hidden="true">{info.icon}</span>
-                <b>{info.label}</b>
-                <small>{info.text}</small>
-              </button>
-            );
-          })}
-        </div>
+        <div className="tc-info"><b>{TACTIC_INFO[tactic].icon} {TACTIC_INFO[tactic].label}:</b> {TACTIC_INFO[tactic].text}</div>
       </div>
       <div>
         <div className="tc-h">

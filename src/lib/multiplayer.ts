@@ -550,7 +550,7 @@ export function subsOf(squad: Squad | null | undefined): { slot: string; inId: s
 export const encodeSubs = (picks: { slot: string; inId: string }[]) =>
   JSON.stringify(picks.slice(0, SUBS_MAX).map((pick) => ({ s: pick.slot, i: pick.inId })));
 const DRAIN_PER_MINUTE: Record<string, number> = { GK: 0.05, CF: 0.22, LF: 0.26, RF: 0.26, CM: 0.32, LB: 0.24, RB: 0.24 };
-const TACTIC_DRAIN: Record<Tactic, number> = { ofensiva: 1.2, equilibrada: 1, defensiva: 0.88, contra: 0.95, posse: 0.9, pressao: 1.35 };
+export const TACTIC_DRAIN: Record<Tactic, number> = { ofensiva: 1.2, equilibrada: 1, defensiva: 0.88, contra: 0.95, posse: 0.9, pressao: 1.35 };
 const TIRED_FROM = 75;
 const FATIGUE_PER_POINT = 0.18;
 export const OUT_OF_POSITION_PENALTY = 5;

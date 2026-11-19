@@ -102,7 +102,7 @@ export function SquadLinksLayer({ links }: { links: [Position, Position][] }) {
   );
 }
 
-export function SquadRatingPanel({ club, stats }: { club: Team; stats: ReturnType<typeof squadStats> }) {
+export function SquadRatingPanel({ club, stats, squad }: { club: Team; stats: ReturnType<typeof squadStats>; squad?: Partial<Record<Position, Player>> }) {
   const avg = useCountUp(stats.avg);
   const [tacticsOpen, setTacticsOpen] = useState(false);
   const tacticStore = loadTactics();
@@ -134,7 +134,7 @@ export function SquadRatingPanel({ club, stats }: { club: Team; stats: ReturnTyp
         <span>⚙ TÁTICAS</span>
         <b>{presetName(tacticStore.main)} · {TACTIC_INFO[deriveTactic(mainPreset)].label}</b>
       </button>
-      {tacticsOpen && <TacticalSettings onClose={() => setTacticsOpen(false)} />}
+      {tacticsOpen && <TacticalSettings onClose={() => setTacticsOpen(false)} squad={squad} />}
     </section>
   );
 }
