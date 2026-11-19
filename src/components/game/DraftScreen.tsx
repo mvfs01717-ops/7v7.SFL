@@ -66,24 +66,28 @@ export const draftCss = `
   position: absolute;
   left: 50%;
   top: 100%;
-  transform: translate(-50%, 4px);
+  transform: translate(-50%, 1px);
   white-space: nowrap;
   font-style: normal;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: .08em;
-  padding: 2px 7px;
-  border-radius: 99px;
-  background: rgba(5,8,12,.78);
-  color: #F5B800;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: .06em;
+  padding: 6px 18px 7px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 30%, rgba(14,32,40,.96), rgba(4,12,16,.92));
+  color: #4fb0f0;
+  text-shadow: 0 0 6px rgba(79,176,240,.55);
+  box-shadow: 0 2px 6px rgba(0,0,0,.5), inset 0 0 0 1px rgba(79,176,240,.18);
 }
-.dr-slot.filled .dr-label { color: #e8e6df; }
+.dr-slot.filled .dr-label { color: #4fb0f0; }
 .dr-slot.swappable { cursor: pointer; }
 .dr-slot.swappable:hover .dr-glow { transform: translateY(-3px); }
 .dr-slot.sel { z-index: 3; }
 .dr-slot.sel .dr-glow { transform: scale(1.12); filter: drop-shadow(0 0 14px #F5B800) drop-shadow(0 0 4px #fff); }
 .dr-slot.target .dr-glow { animation: dr-pulse 1.3s ease-in-out infinite; }
-.dr-label.oop { background: #7f1d1d; color: #fecaca; }
+.dr-bench .dr-label { font-size: 9px; padding: 5px 9px 6px; letter-spacing: .04em; }
+.dr-label.oop { background: #7f1d1d; color: #fecaca; text-shadow: none; border-radius: 99px; padding: 5px 10px 6px; }
 .dr-reveal { animation: dr-reveal .95s cubic-bezier(.2,.85,.25,1) both; }
 .dr-reveal-glow { animation: dr-flash 1.5s ease-out both; }
 .dr-bench { width: min(100%, 540px); margin: 22px auto 0; text-align: center; }
