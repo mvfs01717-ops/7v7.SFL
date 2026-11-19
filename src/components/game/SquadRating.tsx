@@ -4,7 +4,7 @@ import { Badge } from '@/components/game/Card';
 import { TacticalSettings } from '@/components/game/TacticalSettings';
 import { deriveTactic, loadTactics, presetName } from '@/lib/tacticsProfile';
 import { TACTIC_INFO } from '@/lib/multiplayer';
-import { ROLES_EVENT, loadRoles, roleOf } from '@/lib/playerRoles';
+import { ROLES_EVENT, loadRoles, roleOf, roleTag } from '@/lib/playerRoles';
 
 // Painel de avaliação do elenco (inspirado na tela de gestão do Ultimate Team).
 // Tudo vem dos jogadores já escolhidos no draft: nada é fixo ou inventado.
@@ -160,7 +160,7 @@ export function SquadListPanel({ stats, bench, withBench }: { stats: ReturnType<
           <i className="sq-pos">{row.position}</i>
           {row.player ? (
             <>
-              <span className="sq-name">{row.player.name}{!row.natural && <em title="Fora da posição: −5">fora</em>}<small className="sq-role">{roleOf(row.position, row.player, saved).role.icon} {roleOf(row.position, row.player, saved).role.name}</small></span>
+              <span className="sq-name">{row.player.name}{!row.natural && <em title="Fora da posição: −5">fora</em>}<small className="sq-role">{roleOf(row.position, row.player, saved).role.icon} {roleOf(row.position, row.player, saved).role.name}{(() => { const tag = roleTag(row.player); return tag ? <span className="sq-mastery"> · {tag.name} <em>{tag.sym}</em></span> : null; })()}</small></span>
               <Flag />
               <b className="sq-ovr-s">{row.player.overall}</b>
               <span className="sq-pips" title={`Entrosamento ${row.chem}/3`}>{[0, 1, 2].map((n) => <u key={n} className={n < row.chem ? 'on' : ''} />)}</span>
@@ -225,6 +225,7 @@ export const squadRatingCss = `
 .sq-row.empty { opacity: .4; }
 .sq-row.click { cursor: pointer; transition: background .2s; }
 .sq-row.click:hover { background: rgba(245,184,0,.08); }
+.sq-mastery { color: #fff; font-weight: 700; } .sq-mastery em { font-style: normal; color: #37d67a; font-weight: 900; }
 .sq-role { display: block; margin-top: 1px; font-size: 10.5px; font-weight: 600; color: #F5B800; opacity: .9; overflow: hidden; text-overflow: ellipsis; }
 .sq-pos { flex: none; width: 34px; text-align: center; font-style: normal; font-weight: 900; font-size: 11px; padding: 3px 0; border-radius: 6px; background: rgba(245,184,0,.16); color: #F5B800; }
 .sq-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }

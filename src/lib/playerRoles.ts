@@ -47,6 +47,9 @@ export const FIT_TEXT: Record<Fit, string> = {
 
 // Usa só dados reais: posição principal e posições alternativas do jogador
 export function roleFit(player: Player, slot: Position, role: Role): Fit {
+  // Função cadastrada pelo administrador: avançado/especialista = ideal; básico = compatível
+  const registered = (player as { role_mastery?: Record<string, { lv?: number }> | null }).role_mastery?.[role.id];
+  if (registered) return registered.lv ? 'ideal' : 'compativel';
   const group = SECTOR_POSITIONS[SECTOR_OF[slot]];
   const inGroup = group.includes(player.primary_position);
   const alts = player.alternate_positions ?? [];
@@ -85,4 +88,60 @@ export function roleOf(slot: Position, player: Player | undefined, saved: Saved 
   const entry = saved[slot];
   const role = entry && player && entry.player === player.id ? roleById(entry.role) : undefined;
   return role && role.sector === SECTOR_OF[slot] ? { role, custom: true } : { role: defaultRole(slot), custom: false };
+}
+
+// ---- Domínio das funções (cadastrado pelo administrador no banco: players.role_mastery) ----
+export type Mastery = 0 | 1 | 2;
+export type RoleEntry = { lv: Mastery; style?: string };
+export type RoleMastery = Record<string, RoleEntry>;
+export const MASTERY: { lv: Mastery; label: string; sym: string }[] = [
+  { lv: 0, label: 'Básico', sym: '' },
+  { lv: 1, label: 'Avançado', sym: '+' },
+  { lv: 2, label: 'Especialista', sym: '++' },
+];
+export const SECTOR_ABBR: Record<Sector, string> = { GK: 'GOL', DEF: 'ZAG', MID: 'MC', WING: 'PONTA', ATT: 'ATA' };
+export const ROLE_STYLES = ['Defender', 'Antecipar', 'Pressionar', 'Construir', 'Equilibrar', 'Criar jogadas', 'Abrir o campo', 'Infiltrar', 'Movimentar', 'Segurar a bola', 'Finalizar'];
+export const DEFAULT_STYLE: Record<string, string> = {
+  'gk-trad': 'Defender', 'gk-build': 'Construir', 'gk-libero': 'Antecipar',
+  'df-build': 'Construir', 'df-mark': 'Defender', 'df-anti': 'Antecipar', 'df-aggr': 'Pressionar',
+  'mc-play': 'Criar jogadas', 'mc-b2b': 'Equilibrar', 'mc-hold': 'Defender', 'mc-inf': 'Infiltrar',
+  'wg-wide': 'Abrir o campo', 'wg-inf': 'Infiltrar', 'wg-play': 'Criar jogadas', 'wg-bal': 'Equilibrar',
+  'at-fin': 'Finalizar', 'at-f9': 'Criar jogadas', 'at-pivot': 'Segurar a bola', 'at-mobile': 'Movimentar',
+};
+
+// Só funções dos setores em que o jogador realmente joga (posição principal + alternativas)
+export function rolesForPositions(primary: Position, alternates: Position[] = []): Role[] {
+  const sectors = new Set<Sector>([SECTOR_OF[primary], ...alternates.map((item) => SECTOR_OF[item])]);
+  return ROLES.filter((role) => sectors.has(role.sector));
+}
+
+export function cleanMastery(raw: unknown, allowed?: Role[]): RoleMastery {
+  const out: RoleMastery = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const role of allowed ?? ROLES) {
+    const entry = (raw as Record<string, any>)[role.id];
+    if (!entry || typeof entry !== 'object') continue;
+    const lv = entry.lv === 1 || entry.lv === 2 ? entry.lv : 0;
+    const style = typeof entry.style === 'string' && ROLE_STYLES.includes(entry.style) ? entry.style : undefined;
+    out[role.id] = style ? { lv, style } : { lv };
+  }
+  return out;
+}
+
+// Funções cadastradas do jogador, da maior para a menor especialidade
+export function masteryList(player: Pick<Player, 'primary_position' | 'alternate_positions'> & { role_mastery?: unknown }): { role: Role; entry: RoleEntry }[] {
+  const clean = cleanMastery(player.role_mastery, rolesForPositions(player.primary_position, player.alternate_positions));
+  return ROLES.filter((role) => clean[role.id]).map((role) => ({ role, entry: clean[role.id] })).sort((a, b) => b.entry.lv - a.entry.lv);
+}
+
+// Etiqueta do Draft: "Defensor ++ · Defender · ZAG"
+export function roleTag(player: Parameters<typeof masteryList>[0]) {
+  const top = masteryList(player)[0];
+  if (!top) return null;
+  return {
+    name: top.role.name,
+    sym: MASTERY[top.entry.lv].sym,
+    style: top.entry.style ?? DEFAULT_STYLE[top.role.id],
+    sector: SECTOR_ABBR[top.role.sector],
+  };
 }

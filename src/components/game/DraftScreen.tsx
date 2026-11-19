@@ -3,6 +3,7 @@ import { ArrowLeft } from 'lucide-react';
 import { BENCH_SLOTS, positionNames, type BenchSlot, type DraftSlot, type Player, type Position, type Team } from '@/lib/game/types';
 import { Card, cardCss } from '@/components/game/Card';
 import { stadiumCss } from '@/lib/game/stadiumCss';
+import { RoleTag } from '@/components/game/RoleTag';
 import { SquadLinksLayer, SquadListPanel, SquadRatingPanel, formationLabel, squadRatingCss, squadStats } from '@/components/game/SquadRating';
 
 // ---------- Draft estilo campo: o campo aparece com as cartas escondidas e cada posição revela 3 cartas ----------
@@ -255,6 +256,7 @@ export function DraftPicker({
                 </div>
                 <span className="dr-glint" aria-hidden="true" />
               </div>
+              <RoleTag player={player} />
             </div>
           ))}
         </div>

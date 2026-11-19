@@ -1,3 +1,4 @@
+import { DEFAULT_STYLE, MASTERY, ROLE_STYLES, SECTOR_LABEL, cleanMastery, rolesForPositions, type Mastery } from '@/lib/playerRoles';
 import { ColorField } from '@/components/game/ColorField';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
@@ -25,6 +26,7 @@ type Player = {
   team_id: string;
   image_url?: string | null;
   team?: Team;
+  role_mastery?: Record<string, { lv: number; style?: string }> | null;
 };
 type Notice = { text: string; error: boolean };
 type AuditRow = {
@@ -1390,6 +1392,11 @@ function PlayerForm({
     // A imagem só vai para o banco se tiver valor (ou se estiver sendo removida)
     if (form.image_url) payload.image_url = form.image_url;
     else if (player.image_url) payload.image_url = null;
+    // Funções e domínio: só vai para o banco se mudou (assim o salvamento normal não depende da coluna nova)
+    const allowedRoles = rolesForPositions(form.primary_position, form.alternate_positions);
+    const masteryNow = cleanMastery(form.role_mastery, allowedRoles);
+    const masteryBefore = cleanMastery(player.role_mastery, rolesForPositions(player.primary_position, player.alternate_positions));
+    if (JSON.stringify(masteryNow) !== JSON.stringify(masteryBefore)) payload.role_mastery = masteryNow;
 
     setSaving(true);
     const result = isNew
@@ -1397,10 +1404,24 @@ function PlayerForm({
       : await supabase.from('players').update(payload).eq('id', form.id);
     setSaving(false);
     if (result.error) {
-      setMessage(`Erro ao salvar: ${result.error.message}`);
+      setMessage(
+        result.error.message.includes('role_mastery')
+          ? 'O banco ainda não tem a coluna das funções. Rode a migração 20261119100000_add_player_role_mastery.sql no Supabase e salve de novo.'
+          : `Erro ao salvar: ${result.error.message}`,
+      );
       return;
     }
     await onSaved();
+  }
+
+  function toggleRole(id: string, on: boolean) {
+    const next = { ...(form.role_mastery ?? {}) };
+    if (on) next[id] = { lv: 0, style: DEFAULT_STYLE[id] };
+    else delete next[id];
+    setForm({ ...form, role_mastery: next });
+  }
+  function patchRole(id: string, patch: { lv?: Mastery; style?: string }) {
+    setForm({ ...form, role_mastery: { ...(form.role_mastery ?? {}), [id]: { ...(form.role_mastery?.[id] ?? { lv: 0 }), ...patch } } });
   }
 
   function toggleAlternative(item: Position) {
@@ -1561,6 +1582,58 @@ function PlayerForm({
                 </button>
               ))}
           </div>
+        </fieldset>
+
+        <fieldset className="rm-box">
+          <legend>Funções e Domínio</legend>
+          <style>{`
+            .rm-box small.rm-help { display: block; margin: 0 0 10px; opacity: .7; font-size: 12px; }
+            .rm-sector { margin: 10px 0 4px; font-size: 10px; letter-spacing: 2px; color: #F5B800; font-weight: 800; }
+            .rm-row { display: grid; grid-template-columns: minmax(0, 1.3fr) auto minmax(0, 1fr); gap: 10px; align-items: center; padding: 9px 0; border-top: 1px solid rgba(255,255,255,.08); }
+            .rm-name { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; cursor: pointer; }
+            .rm-name input { width: 18px; height: 18px; min-height: 0 !important; accent-color: #F5B800; flex: none; }
+            .rm-lv { display: inline-flex; border: 1px solid rgba(255,255,255,.2); border-radius: 10px; overflow: hidden; }
+            .rm-lv button { padding: 8px 11px; font-size: 12px; font-weight: 800; color: #fff; background: rgba(255,255,255,.04); border: 0; cursor: pointer; transition: background .2s; }
+            .rm-lv button + button { border-left: 1px solid rgba(255,255,255,.14); }
+            .rm-lv button.on { background: rgba(245,184,0,.3); color: #F5B800; }
+            .rm-lv button.on.plus { background: rgba(55,214,122,.22); color: #37d67a; }
+            .rm-row select { min-height: 38px; }
+            .rm-row.off .rm-lv, .rm-row.off select { opacity: .3; pointer-events: none; }
+            .rm-empty { opacity: .7; font-size: 13px; }
+            @media (max-width: 640px) { .rm-row { grid-template-columns: 1fr; gap: 8px; } .rm-lv button { flex: 1; min-height: 44px; } }
+          `}</style>
+          <small className="rm-help">Marque as funções que este jogador tem, o nível de domínio e o estilo de atuação. Aparece no Draft depois de salvar. Não muda o overall.</small>
+          {(() => {
+            const available = rolesForPositions(form.primary_position, form.alternate_positions);
+            if (!available.length) return <div className="rm-empty">Escolha as posições do jogador primeiro.</div>;
+            let lastSector = '';
+            return available.map((role) => {
+              const entry = form.role_mastery?.[role.id];
+              const header = role.sector !== lastSector ? <div className="rm-sector" key={`h-${role.sector}`}>{SECTOR_LABEL[role.sector].toUpperCase()}</div> : null;
+              lastSector = role.sector;
+              return (
+                <div key={role.id}>
+                  {header}
+                  <div className={`rm-row ${entry ? '' : 'off'}`}>
+                    <label className="rm-name">
+                      <input type="checkbox" checked={!!entry} onChange={(event) => toggleRole(role.id, event.target.checked)} />
+                      <span>{role.icon} {role.name}</span>
+                    </label>
+                    <div className="rm-lv" role="radiogroup" aria-label={`Domínio de ${role.name}`}>
+                      {MASTERY.map((level) => (
+                        <button key={level.lv} type="button" role="radio" aria-checked={entry?.lv === level.lv} className={`${entry?.lv === level.lv ? 'on' : ''} ${level.lv ? 'plus' : ''}`} onClick={() => patchRole(role.id, { lv: level.lv })}>
+                          {level.lv === 0 ? 'Básico' : level.lv === 1 ? '+' : '++'}
+                        </button>
+                      ))}
+                    </div>
+                    <select value={entry?.style ?? DEFAULT_STYLE[role.id]} onChange={(event) => patchRole(role.id, { style: event.target.value })} aria-label={`Estilo de atuação de ${role.name}`}>
+                      {ROLE_STYLES.map((style) => <option key={style} value={style}>{style}</option>)}
+                    </select>
+                  </div>
+                </div>
+              );
+            });
+          })()}
         </fieldset>
 
         {message && <div className="form-message">{message}</div>}
