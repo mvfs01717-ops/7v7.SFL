@@ -6,6 +6,7 @@ import {
   BUILD_OPTS, CHANCE_OPTS, DEFENSE_OPTS, MAX_PRESETS, STYLE_OPTS, DEFAULT_PROFILE, deriveTactic, describeProfile, loadTactics, presetName, saveTactics,
   type TacticProfile, type TacticStore,
 } from '@/lib/tacticsProfile';
+import { FIT_LABEL, FIT_TEXT, SECTOR_LABEL, SECTOR_OF, loadRoles, roleById, roleFit, roleOf, rolesFor, saveRole } from '@/lib/playerRoles';
 
 type Key = 'style' | 'defense' | 'build' | 'chance';
 type Opt = { id: string; label: string; icon: string; text: string };
@@ -29,10 +30,20 @@ export function TacticalSettings({ onClose, onUse, squad }: { onClose: () => voi
   const [tab, setTab] = useState(saved.main);
   const [focus, setFocus] = useState<Key>('defense');
   const [note, setNote] = useState('');
+  const [view, setView] = useState<'tactics' | 'roles'>('tactics');
+  const filled = ORDER.filter((position) => squad?.[position]);
+  const [roleSlot, setRoleSlot] = useState<Position>(filled[0] ?? 'GK');
+  const [pendingRoles, setPendingRoles] = useState<Partial<Record<Position, string>>>({});
+  const savedRoles = loadRoles();
+  const roleIdOf = (position: Position) => pendingRoles[position] ?? roleOf(position, squad?.[position], savedRoles).role.id;
   const profile = store.presets[tab] ?? DEFAULT_PROFILE;
   const tactic = deriveTactic(profile);
   const info = TACTIC_INFO[tactic];
-  const dirty = JSON.stringify(store) !== JSON.stringify(saved);
+  const dirty = JSON.stringify(store) !== JSON.stringify(saved) || Object.keys(pendingRoles).length > 0;
+  const persistRoles = () => {
+    (Object.entries(pendingRoles) as [Position, string][]).forEach(([position, id]) => squad?.[position] && saveRole(position, squad[position]!, id));
+    setPendingRoles({});
+  };
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => event.key === 'Escape' && onClose();
@@ -72,11 +83,13 @@ export function TacticalSettings({ onClose, onUse, squad }: { onClose: () => voi
   };
   const save = () => {
     saveTactics(store);
+    persistRoles();
     setSaved(store);
     setNote('Alterações salvas');
   };
   const discard = () => {
     setStore(saved);
+    setPendingRoles({});
     if (!saved.presets[tab]) setTab(saved.main);
     setNote('Alterações descartadas');
   };
@@ -104,8 +117,11 @@ export function TacticalSettings({ onClose, onUse, squad }: { onClose: () => voi
       <style>{tacticalCss}</style>
       <div className="ts-wrap">
         <nav className="ts-nav">
-          <b>Edit Tactic</b>
-          <div className="ts-tabs" role="tablist">
+          <div className="ts-views" role="tablist">
+            <button type="button" role="tab" aria-selected={view === 'tactics'} className={view === 'tactics' ? 'on' : ''} onClick={() => setView('tactics')}>Team Tactics</button>
+            <button type="button" role="tab" aria-selected={view === 'roles'} className={view === 'roles' ? 'on' : ''} onClick={() => setView('roles')}>Player Roles</button>
+          </div>
+          <div className="ts-tabs" role="tablist" hidden={view === 'roles'}>
             {Array.from({ length: MAX_PRESETS }, (_, index) =>
               store.presets[index] ? (
                 <button key={index} type="button" role="tab" aria-selected={tab === index} className={`ts-tab ${tab === index ? 'on' : ''}`} onClick={() => setTab(index)}>{presetName(index)}</button>
@@ -118,6 +134,53 @@ export function TacticalSettings({ onClose, onUse, squad }: { onClose: () => voi
         </nav>
         <div className="ts-main">
           <section className="ts-left">
+            {view === 'roles' ? (
+              <div className="ts-roles">
+                <h2>FUNÇÕES DOS JOGADORES</h2>
+                {!filled.length ? (
+                  <p className="ts-empty">Escolha jogadores no draft para definir as funções deles.</p>
+                ) : (
+                  <>
+                    <div className="ts-meta"><span>Toque em um jogador no campo ou aqui:</span></div>
+                    <div className="ts-pickers">
+                      {filled.map((position) => (
+                        <button key={position} type="button" className={roleSlot === position ? 'on' : ''} onClick={() => setRoleSlot(position)}>{position}</button>
+                      ))}
+                    </div>
+                    {(() => {
+                      const slot = filled.includes(roleSlot) ? roleSlot : filled[0];
+                      const player = squad![slot]!;
+                      const currentId = roleIdOf(slot);
+                      const current = roleById(currentId)!;
+                      const fit = roleFit(player, slot, current);
+                      return (
+                        <div className="ts-rolebox" key={slot}>
+                          <div className="ts-rhead"><b>{player.name}</b><span>{SECTOR_LABEL[SECTOR_OF[slot]]} · {slot} · Overall {player.overall}</span></div>
+                          <div className="ts-rlist" role="radiogroup" aria-label="Funções disponíveis">
+                            {rolesFor(slot).map((role) => {
+                              const roleFitValue = roleFit(player, slot, role);
+                              return (
+                                <button key={role.id} type="button" role="radio" aria-checked={currentId === role.id} className={`ts-role ${currentId === role.id ? 'on' : ''}`} onClick={() => setPendingRoles((c) => ({ ...c, [slot]: role.id }))}>
+                                  <span className="ic" aria-hidden="true">{role.icon}</span>
+                                  <span className="tx"><b>{role.name}</b><small>{role.text}</small></span>
+                                  <em className={`fit ${roleFitValue}`}>{FIT_LABEL[roleFitValue]}</em>
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <div className="ts-rdetail" key={currentId}>
+                            <div><small>FINALIDADE TÁTICA</small><b>{current.icon} {current.goal}</b></div>
+                            <div><small>COMPATIBILIDADE</small><b className={`fit-t ${fit}`}>{FIT_LABEL[fit]}</b><span>{FIT_TEXT[fit]}</span></div>
+                          </div>
+                          <p className="ts-rnote">Baseada nas posições do jogador (principal e alternativas). A função não muda o overall.</p>
+                        </div>
+                      );
+                    })()}
+                  </>
+                )}
+              </div>
+            ) : (
+              <>
             <h2>{tab === 0 ? 'TÁTICA PRINCIPAL' : presetName(tab).toUpperCase()}</h2>
             <div className="ts-meta">
               {store.main === tab ? (
@@ -163,15 +226,17 @@ export function TacticalSettings({ onClose, onUse, squad }: { onClose: () => voi
                 );
               })}
             </div>
+              </>
+            )}
             <div className="ts-save">
               <button type="button" className="ts-savebtn" disabled={!dirty} onClick={save}>● Salvar alterações</button>
               <button type="button" className="ts-ghost" disabled={!dirty} onClick={discard}>Descartar</button>
-              {onUse && <button type="button" className="ts-savebtn use" onClick={() => { saveTactics(store); onUse(tactic); onClose(); }}>Usar na partida</button>}
+              {onUse && <button type="button" className="ts-savebtn use" onClick={() => { saveTactics(store); persistRoles(); onUse(tactic); onClose(); }}>Usar na partida</button>}
               <span className="ts-note" key={note}>{note}</span>
             </div>
           </section>
           <section className="ts-right">
-            <div className="ts-viewh"><b>{info.icon} {info.label}</b><span>{describeProfile(profile)}</span></div>
+            <div className="ts-viewh">{view === 'roles' ? <><b>Funções no campo</b><span>A formação é fixa: você só escolhe como cada jogador atua.</span></> : <><b>{info.icon} {info.label}</b><span>{describeProfile(profile)}</span></>}</div>
             <div className="ts-pitch" aria-label="Formação fixa 1-2-1-3">
               <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
                 <polygon points="19,0 81,0 100,100 0,100" className="ts-turf" />
@@ -188,15 +253,24 @@ export function TacticalSettings({ onClose, onUse, squad }: { onClose: () => voi
                 const scale = 0.62 + 0.38 * (spot.y / 100);
                 const player = squad?.[position];
                 return (
-                  <div key={position} className="ts-plate" style={{ left: `${50 + (spot.x - 50) * scale}%`, top: `${spot.y}%` }}>
+                  <div
+                    key={position}
+                    className={`ts-plate ${view === 'roles' && player ? 'pick' : ''} ${view === 'roles' && roleSlot === position ? 'sel' : ''}`}
+                    style={{ left: `${50 + (spot.x - 50) * scale}%`, top: `${spot.y}%` }}
+                    role={view === 'roles' && player ? 'button' : undefined}
+                    tabIndex={view === 'roles' && player ? 0 : undefined}
+                    onClick={() => view === 'roles' && player && setRoleSlot(position)}
+                    onKeyDown={(event) => event.key === 'Enter' && view === 'roles' && player && setRoleSlot(position)}
+                  >
                     <b>{player ? player.name : positionNames[position]}</b>
                     <span>{player ? `${position} · ${player.overall}` : position}</span>
+                    {view === 'roles' && player && <i>{roleById(roleIdOf(position))!.icon} {roleById(roleIdOf(position))!.name}</i>}
                   </div>
                 );
               })}
               <small className="ts-fixed">🔒 Posições fixas</small>
             </div>
-            <div className="ts-analysis">
+            <div className="ts-analysis" hidden={view === 'roles'}>
               <ul>
                 {checks.map((check) => (
                   <li key={check.text} className={check.ok ? 'ok' : 'warn'}><i aria-hidden="true">{check.ok ? '✓' : '!'}</i>{check.text}</li>
@@ -292,6 +366,34 @@ export const tacticalCss = `
 .ts-ring { fill: none; stroke: rgba(255,255,255,.28); stroke-width: .8; }
 .ts-shape { fill: rgba(245,184,0,.35); stroke: #F5B800; stroke-width: 1.4; transition: all .5s; }
 .ts-radar text { fill: #fff; font-size: 8px; font-weight: 700; }
+
+.ts-views { display: flex; gap: 4px; padding-right: 14px; border-right: 1px solid rgba(255,255,255,.2); }
+.ts-views button { background: none; border: 0; color: rgba(255,255,255,.6); font-size: 14px; font-weight: 800; padding: 8px 10px; cursor: pointer; border-bottom: 2px solid transparent; }
+.ts-views button.on { color: #fff; border-bottom-color: #F5B800; }
+.ts-roles h2 { margin: 0 0 8px; font-family: 'Bebas Neue', Inter, sans-serif; font-weight: 400; font-size: 36px; letter-spacing: 1.5px; }
+.ts-empty { opacity: .7; font-size: 13px; }
+.ts-pickers { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.ts-pickers button { padding: 7px 12px; border-radius: 99px; font-size: 11px; font-weight: 900; color: #fff; border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.05); cursor: pointer; transition: all .2s; }
+.ts-pickers button.on { border-color: #F5B800; background: rgba(245,184,0,.25); color: #F5B800; }
+.ts-rhead { margin-bottom: 8px; } .ts-rhead b { display: block; font-size: 18px; } .ts-rhead span { font-size: 12px; opacity: .7; }
+.ts-rlist { display: grid; gap: 8px; }
+.ts-role { display: flex; align-items: center; gap: 10px; padding: 10px 12px; text-align: left; color: #fff; cursor: pointer; border-radius: 12px; border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.05); transition: all .25s; }
+.ts-role:hover { background: rgba(255,255,255,.09); }
+.ts-role .ic { font-size: 24px; flex: none; transition: transform .3s; }
+.ts-role .tx { flex: 1; min-width: 0; } .ts-role .tx b { display: block; font-size: 13px; } .ts-role .tx small { display: block; font-size: 11px; opacity: .7; line-height: 1.3; margin-top: 2px; }
+.ts-role .fit { flex: none; font-style: normal; font-size: 9px; font-weight: 900; letter-spacing: .5px; text-transform: uppercase; padding: 3px 7px; border-radius: 99px; }
+.fit.ideal { background: rgba(55,214,122,.18); color: #37d67a; } .fit.compativel { background: rgba(245,184,0,.18); color: #F5B800; } .fit.alternativa { background: rgba(255,255,255,.1); color: #c7cfdd; }
+.ts-role.on { border-color: #F5B800; background: linear-gradient(160deg, rgba(120,150,210,.3), rgba(245,184,0,.14)); box-shadow: 0 0 0 1px #F5B800, 0 8px 22px rgba(245,184,0,.2); }
+.ts-role.on .ic { transform: scale(1.18); filter: drop-shadow(0 0 8px rgba(245,184,0,.8)); }
+.ts-rdetail { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; padding: 12px; border-radius: 12px; background: rgba(0,0,0,.3); border: 1px solid rgba(255,255,255,.1); animation: ts-in .25s ease-out; }
+.ts-rdetail small { display: block; font-size: 9px; letter-spacing: 2px; opacity: .6; margin-bottom: 4px; } .ts-rdetail b { display: block; font-size: 13px; } .ts-rdetail span { display: block; margin-top: 3px; font-size: 11px; opacity: .72; }
+.fit-t.ideal { color: #37d67a; } .fit-t.compativel { color: #F5B800; } .fit-t.alternativa { color: #c7cfdd; }
+.ts-rnote { margin: 8px 0 0; font-size: 11px; opacity: .55; }
+.ts-plate i { display: block; margin-top: 2px; font-style: normal; font-size: 9px; font-weight: 700; opacity: .9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ts-plate.pick { cursor: pointer; } .ts-plate.pick:hover { transform: translate(-50%, -54%); }
+.ts-plate.sel { border-color: #F5B800; box-shadow: 0 0 14px rgba(245,184,0,.55); background: rgba(40,30,4,.92); }
+@media (max-width: 560px) { .ts-rdetail { grid-template-columns: 1fr; } .ts-role .fit { display: none; } .ts-plate i { display: none; } .ts-nav > .ts-views { border-right: 0; } }
+.ts-tabs[hidden], .ts-analysis[hidden] { display: none; }
 @keyframes ts-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @media (min-width: 900px) { .ts-main { grid-template-columns: 400px minmax(0, 1fr); } }
 @media (max-width: 560px) {

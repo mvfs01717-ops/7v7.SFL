@@ -4,8 +4,7 @@ import { Badge } from '@/components/game/Card';
 import { TacticalSettings } from '@/components/game/TacticalSettings';
 import { deriveTactic, loadTactics, presetName } from '@/lib/tacticsProfile';
 import { TACTIC_INFO } from '@/lib/multiplayer';
-import { RolePicker, useRoles } from '@/components/game/PlayerRoles';
-import { roleOf } from '@/lib/playerRoles';
+import { ROLES_EVENT, loadRoles, roleOf } from '@/lib/playerRoles';
 
 // Painel de avaliação do elenco (inspirado na tela de gestão do Ultimate Team).
 // Tudo vem dos jogadores já escolhidos no draft: nada é fixo ou inventado.
@@ -104,22 +103,14 @@ export function SquadLinksLayer({ links }: { links: [Position, Position][] }) {
   );
 }
 
-export function SquadRolesLayer({ selected }: { selected: Partial<Record<Position, Player>> }) {
-  const saved = useRoles();
-  return (
-    <>
-      {(Object.keys(SPOTS) as Position[]).map((position) => {
-        const player = selected[position];
-        if (!player) return null;
-        const { role, custom } = roleOf(position, player, saved);
-        return (
-          <span key={position} className={`sq-rolechip ${custom ? 'custom' : ''}`} style={{ left: `${SPOTS[position].x}%`, top: `${Math.min(SPOTS[position].y + 15.5, 98.5)}%` }}>
-            {role.icon} {role.name}
-          </span>
-        );
-      })}
-    </>
-  );
+function useRoles() {
+  const [saved, setSaved] = useState(() => loadRoles());
+  useEffect(() => {
+    const refresh = () => setSaved(loadRoles());
+    window.addEventListener(ROLES_EVENT, refresh);
+    return () => window.removeEventListener(ROLES_EVENT, refresh);
+  }, []);
+  return saved;
 }
 
 export function SquadRatingPanel({ club, stats, squad }: { club: Team; stats: ReturnType<typeof squadStats>; squad?: Partial<Record<Position, Player>> }) {
@@ -161,14 +152,11 @@ export function SquadRatingPanel({ club, stats, squad }: { club: Team; stats: Re
 
 export function SquadListPanel({ stats, bench, withBench }: { stats: ReturnType<typeof squadStats>; bench: Partial<Record<BenchSlot, Player>>; withBench: boolean }) {
   const saved = useRoles();
-  const [editing, setEditing] = useState<Position | null>(null);
-  const editingPlayer = editing ? stats.rows.find((row) => row.position === editing)?.player : undefined;
   return (
     <section className="sq-panel sq-list" aria-label="Jogadores do elenco">
       <div className="sq-list-h"><b>TITULARES</b><span>{stats.count}/{stats.rows.length}</span></div>
-      <p className="sq-hint">Toque em um jogador para escolher a função dele.</p>
       {stats.rows.map((row) => (
-        <div key={row.position} className={`sq-row ${row.player ? 'click' : 'empty'}`} role={row.player ? 'button' : undefined} tabIndex={row.player ? 0 : undefined} title={row.player ? 'Escolher a função deste jogador' : undefined} onClick={() => row.player && setEditing(row.position)} onKeyDown={(event) => event.key === 'Enter' && row.player && setEditing(row.position)}>
+        <div key={row.position} className={`sq-row ${row.player ? '' : 'empty'}`} >
           <i className="sq-pos">{row.position}</i>
           {row.player ? (
             <>
@@ -197,7 +185,6 @@ export function SquadListPanel({ stats, bench, withBench }: { stats: ReturnType<
           })}
         </>
       )}
-      {editing && editingPlayer && <RolePicker slot={editing} player={editingPlayer} onClose={() => setEditing(null)} />}
     </section>
   );
 }
@@ -235,9 +222,6 @@ export const squadRatingCss = `
 .sq-list-h span { opacity: .75; letter-spacing: 1px; color: #fff; }
 .sq-bench-h { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.1); }
 .sq-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,.06); font-size: 13px; }
-.sq-hint { margin: -2px 0 6px; font-size: 11px; opacity: .6; }
-.sq-rolechip { position: absolute; z-index: 2; transform: translateX(-50%); max-width: 34%; padding: 2px 8px; border-radius: 99px; font-size: 9.5px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; color: #fff; background: rgba(6,12,30,.82); border: 1px solid rgba(255,255,255,.2); }
-.sq-rolechip.custom { color: #F5B800; border-color: rgba(245,184,0,.6); }
 .sq-row.empty { opacity: .4; }
 .sq-row.click { cursor: pointer; transition: background .2s; }
 .sq-row.click:hover { background: rgba(245,184,0,.08); }

@@ -3,7 +3,7 @@ import { ArrowLeft } from 'lucide-react';
 import { BENCH_SLOTS, positionNames, type BenchSlot, type DraftSlot, type Player, type Position, type Team } from '@/lib/game/types';
 import { Card, cardCss } from '@/components/game/Card';
 import { stadiumCss } from '@/lib/game/stadiumCss';
-import { SquadLinksLayer, SquadRolesLayer, SquadListPanel, SquadRatingPanel, formationLabel, squadRatingCss, squadStats } from '@/components/game/SquadRating';
+import { SquadLinksLayer, SquadListPanel, SquadRatingPanel, formationLabel, squadRatingCss, squadStats } from '@/components/game/SquadRating';
 
 // ---------- Draft estilo campo: o campo aparece com as cartas escondidas e cada posição revela 3 cartas ----------
 export const FIELD_SPOTS: Record<Position, { x: number; y: number }> = {
@@ -424,7 +424,6 @@ export function DraftScreen({
         <div className="dr-field">
           <DraftField />
           <SquadLinksLayer links={stats.links} />
-          <SquadRolesLayer selected={selected} />
           {positionList.map((position, index) =>
             slotView(position, position, index, { left: `${FIELD_SPOTS[position].x}%`, top: `${FIELD_SPOTS[position].y}%` }),
           )}
