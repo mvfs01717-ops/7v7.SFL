@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { CircleUserRound, Goal, RefreshCw, Shield, SkipForward, Zap } from 'lucide-react';
 import MatchPitch, { type LiveSnap } from '@/components/MatchPitch';
 import { StadiumFx } from '@/components/game/StadiumFx';
@@ -108,7 +108,9 @@ export function MatchScreen({
   userId,
   chatMessages,
   onSendChat,
+  shapes,
 }: {
+  shapes?: ComponentProps<typeof MatchPitch>['shapes'];
   club: Team;
   opponent: Team;
   userTeam: Player[];
@@ -302,6 +304,7 @@ export function MatchScreen({
             opponent={opponent}
             userTeam={userTeam}
             botTeam={botTeam}
+            shapes={shapes}
             events={events}
             onGoal={onGoal}
             restartKey={restartKey}

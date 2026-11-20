@@ -1,4 +1,4 @@
-import { DEFAULT_STYLE, MASTERY, ROLE_STYLES, SECTOR_LABEL, cleanMastery, rolesForPositions, type Mastery } from '@/lib/playerRoles';
+import { DEFAULT_STYLE, FOCUS_LABEL, MASTERY, ROLE_STYLES, SECTOR_LABEL, cleanMastery, focusOptions, rolesForPositions, type Focus, type Mastery } from '@/lib/playerRoles';
 import { ColorField } from '@/components/game/ColorField';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
@@ -26,7 +26,7 @@ type Player = {
   team_id: string;
   image_url?: string | null;
   team?: Team;
-  role_mastery?: Record<string, { lv: number; style?: string }> | null;
+  role_mastery?: Record<string, { lv: number; style?: string; focus?: string }> | null;
 };
 type Notice = { text: string; error: boolean };
 type AuditRow = {
@@ -1420,7 +1420,7 @@ function PlayerForm({
     else delete next[id];
     setForm({ ...form, role_mastery: next });
   }
-  function patchRole(id: string, patch: { lv?: Mastery; style?: string }) {
+  function patchRole(id: string, patch: { lv?: Mastery; style?: string; focus?: Focus }) {
     setForm({ ...form, role_mastery: { ...(form.role_mastery ?? {}), [id]: { ...(form.role_mastery?.[id] ?? { lv: 0 }), ...patch } } });
   }
 
@@ -1589,7 +1589,7 @@ function PlayerForm({
           <style>{`
             .rm-box small.rm-help { display: block; margin: 0 0 10px; opacity: .7; font-size: 12px; }
             .rm-sector { margin: 10px 0 4px; font-size: 10px; letter-spacing: 2px; color: #F5B800; font-weight: 800; }
-            .rm-row { display: grid; grid-template-columns: minmax(0, 1.3fr) auto minmax(0, 1fr); gap: 10px; align-items: center; padding: 9px 0; border-top: 1px solid rgba(255,255,255,.08); }
+            .rm-row { display: grid; grid-template-columns: minmax(0, 1.3fr) auto minmax(0, 1fr) minmax(0, .8fr); gap: 10px; align-items: center; padding: 9px 0; border-top: 1px solid rgba(255,255,255,.08); }
             .rm-name { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; cursor: pointer; }
             .rm-name input { width: 18px; height: 18px; min-height: 0 !important; accent-color: #F5B800; flex: none; }
             .rm-lv { display: inline-flex; border: 1px solid rgba(255,255,255,.2); border-radius: 10px; overflow: hidden; }
@@ -1628,6 +1628,9 @@ function PlayerForm({
                     </div>
                     <select value={entry?.style ?? DEFAULT_STYLE[role.id]} onChange={(event) => patchRole(role.id, { style: event.target.value })} aria-label={`Estilo de atuação de ${role.name}`}>
                       {ROLE_STYLES.map((style) => <option key={style} value={style}>{style}</option>)}
+                    </select>
+                    <select value={entry?.focus ?? 'bal'} onChange={(event) => patchRole(role.id, { focus: event.target.value as Focus })} aria-label={`Foco de ${role.name}`} title="Foco inicial dessa função para o jogador (o jogador ainda pode mudar nas Configurações Táticas)">
+                      {focusOptions(role.id).map((item) => <option key={item} value={item}>Foco: {FOCUS_LABEL[item]}</option>)}
                     </select>
                   </div>
                 </div>

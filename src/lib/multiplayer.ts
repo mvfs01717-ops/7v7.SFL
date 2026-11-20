@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { NEUTRAL_FX, type TeamFx } from '@/lib/roleTactics';
 
 export type RoomStatus = 'waiting' | 'drafting' | 'playing' | 'finished' | 'cancelled';
 export type Squad = Record<string, string>;
@@ -98,6 +99,7 @@ type Lite = {
   alts?: string[];
   alternate_positions?: string[];
   since?: number;
+  rw?: number; // peso na hora de finalizar, vindo da função/foco (ver roleTactics)
 };
 // Titular escalado numa posição que não é a principal nem uma alternativa dele: rende menos
 export const startsOutOfPosition = (player: Lite) =>
@@ -307,7 +309,7 @@ const SHOOTER_SPREAD = 7;
 function pickShooter(squad: Lite[]): Lite | undefined {
   const pool = squad.filter((player) => (SHOOTER_WEIGHT[posOf(player)] ?? 0) > 0);
   const weights = pool.map(
-    (player) => SHOOTER_WEIGHT[posOf(player)] * Math.exp((player.overall - 80) / SHOOTER_SPREAD),
+    (player) => SHOOTER_WEIGHT[posOf(player)] * (player.rw ?? 1) * Math.exp((player.overall - 80) / SHOOTER_SPREAD),
   );
   const total = weights.reduce((sum, weight) => sum + weight, 0);
   if (!pool.length || total <= 0) return undefined;
@@ -398,10 +400,15 @@ export function generatePlan(
   guestSquadRaw: Lite[],
   drawChance = 0,
   tactics: { host?: Tactic; guest?: Tactic } = {},
+  // Funções e focos de cada time (efeito pequeno e limitado; sem escolhas o jogo é igual ao de antes)
+  roles: { host?: TeamFx; guest?: TeamFx } = {},
 ): PlanItem[] {
+  const hostFx = roles.host ?? NEUTRAL_FX;
+  const guestFx = roles.guest ?? NEUTRAL_FX;
   // O bônus do capitão entra no overall dos dois times antes de qualquer cálculo
-  const hostSquad = withCaptain(hostSquadRaw);
-  const guestSquad = withCaptain(guestSquadRaw);
+  const withRoles = (squad: Lite[], fx: TeamFx) => squad.map((player) => (fx.shooter[posOf(player)] ? { ...player, rw: fx.shooter[posOf(player)] } : player));
+  const hostSquad = withRoles(withCaptain(hostSquadRaw), hostFx);
+  const guestSquad = withRoles(withCaptain(guestSquadRaw), guestFx);
   const hostTactic = tactics.host ?? 'equilibrada';
   const guestTactic = tactics.guest ?? 'equilibrada';
   const edgeHost = attackRating(hostSquad) - defenseRating(guestSquad);
@@ -418,23 +425,25 @@ export function generatePlan(
     const onTarget = Math.random() < clampNum(0.6 + (skill - 78) * 0.002, 0.4, 0.8);
     if (!onTarget) return { side, shooter, keeper, outcome: 'fora' };
     // No gol: atacante melhor que o goleiro marca mais; goleiro melhor que o atacante defende mais
-    const pGoal = clampNum(0.36 + (skill - keeperSkill) * DUEL_PER_POINT + TACTIC_QUALITY[side === 'host' ? hostTactic : guestTactic], 0.1, 0.75);
+    const pGoal = clampNum(0.36 + (skill - keeperSkill) * DUEL_PER_POINT + TACTIC_QUALITY[side === 'host' ? hostTactic : guestTactic] + (side === 'host' ? hostFx.q + guestFx.qa : guestFx.q + hostFx.qa), 0.1, 0.75);
     return { side, shooter, keeper, outcome: Math.random() < pGoal ? 'gol' : 'defesa' };
   };
   // A tática mexe na quantidade de chutes: a própria (cria mais/menos) e a do rival (cede mais/menos)
-  const shotCount = (edge: number, own: Tactic, rival: Tactic) =>
+  const shotCount = (edge: number, own: Tactic, rival: Tactic, ownFx: TeamFx, rivalFx: TeamFx) =>
     Math.max(
       3,
       Math.round(
         clampNum(9 + edge * SHOTS_PER_EDGE, 5, 14) +
           TACTIC_SHOTS[own].own +
           TACTIC_SHOTS[rival].conceded +
+          ownFx.own +
+          rivalFx.conc +
           (Math.random() * 3 - 1.5),
       ),
     );
   const shots: Shot[] = [];
-  for (let i = shotCount(edgeHost, hostTactic, guestTactic); i > 0; i -= 1) shots.push(takeShot('host'));
-  for (let i = shotCount(edgeGuest, guestTactic, hostTactic); i > 0; i -= 1) shots.push(takeShot('guest'));
+  for (let i = shotCount(edgeHost, hostTactic, guestTactic, hostFx, guestFx); i > 0; i -= 1) shots.push(takeShot('host'));
+  for (let i = shotCount(edgeGuest, guestTactic, hostTactic, guestFx, hostFx); i > 0; i -= 1) shots.push(takeShot('guest'));
 
   const goalsOf = (side: Shot['side']) => shots.filter((shot) => shot.side === side && shot.outcome === 'gol').length;
   // Transforma um chute do lado em gol (prefere uma defesa; se não houver chute, cria um)

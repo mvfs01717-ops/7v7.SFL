@@ -27,6 +27,8 @@ type Crowd = {
   wave?: { side: Side | 'all'; key: number } | null;
 };
 type Props = {
+  // Posição de cada jogador conforme a função e o foco configurados (ver roleTactics.roleShape)
+  shapes?: { user?: Partial<Record<Pos, { dDepth: number; dLat: number; follow: number }>>; bot?: Partial<Record<Pos, { dDepth: number; dLat: number; follow: number }>> };
   // 0 a 1: encharcamento do gramado na chuva (cresce com o tempo molhado): poças maiores e mais, marcas de escorregão mais fortes e duradouras
   wet?: number;
   // 0 a 1: quanto as listras do corte do gramado já se apagaram (cresce com o desgaste do jogo)
@@ -490,10 +492,12 @@ export type LiveSnap = {
   fx: { def: number; hold: number; stretch: number; hrot: number; hsc: number } | null;
 };
 
-export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = 'user', ambience, crowd, onClip, mapRef, club, opponent, userTeam, botTeam, events, onGoal, restartKey, workRef, endHalfRef, deadBallRef, hold = false, hideOverlays = false, onCaption, order = null }: Props) {
+export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = 'user', ambience, crowd, onClip, mapRef, club, opponent, userTeam, botTeam, events, onGoal, restartKey, workRef, endHalfRef, deadBallRef, hold = false, hideOverlays = false, onCaption, order = null, shapes }: Props) {
   const holdRef = useRef(false);
   holdRef.current = hold;
   const orderRef = useRef<Props['order']>(null);
+  const shapesRef = useRef<Props['shapes']>(undefined);
+  shapesRef.current = shapes;
   orderRef.current = order;
   // Tempo do campo: igual ao relógio do navegador, menos o tempo que ficou congelado
   const heldTotal = useRef(0);
@@ -1961,7 +1965,9 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         } else if (s.pos === 'GK') {
           // Goleiro fica entre a bola e o gol e sai um pouco quando a bola chega perto
           const goalLineX = d > 0 ? FX0 : FX1;
-          const off = clamp(Math.abs(st.ballX - goalLineX) * 0.1, 16, 52);
+          // Goleiro líbero (função/foco) sai mais da área; o tradicional fica colado na linha
+          const gk = shapesRef.current?.[s.side]?.GK;
+          const off = clamp(Math.abs(st.ballX - goalLineX) * 0.1 * (gk?.follow ?? 1) + (gk ? gk.dDepth * (FX1 - FX0) : 0), 16, gk ? 96 : 52);
           tx = goalLineX + d * off;
           ty = MID_Y + clamp((st.ballY - MID_Y) * 0.38, -46, 46);
           speedMul = 0.9;
@@ -1976,13 +1982,15 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           const ord = s.side === 'user' ? orderRef.current : null;
           const wide = s.pos === 'LB' || s.pos === 'RB' || s.pos === 'LF' || s.pos === 'RF';
           const ordDepth = ord === 'pressionar' ? 0.09 : ord === 'recuar' ? -0.12 : ord === 'pontas' && isFwd && inPoss ? 0.03 : 0;
+          // Função e foco: o mapa de atuação mexe na altura, na largura e em quanto o jogador acompanha a bola
+          const rs = shapesRef.current?.[s.side]?.[s.pos];
           const f = clamp(
-            BASE[s.pos][0] + (prog - 0.5) * (inPoss ? 0.46 : 0.3) * SHAPE_FACTOR[s.pos] + (isFwd ? (inPoss ? 0.04 : -0.04) : 0) + ordDepth,
+            BASE[s.pos][0] + (rs?.dDepth ?? 0) + (prog - 0.5) * (inPoss ? 0.46 : 0.3) * SHAPE_FACTOR[s.pos] * (rs?.follow ?? 1) + (isFwd ? (inPoss ? 0.04 : -0.04) : 0) + ordDepth,
             0.1,
             0.9,
           );
           const ballG = s.side === 'user' ? (st.ballY - FY0) / (FY1 - FY0) : 1 - (st.ballY - FY0) / (FY1 - FY0);
-          const g0 = BASE[s.pos][1];
+          const g0 = clamp(BASE[s.pos][1] + (rs?.dLat ?? 0), 0.05, 0.95);
           let g = clamp(inPoss ? 0.5 + (g0 - 0.5) * 1.18 : g0 + (ballG - g0) * 0.22, 0.07, 0.93);
           if (ord === 'pontas' && wide) g = clamp(0.5 + (g - 0.5) * 1.45, 0.04, 0.96);
           else if (ord === 'pontas' && s.pos === 'CM') g = clamp(0.5 + (g - 0.5) * 0.6, 0.2, 0.8);

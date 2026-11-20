@@ -24,7 +24,7 @@ export type Player = {
   // Capitão do time (dá bônus ao time e não pode ser substituído)
   captain?: boolean;
   // Funções e domínio cadastrados pelo administrador: { [id da função]: { lv: 0 básico | 1 avançado | 2 especialista, style } }
-  role_mastery?: Record<string, { lv: number; style?: string }> | null;
+  role_mastery?: Record<string, { lv: number; style?: string; focus?: string }> | null;
 };
 
 export type MatchEvent = {

@@ -37,6 +37,19 @@ export const rolesFor = (position: Position): Role[] => ROLES.filter((role) => r
 export const defaultRole = (position: Position): Role => rolesFor(position).find((role) => role.base) ?? rolesFor(position)[0];
 export const roleById = (id: string | undefined): Role | undefined => ROLES.find((role) => role.id === id);
 
+// FOCO: complementa a função (muda prioridades de movimentação). Cada função só aceita os focos que fazem sentido para ela.
+export type Focus = 'def' | 'bal' | 'off' | 'sup' | 'free';
+export const FOCUS_LABEL: Record<Focus, string> = { def: 'Defensivo', bal: 'Equilibrado', off: 'Ofensivo', sup: 'Apoio', free: 'Liberdade' };
+export const FOCUS_BY_ROLE: Record<string, Focus[]> = {
+  'gk-trad': ['def', 'bal'], 'gk-build': ['bal', 'sup'], 'gk-libero': ['def', 'bal', 'free'],
+  'df-build': ['def', 'bal', 'sup'], 'df-mark': ['def', 'bal'], 'df-anti': ['def', 'bal', 'free'], 'df-aggr': ['bal', 'off'],
+  'mc-play': ['bal', 'off', 'sup', 'free'], 'mc-b2b': ['def', 'bal', 'off'], 'mc-hold': ['def', 'bal', 'sup'], 'mc-inf': ['bal', 'off', 'free'],
+  'wg-wide': ['def', 'bal', 'off'], 'wg-inf': ['bal', 'off', 'free'], 'wg-play': ['bal', 'sup', 'free'], 'wg-bal': ['def', 'bal', 'off'],
+  'at-fin': ['bal', 'off'], 'at-f9': ['bal', 'sup', 'free'], 'at-pivot': ['bal', 'sup', 'off'], 'at-mobile': ['bal', 'off', 'free'],
+};
+export const focusOptions = (roleId: string): Focus[] => FOCUS_BY_ROLE[roleId] ?? ['bal'];
+export const cleanFocus = (roleId: string, value: unknown): Focus => (focusOptions(roleId).includes(value as Focus) ? (value as Focus) : 'bal');
+
 export type Fit = 'ideal' | 'compativel' | 'alternativa';
 export const FIT_LABEL: Record<Fit, string> = { ideal: 'Função ideal', compativel: 'Função compatível', alternativa: 'Função alternativa' };
 export const FIT_TEXT: Record<Fit, string> = {
@@ -62,7 +75,7 @@ export function roleFit(player: Player, slot: Position, role: Role): Fit {
 }
 
 // Persistência: uma função por vaga, ligada ao jogador que estava nela (se o jogador mudar, volta ao padrão)
-type Saved = Partial<Record<Position, { role: string; player: string }>>;
+type Saved = Partial<Record<Position, { role: string; player: string; focus?: string }>>;
 const KEY = 'sfl7v7.roles.v1';
 export const ROLES_EVENT = 'sfl-roles-changed';
 
@@ -74,25 +87,32 @@ export function loadRoles(): Saved {
     return {};
   }
 }
-export function saveRole(slot: Position, player: Player, roleId: string) {
+export function saveRole(slot: Position, player: Player, roleId: string, focus: Focus = 'bal') {
   try {
     const all = loadRoles();
-    all[slot] = { role: roleId, player: player.id };
+    all[slot] = { role: roleId, player: player.id, focus: cleanFocus(roleId, focus) };
     localStorage.setItem(KEY, JSON.stringify(all));
   } catch {
     /* sem armazenamento: vale só nesta sessão */
   }
   window.dispatchEvent(new Event(ROLES_EVENT));
 }
-export function roleOf(slot: Position, player: Player | undefined, saved: Saved = loadRoles()): { role: Role; custom: boolean } {
+export function roleOf(slot: Position, player: Player | undefined, saved: Saved = loadRoles()): { role: Role; custom: boolean; focus: Focus } {
   const entry = saved[slot];
   const role = entry && player && entry.player === player.id ? roleById(entry.role) : undefined;
-  return role && role.sector === SECTOR_OF[slot] ? { role, custom: true } : { role: defaultRole(slot), custom: false };
+  if (role && role.sector === SECTOR_OF[slot]) {
+    // Foco: o que o jogador escolheu; se nunca escolheu, o foco que o administrador cadastrou para essa função
+    const registered = (player as { role_mastery?: Record<string, { focus?: string }> | null }).role_mastery?.[role.id]?.focus;
+    return { role, custom: true, focus: cleanFocus(role.id, entry?.focus ?? registered) };
+  }
+  const base = defaultRole(slot);
+  const registered = (player as { role_mastery?: Record<string, { focus?: string }> | null } | undefined)?.role_mastery?.[base.id]?.focus;
+  return { role: base, custom: false, focus: cleanFocus(base.id, registered) };
 }
 
 // ---- Domínio das funções (cadastrado pelo administrador no banco: players.role_mastery) ----
 export type Mastery = 0 | 1 | 2;
-export type RoleEntry = { lv: Mastery; style?: string };
+export type RoleEntry = { lv: Mastery; style?: string; focus?: Focus };
 export type RoleMastery = Record<string, RoleEntry>;
 export const MASTERY: { lv: Mastery; label: string; sym: string }[] = [
   { lv: 0, label: 'Básico', sym: '' },
@@ -123,7 +143,8 @@ export function cleanMastery(raw: unknown, allowed?: Role[]): RoleMastery {
     if (!entry || typeof entry !== 'object') continue;
     const lv = entry.lv === 1 || entry.lv === 2 ? entry.lv : 0;
     const style = typeof entry.style === 'string' && ROLE_STYLES.includes(entry.style) ? entry.style : undefined;
-    out[role.id] = style ? { lv, style } : { lv };
+    const focus = focusOptions(role.id).includes(entry.focus) && entry.focus !== 'bal' ? (entry.focus as Focus) : undefined;
+    out[role.id] = { lv, ...(style ? { style } : {}), ...(focus ? { focus } : {}) };
   }
   return out;
 }

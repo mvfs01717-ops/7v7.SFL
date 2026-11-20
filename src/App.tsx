@@ -3,6 +3,7 @@ import AdminScreen from '@/components/AdminScreen';
 import { type Shootout } from '@/components/PenaltyShootout';
 import StadiumBackdrop, { type BackdropCamera } from '@/components/game/StadiumBackdrop';
 import { globalCss } from '@/lib/game/globalCss';
+import { decodeRoles, encodeRoles, shapesOf, teamChoices, teamFx } from '@/lib/roleTactics';
 import { isFreeAgent, HALFTIME_MS, HT_BREAK_MS, HT_RETURN_MS, HT_RETURN_NO_SUBS_MS, LINEUP_REVEAL_MS, MINUTE_MS, PENALTY_PREP_MS, SHOOTOUT_CHANCE, average, forceDrawPlan, getPlayerPositions, pickByRoll, pickShooter, slotOf, type PlanEntry } from '@/lib/game/helpers';
 import { BENCH_SLOTS, emptyStats, positions, slotPositionsOf, type BenchSlot, type DraftSlot, type GoalRecord, type MatchEvent, type MatchStats, type Player, type Position, type Screen, type Team } from '@/lib/game/types';
 import { BENCH_KEYS, SUBS_MAX, SUBS_WINDOW_SEC, autoSubstitutions, encodeSubs, hasBench, subsDecided, subsOf, createRoom, effortLoss, fetchRoom, pingRoom, fitsSlot, generatePlan, isRoomLive, listLiveRooms, joinRoom, openRoomChat, patchRoom, recordResult, reshapeSecondHalf, setWetFrom, saveActiveRoom, clearActiveRoom, loadActiveRoom, slowdown, staminaAt, tacticOf, TACTIC_INFO, type ChatMessage, type FieldLite, type PlanItem, type Room, type Tactic } from '@/lib/multiplayer';
@@ -334,6 +335,9 @@ function App() {
     if (tactic) out._t = tactic;
     // O capitão também vai junto do time (chave `_c` = id do jogador)
     if (captain) out._c = captain;
+    // Funções e focos (Player Roles) também vão junto: o anfitrião usa os dois lados ao sortear a partida
+    const rolesCode = encodeRoles(teamChoices(source));
+    if (rolesCode) out._r = rolesCode;
     positions.forEach((position) => {
       const player = source[position];
       if (player) out[position] = player.id;
@@ -855,7 +859,7 @@ function App() {
       const plan = generatePlan(squadPlayers(room.host_squad), squadPlayers(room.guest_squad), SHOOTOUT_CHANCE, {
         host: tacticOf(room.host_squad),
         guest: tacticOf(room.guest_squad),
-      });
+      }, { host: teamFx(decodeRoles(room.host_squad?._r)), guest: teamFx(decodeRoles(room.guest_squad?._r)) });
       void patchRoom(room.id, { plan, status: 'playing' });
     }
     if (room.status === 'playing' && room.plan && mpMatchRoom.current !== room.id) {
@@ -1207,7 +1211,7 @@ function App() {
     const matchAmb = pickAmbience();
     setBotAmb(matchAmb);
     setWetFrom(wetFromOf(matchAmb));
-    const basePlan: PlanEntry[] = generatePlan(chosen, botPlayers, 0, { host: tactic, guest: botTactic })
+    const basePlan: PlanEntry[] = generatePlan(chosen, botPlayers, 0, { host: tactic, guest: botTactic }, { host: teamFx(teamChoices(Object.fromEntries(chosen.map((player) => [player.slot, player])) as Partial<Record<Position, Player>>)) })
       .filter((item) => item.minute > 0)
       .map((item) => ({
         minute: item.minute,
@@ -2403,6 +2407,10 @@ function App() {
 
       {screen === 'match' && selectedClub && opponentTeam && !lineupReveal && (
         <MatchScreen
+          shapes={{
+            user: shapesOf(teamChoices(Object.fromEntries(userTeam.map((player) => [slotOf(player), player])) as Partial<Record<Position, Player>>)),
+            bot: shapesOf(decodeRoles(theirSquad?._r)),
+          }}
           club={selectedClub}
           opponent={opponentTeam}
           userTeam={userTeam}
