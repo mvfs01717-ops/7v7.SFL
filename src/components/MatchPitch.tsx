@@ -4,6 +4,7 @@ import type { Ambience } from '@/lib/game/ambience';
 import { mixHex, stadiumFor } from '@/lib/game/stadium';
 import { perfSample, useLite } from '@/lib/settings';
 import { useCosmetics } from '@/lib/cosmetics';
+import { chooseDribble, dribbleBody, dribbleGeometry, moveFit, recordDribble, DRIBBLE_CAPTION, type DribbleCtx, type DribbleMove } from '@/lib/game/dribbles';
 import { ambientChoice, choosePlay, createIntel, passBias, passTaste, recordPass, recordPlay, type Intel, type PlayKind, type Style } from '@/lib/game/playIntel';
 import { ReplayPlayer, type ClipData } from '@/components/game/ReplayPlayer';
 
@@ -102,7 +103,7 @@ type Step = {
   ambient?: boolean;
   dribble?: boolean;
   // Finta (primeiro toque do drible) ou arrancada (segundo); guarda o lado e se o drible dá certo
-  feint?: { phase: 'fake' | 'burst'; opp: string; sg: number; win: boolean };
+  feint?: { phase: 'fake' | 'burst'; opp: string; sg: number; win: boolean; move?: DribbleMove };
   arrive?: boolean;
   caption?: string;
   // Altura da bola no meio do trajeto (passe/chute por cima), em pixels
@@ -640,7 +641,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
   const slideRef = useRef<Record<string, { until: number; fx: number; fy: number }>>({});
   // Animação do desarme: o marcador estica no chão (carrinho) ou dá o bote, a bota aparece, o impacto pisca e o desarmado tropeça
   const tackleFx = useRef<{ def: string; hold: string; t0: number; span: number; slide: boolean; win: boolean; ax: number; ay: number; contact: number } | null>(null);
-  const dribFx = useRef<{ key: string; opp: string; t0: number; dur: number; sg: number; win: boolean; phase: 'fake' | 'burst'; dx: number } | null>(null);
+  const dribFx = useRef<{ key: string; opp: string; t0: number; dur: number; sg: number; win: boolean; phase: 'fake' | 'burst'; dx: number; move: DribbleMove } | null>(null);
   const tkSnap = useRef<{ def: string; hold: string; stretch: number; hrot: number; hsc: number } | null>(null);
   const bootNode = useRef<SVGGElement | null>(null);
   const impactNode = useRef<SVGCircleElement | null>(null);
@@ -779,53 +780,62 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
   }
 
   // Drible: finta para o lado do marcador e acelera por fora. Pode dar certo ou o marcador desarma.
-  function dribbleSteps(h: Slot, opp: Slot, ambient: boolean, forceWin: boolean): Step[] {
+  function dribbleSteps(h: Slot, opp: Slot, ambient: boolean, forceWin: boolean, forcedMove?: DribbleMove): Step[] {
     const st = engine.current;
+    const all = slotsRef.current;
     const d = dirOf(h.side);
     let sg = opp.y >= h.y ? -1 : 1;
     if (h.y + sg * 40 < FY0 + 25 || h.y + sg * 40 > FY1 - 25) sg = -sg;
-    const chance = clamp(0.58 + (h.ovr - opp.ovr) / 80, 0.3, 0.85);
+    // Escolha do drible conforme a situação (pressão, espaço livre, marcador, função, foco, personalidade e memória)
+    const gap = dist(h, opp);
+    const ahead: Point = { x: opp.x + d * 90, y: opp.y + sg * 30 };
+    const ctx: DribbleCtx = {
+      side: h.side,
+      holder: { name: h.name, ovr: h.ovr, pos: h.pos, style: stylesRef.current?.[h.side]?.[h.pos] as Style | undefined },
+      opp: { ovr: opp.ovr },
+      pressure: clamp((95 - gap) / 60, 0, 1),
+      gap,
+      space: clamp(nearestOpp(all, h.side, ahead).d / 100, 0, 1),
+      toGoal: Math.abs((d > 0 ? FX1 : FX0) - h.x),
+      wide: Math.abs(h.y - MID_Y) > 85,
+    };
+    const move = forcedMove ?? chooseDribble(intelRef.current, ctx);
+    const chance = clamp(0.58 + (h.ovr - opp.ovr) / 80 + moveFit(move, ctx), 0.3, 0.88);
     const win = forceWin || Math.random() < chance;
-    const first: Step = {
-      kind: 'carry',
-      to: {
-        x: clamp(opp.x - d * 6, FX0 + 20, FX1 - 20),
-        y: clamp(opp.y + sg * 38, FY0 + 20, FY1 - 20),
-      },
-      dur: 340,
-      ambient,
-      dribble: true,
-      feint: { phase: 'fake', opp: opp.key, sg, win },
-      caption: win ? `${h.name} dribla ${opp.name}` : `${h.name} tenta driblar ${opp.name}`,
-      after: () => {
-        const t = tnow();
-        if (win) {
-          // O marcador fica para trás, desequilibrado
-          st.overrides[opp.key] = { x: opp.x, y: opp.y, until: t + 1000, speed: 0.18 };
-        } else {
-          st.queue = [];
-          st.active = null;
-          st.holder = opp.key;
-          st.poss = opp.side;
-          st.overrides = {};
-          st.ambientAt = t + 450;
-          setCaption(`${opp.name} desarma ${h.name} no drible`);
-        }
-      },
-    };
-    if (!win) return [first];
-    const second: Step = {
-      kind: 'carry',
-      to: {
-        x: clamp(opp.x + d * 70, FX0 + 20, FX1 - 20),
-        y: clamp(opp.y + sg * 26, FY0 + 20, FY1 - 20),
-      },
-      dur: 400,
-      ambient,
-      dribble: true,
-      feint: { phase: 'burst', opp: opp.key, sg, win },
-    };
-    return [first, second];
+    recordDribble(intelRef.current, h.side, move, win);
+    const plan = dribbleGeometry(move, h, opp, sg, d);
+    const steps: Step[] = [];
+    (win ? plan : plan.slice(0, 1)).forEach((p, i) => {
+      steps.push({
+        kind: 'carry',
+        to: { x: clamp(p.to.x, FX0 + 20, FX1 - 20), y: clamp(p.to.y, FY0 + 20, FY1 - 20) },
+        dur: p.dur,
+        ambient,
+        dribble: true,
+        speed: p.speed,
+        feint: { phase: p.phase, opp: opp.key, sg, win, move },
+        caption: i === 0 ? (win ? DRIBBLE_CAPTION[move].win(h.name, opp.name) : DRIBBLE_CAPTION[move].lose(h.name, opp.name)) : undefined,
+        after:
+          i === 0
+            ? () => {
+                const t = tnow();
+                if (win) {
+                  // O marcador fica para trás, desequilibrado
+                  st.overrides[opp.key] = { x: opp.x, y: opp.y, until: t + 1000, speed: 0.18 };
+                } else {
+                  st.queue = [];
+                  st.active = null;
+                  st.holder = opp.key;
+                  st.poss = opp.side;
+                  st.overrides = {};
+                  st.ambientAt = t + 450;
+                  setCaption(`${opp.name} desarma ${h.name} no drible`);
+                }
+              }
+            : undefined,
+      });
+    });
+    return steps;
   }
 
   // Começa um passo da fila (passe, condução, chute ou recuperação)
@@ -857,7 +867,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         speed: step.speed ?? (step.dribble ? 1.3 : step.arrive ? 1.25 : 0.9),
       };
       if (step.caption) setCaption(step.caption);
-      dribFx.current = step.feint ? { key: holder.key, opp: step.feint.opp, t0: now, dur: step.dur, sg: step.feint.sg, win: step.feint.win, phase: step.feint.phase, dx: dirOf(holder.side) } : null;
+      dribFx.current = step.feint ? { key: holder.key, opp: step.feint.opp, t0: now, dur: step.dur, sg: step.feint.sg, win: step.feint.win, phase: step.feint.phase, dx: dirOf(holder.side), move: step.feint.move ?? 'finta' } : null;
       return;
     }
 
@@ -1618,10 +1628,11 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         const uy = sp > 12 ? holderNow.vy / sp : 0;
         const k = 1 - Math.exp(-dt / 60);
         const touch = st.active && st.active.step.kind === 'carry' && !st.active.step.dribble && sp > 20 ? Math.max(0, Math.sin(now / 120)) * 5 : 0;
-        st.ballX += (holderNow.x + ux * (11 + touch) - st.ballX) * k;
         const df = dribFx.current;
+        const bfx = st.active && st.active.step.dribble && df ? dribbleBody(df.move, df.phase, clamp((now - df.t0) / df.dur, 0, 1), df.sg) : null;
+        st.ballX += (holderNow.x + ux * (11 + touch) + (bfx ? bfx.ballFwd * dirOf(holderNow.side) : 0) - st.ballX) * k;
         const wob = st.active && st.active.step.dribble ? (df && df.phase === 'fake' ? df.sg * Math.sin(clamp((now - df.t0) / df.dur, 0, 1) * Math.PI * 2) * 9 : Math.sin(now / 45) * 6) : 0;
-        st.ballY += (holderNow.y + uy * 11 + 2 + wob - st.ballY) * k;
+        st.ballY += (holderNow.y + uy * 11 + 2 + wob + (bfx ? bfx.ballLat : 0) - st.ballY) * k;
       };
 
       // Move a bola
@@ -2271,20 +2282,8 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           const oEl = all.find((x) => x.key === df.opp);
           const pr = clamp((now - df.t0) / df.dur, 0, 1);
           if (cEl) {
-            let rot: number;
-            let sx = 1;
-            let sy = 1;
-            let shift = 0;
-            if (df.phase === 'fake') {
-              rot = df.sg * -Math.sin(pr * Math.PI * 2) * 22;
-              sy = 1 + 0.14 * Math.sin(pr * Math.PI);
-              sx = 1 - 0.08 * Math.sin(pr * Math.PI);
-              shift = -df.sg * Math.sin(pr * Math.PI) * 6;
-            } else {
-              rot = df.sg * Math.sin(pr * Math.PI) * 8;
-              sx = 1 + 0.2 * Math.sin(pr * Math.PI);
-              sy = 1 - 0.1 * Math.sin(pr * Math.PI);
-            }
+            const fx = dribbleBody(df.move, df.phase, pr, df.sg);
+            const { rot, sx, sy, shift } = fx;
             nodes.current[cEl.key]?.setAttribute('transform', `translate(${cEl.x.toFixed(1)} ${(cEl.y + shift).toFixed(1)}) rotate(${rot.toFixed(1)}) scale(${sx.toFixed(3)} ${sy.toFixed(3)})`);
             if (!liteRef.current && df.phase === 'burst' && pr < 0.6 && Math.random() < 0.5) {
               const i = markNext.current % MARK_POOL;
@@ -2303,9 +2302,10 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
             const sway = df.win ? (fakePhase ? Math.sin(pr * Math.PI) * 16 * df.sg : 16 * df.sg * (1 - pr) + Math.sin(pr * Math.PI * 3) * 4) : -Math.sin(pr * Math.PI) * 6 * df.sg;
             const dip = df.win ? 1 + 0.1 * (fakePhase ? Math.sin(pr * Math.PI) : 1 - pr) : 1;
             const bite = df.win && fakePhase ? df.sg * Math.sin(pr * Math.PI) * 5 : 0;
-            nodes.current[oEl.key]?.setAttribute('transform', `translate(${oEl.x.toFixed(1)} ${(oEl.y + bite).toFixed(1)}) rotate(${sway.toFixed(1)}) scale(${dip.toFixed(3)})`);
+            const swayK = dribbleBody(df.move, df.phase, pr, df.sg).oppSway;
+            nodes.current[oEl.key]?.setAttribute('transform', `translate(${oEl.x.toFixed(1)} ${(oEl.y + bite * swayK).toFixed(1)}) rotate(${(sway * swayK).toFixed(1)}) scale(${dip.toFixed(3)})`);
           }
-          tkSnap.current = cEl && oEl ? { def: df.opp, hold: df.key, stretch: 0, hrot: df.phase === 'fake' ? df.sg * -Math.sin(pr * Math.PI * 2) * 22 : df.sg * Math.sin(pr * Math.PI) * 8, hsc: 1 + 0.12 * Math.sin(pr * Math.PI) } : null;
+          tkSnap.current = cEl && oEl ? { def: df.opp, hold: df.key, stretch: 0, hrot: dribbleBody(df.move, df.phase, pr, df.sg).rot, hsc: 1 + 0.12 * Math.sin(pr * Math.PI) } : null;
         } else if (!tackleFx.current && tkSnap.current && tkSnap.current.stretch === 0) {
           tkSnap.current = null;
         } else if (carrying && st.holder && !(st.active && st.active.step.dribble)) {

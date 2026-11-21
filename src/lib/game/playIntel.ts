@@ -19,6 +19,7 @@ export type Intel = {
   seen: Record<Side, Opp>; // como o time (lado) se deu contra o adversário até agora
   passes: Record<string, number[]>; // "de>para" -> instantes (contador n) dos passes
   ambient: Record<Side, { kind: string; n: number }[]>;
+  dribbles: Record<Side, { move: string; win: boolean }[]>; // dribles recentes e se deram certo
 };
 export const createIntel = (): Intel => ({
   n: 0,
@@ -26,6 +27,7 @@ export const createIntel = (): Intel => ({
   seen: { user: { tried: {}, failed: {} }, bot: { tried: {}, failed: {} } },
   passes: {},
   ambient: { user: [], bot: [] },
+  dribbles: { user: [], bot: [] },
 });
 
 // Personalidade estável de cada atleta (não há atributos detalhados no banco; o nome gera uma tendência fixa, o overall ajusta)
