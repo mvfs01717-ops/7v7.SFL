@@ -7,7 +7,7 @@ import {
   type TacticProfile, type TacticStore,
 } from '@/lib/tacticsProfile';
 import { FIT_LABEL, FIT_TEXT, FOCUS_LABEL, MASTERY, SECTOR_LABEL, SECTOR_OF, cleanMastery, focusOptions, loadRoles, roleById, roleFit, roleOf, rolesFor, saveRole, type Focus } from '@/lib/playerRoles';
-import { MAP_COLS, MAP_ROWS, SLOT_PT, activityMap, describeFx, focusText } from '@/lib/roleTactics';
+import { AXIS_LABEL, MAP_COLS, MAP_ROWS, SLOT_PT, activityMap, describeFx, focusText, teamAnalysis, type RoleChoice, type TeamAxes } from '@/lib/roleTactics';
 
 type Key = 'style' | 'defense' | 'build' | 'chance';
 type Opt = { id: string; label: string; icon: string; text: string };
@@ -54,6 +54,11 @@ export function TacticalSettings({ onClose, onUse, squad }: { onClose: () => voi
     });
   const mapSlot = filled.includes(roleSlot) ? roleSlot : filled[0];
   const mapChoice = mapSlot ? choiceFor(mapSlot) : undefined;
+  const teamView = view === 'roles' && filled.length ? teamAnalysis(filled.map((slot): RoleChoice => {
+    const c = choiceFor(slot);
+    return { slot, role: c.roleId, focus: c.focus, fit: roleFit(squad![slot]!, slot, roleById(c.roleId)!) };
+  })) : null;
+  const hexPoint = (index: number, value: number) => { const a = -Math.PI / 2 + (index * Math.PI) / 3; return `${(50 + Math.cos(a) * 38 * value).toFixed(1)},${(50 + Math.sin(a) * 38 * value).toFixed(1)}`; };
   const profile = store.presets[tab] ?? DEFAULT_PROFILE;
   const tactic = deriveTactic(profile);
   const info = TACTIC_INFO[tactic];
@@ -342,6 +347,26 @@ export function TacticalSettings({ onClose, onUse, squad }: { onClose: () => voi
                 </div>
               )}
             </div>
+            {teamView && (
+              <div className="ts-analysis ts-team" aria-label="Análise tática do time">
+                <ul>
+                  {teamView.good.map((text) => <li key={text} className="ok"><i aria-hidden="true">✓</i>{text}</li>)}
+                  {teamView.warn.map((text) => <li key={text} className="warn"><i aria-hidden="true">!</i>{text}</li>)}
+                </ul>
+                <div className="ts-radar hex">
+                  <small>Análise tática do time</small>
+                  <svg viewBox="-16 -8 132 116" role="img" aria-label={`Radar do time: ${(Object.keys(AXIS_LABEL) as (keyof TeamAxes)[]).map((k) => `${AXIS_LABEL[k]} ${Math.round(teamView.axes[k] * 100)}`).join(', ')}`}>
+                    {[1, 0.66, 0.33].map((r) => <polygon key={r} className="ts-ring" points={[0, 1, 2, 3, 4, 5].map((i) => hexPoint(i, r)).join(' ')} />)}
+                    {[0, 1, 2, 3, 4, 5].map((i) => <line key={i} className="ts-ring" x1="50" y1="50" x2={hexPoint(i, 1).split(',')[0]} y2={hexPoint(i, 1).split(',')[1]} />)}
+                    <polygon className="ts-shape team" points={(Object.keys(AXIS_LABEL) as (keyof TeamAxes)[]).map((k, i) => hexPoint(i, teamView.axes[k])).join(' ')} />
+                    {(Object.keys(AXIS_LABEL) as (keyof TeamAxes)[]).map((k, i) => {
+                      const [x, y] = hexPoint(i, 1.2).split(',').map(Number);
+                      return <text key={k} x={x} y={y + 3} textAnchor="middle">{AXIS_LABEL[k]}</text>;
+                    })}
+                  </svg>
+                </div>
+              </div>
+            )}
             <div className="ts-analysis" hidden={view === 'roles'}>
               <ul>
                 {checks.map((check) => (
@@ -435,6 +460,9 @@ export const tacticalCss = `
 .ts-radar { width: 150px; text-align: center; }
 .ts-radar small { display: block; font-size: 11px; opacity: .75; margin-bottom: 2px; }
 .ts-radar svg { width: 100%; }
+.ts-team { padding-top: 12px; border-top: 1px solid rgba(255,255,255,.12); }
+.ts-radar.hex { width: 210px; }
+.ts-shape.team { fill: rgba(55,214,255,.28); stroke: #37d6ff; }
 .ts-ring { fill: none; stroke: rgba(255,255,255,.28); stroke-width: .8; }
 .ts-shape { fill: rgba(245,184,0,.35); stroke: #F5B800; stroke-width: 1.4; transition: all .5s; }
 .ts-radar text { fill: #fff; font-size: 8px; font-weight: 700; }

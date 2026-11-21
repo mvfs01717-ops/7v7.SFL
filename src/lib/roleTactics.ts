@@ -199,4 +199,57 @@ export function describeFx(slot: Position, roleId: string, focus: Focus, fit: Fi
   if (!list.length) list.push({ ok: true, text: 'Comportamento padrão da posição' });
   return list;
 }
+
+// ---------- Análise tática do time ----------
+// Tudo sai das escolhas reais: o mapa de atuação de cada vaga somado (onde o time joga) e os efeitos da simulação (teamFx).
+// A nota é medida contra o time com as funções padrão: sem mexer em nada, todos os eixos ficam no meio.
+export type TeamAxes = { atq: number; def: number; amp: number; pro: number; arm: number; res: number };
+export const AXIS_LABEL: Record<keyof TeamAxes, string> = { atq: 'ATQ', def: 'DEF', amp: 'AMP', pro: 'PRO', arm: 'ARM', res: 'RES' };
+const AXIS_ORDER: (keyof TeamAxes)[] = ['atq', 'def', 'amp', 'pro', 'arm', 'res'];
+
+function rawAxes(choices: RoleChoice[], fx: TeamFx): TeamAxes {
+  const w = Array.from({ length: MAP_ROWS }, () => Array(MAP_COLS).fill(0) as number[]);
+  choices.forEach((c) => activityMap(c.slot, c.role, c.focus).forEach((line, r) => line.forEach((level, col) => { w[r][col] += level; })));
+  let total = 0, front = 0, back = 0, wide = 0, core = 0, rows = 0;
+  w.forEach((line, r) => line.forEach((v, col) => {
+    total += v; rows += v * r;
+    if (r <= 1) front += v;
+    if (r >= 3) back += v;
+    if (col === 0 || col === MAP_COLS - 1) wide += v;
+    if (r >= 1 && r <= 3 && col >= 1 && col <= 3) core += v;
+  }));
+  const t = total || 1, mean = rows / t;
+  let varR = 0;
+  w.forEach((line, r) => line.forEach((v) => { varR += v * (r - mean) ** 2; }));
+  const fitAvg = choices.length ? choices.reduce((s, c) => s + FIT_MULT[c.fit], 0) / choices.length : 1;
+  return {
+    atq: front / t + 0.12 * fx.own + 3 * fx.q,
+    def: back / t - 0.12 * fx.conc - 3 * fx.qa,
+    amp: wide / t,
+    pro: Math.sqrt(varR / t) * 0.25,
+    arm: core / t + 0.05 * fx.own,
+    res: fitAvg * 0.5 - 0.1 * fx.conc - 2 * fx.qa,
+  };
+}
+
+export function teamAnalysis(choices: RoleChoice[]): { axes: TeamAxes; good: string[]; warn: string[] } {
+  const base = choices.map((c) => { const d = defaultRole(c.slot); return { slot: c.slot, role: d.id, focus: defaultFocus(d.id), fit: 'ideal' as Fit }; });
+  const now = rawAxes(choices, teamFx(choices)), ref = rawAxes(base, NEUTRAL_FX);
+  const GAIN: TeamAxes = { atq: 2, def: 2, amp: 2.5, pro: 3, arm: 2, res: 1.2 };
+  const axes = {} as TeamAxes;
+  AXIS_ORDER.forEach((k) => { axes[k] = Math.max(0.08, Math.min(1, 0.55 + (now[k] - ref[k]) * GAIN[k])); });
+  const GOOD: Record<keyof TeamAxes, string> = {
+    atq: 'Muitas opções de ataque', def: 'Defesa bem protegida', amp: 'Ocupa bem a largura do campo',
+    pro: 'Funções ao longo do comprimento', arm: 'Armação sólida', res: 'Time resistente e bem encaixado',
+  };
+  const BAD: Record<keyof TeamAxes, string> = {
+    atq: 'Falta de opções de ataque', def: 'Defesa fácil de sobrecarregar', amp: 'Abordagem muito estreita',
+    pro: 'Time muito junto, pouca profundidade', arm: 'Pouca armação no meio', res: 'Pouca resistência a contra-ataques',
+  };
+  const by = (sign: 1 | -1) => AXIS_ORDER.filter((k) => (axes[k] - 0.55) * sign >= 0.1).sort((a, b) => (axes[b] - axes[a]) * sign);
+  const good = by(1).slice(0, 3).map((k) => GOOD[k]);
+  const warn = by(-1).slice(0, 3).map((k) => BAD[k]);
+  if (!good.length && !warn.length && choices.length) good.push('Equilíbrio padrão do time');
+  return { axes, good, warn };
+}
 export { ROLES };
