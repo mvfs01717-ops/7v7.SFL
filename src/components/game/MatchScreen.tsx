@@ -109,8 +109,10 @@ export function MatchScreen({
   chatMessages,
   onSendChat,
   shapes,
+  styles,
 }: {
   shapes?: ComponentProps<typeof MatchPitch>['shapes'];
+  styles?: ComponentProps<typeof MatchPitch>['styles'];
   club: Team;
   opponent: Team;
   userTeam: Player[];
@@ -305,6 +307,7 @@ export function MatchScreen({
             userTeam={userTeam}
             botTeam={botTeam}
             shapes={shapes}
+            styles={styles}
             events={events}
             onGoal={onGoal}
             restartKey={restartKey}

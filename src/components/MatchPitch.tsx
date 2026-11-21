@@ -4,6 +4,7 @@ import type { Ambience } from '@/lib/game/ambience';
 import { mixHex, stadiumFor } from '@/lib/game/stadium';
 import { perfSample, useLite } from '@/lib/settings';
 import { useCosmetics } from '@/lib/cosmetics';
+import { ambientChoice, choosePlay, createIntel, passBias, passTaste, recordPass, recordPlay, type Intel, type PlayKind, type Style } from '@/lib/game/playIntel';
 import { ReplayPlayer, type ClipData } from '@/components/game/ReplayPlayer';
 
 type Side = 'user' | 'bot';
@@ -29,6 +30,8 @@ type Crowd = {
 type Props = {
   // Posição de cada jogador conforme a função e o foco configurados (ver roleTactics.roleShape)
   shapes?: { user?: Partial<Record<Pos, { dDepth: number; dLat: number; follow: number }>>; bot?: Partial<Record<Pos, { dDepth: number; dLat: number; follow: number }>> };
+  // Função e foco de cada vaga (decide o estilo das jogadas: ver lib/game/playIntel)
+  styles?: { user?: Partial<Record<Pos, { role: string; focus: string }>>; bot?: Partial<Record<Pos, { role: string; focus: string }>> };
   // 0 a 1: encharcamento do gramado na chuva (cresce com o tempo molhado): poças maiores e mais, marcas de escorregão mais fortes e duradouras
   wet?: number;
   // 0 a 1: quanto as listras do corte do gramado já se apagaram (cresce com o desgaste do jogo)
@@ -400,7 +403,7 @@ function aheadOpp(all: Slot[], h: Slot): Slot | undefined {
 }
 
 // Escolhe para quem passar: prefere quem está à frente e livre, mas passa para trás sob pressão
-function choosePass(h: Slot, all: Slot[]): Slot | undefined {
+function choosePass(h: Slot, all: Slot[], bias?: (r: Slot, fwd: number) => number): Slot | undefined {
   const d = dirOf(h.side);
   const pressure = nearestOpp(all, h.side, h).d < 40;
   const deep = (h.x - (d > 0 ? FX0 : FX1)) * d < 220;
@@ -414,7 +417,7 @@ function choosePass(h: Slot, all: Slot[]): Slot | undefined {
     const fwd = ((r.x - h.x) * d) / 100;
     const open = Math.min(1, nearestOpp(all, h.side, r).d / 80);
     const score =
-      (pressure ? 0.2 : 0.9) * fwd + 0.7 * open - Math.abs(dd - 150) / 220 + Math.random() * 0.7 + (pressure && fwd < 0 ? 0.5 : 0);
+      (pressure ? 0.2 : 0.9) * fwd + 0.7 * open - Math.abs(dd - 150) / 220 + Math.random() * 0.7 + (pressure && fwd < 0 ? 0.5 : 0) + (bias ? bias(r, fwd) : 0);
     if (score > bestScore) {
       bestScore = score;
       best = r;
@@ -492,12 +495,16 @@ export type LiveSnap = {
   fx: { def: number; hold: number; stretch: number; hrot: number; hsc: number } | null;
 };
 
-export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = 'user', ambience, crowd, onClip, mapRef, club, opponent, userTeam, botTeam, events, onGoal, restartKey, workRef, endHalfRef, deadBallRef, hold = false, hideOverlays = false, onCaption, order = null, shapes }: Props) {
+export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = 'user', ambience, crowd, onClip, mapRef, club, opponent, userTeam, botTeam, events, onGoal, restartKey, workRef, endHalfRef, deadBallRef, hold = false, hideOverlays = false, onCaption, order = null, shapes, styles }: Props) {
   const holdRef = useRef(false);
   holdRef.current = hold;
   const orderRef = useRef<Props['order']>(null);
   const shapesRef = useRef<Props['shapes']>(undefined);
   shapesRef.current = shapes;
+  const stylesRef = useRef<Props['styles']>(undefined);
+  stylesRef.current = styles;
+  // Memória de jogadas e leitura do adversário: dura a partida inteira
+  const intelRef = useRef<Intel>(createIntel());
   orderRef.current = order;
   // Tempo do campo: igual ao relógio do navegador, menos o tempo que ficou congelado
   const heldTotal = useRef(0);
@@ -999,7 +1006,27 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     const backlog = st.queue.length + (st.active && st.active.step.scripted ? 1 : 0);
 
     // Estilo da jogada: a narração manda quando cita o tipo de finalização; senão, sorteio ponderado
-    type Play = 'central' | 'ponta' | 'lancamento' | 'tabela' | 'solo' | 'contra' | 'longe';
+    type Play = PlayKind;
+    const intel = intelRef.current;
+    const teamStyles = stylesRef.current?.[S] as Partial<Record<string, Style>> | undefined;
+    // Partner / apoio (usados também para saber quais jogadas têm gente suficiente)
+    const cmSlot = find(`${S}-CM`);
+    const sideOfSlot = (s: Slot) => (s.base.y < MID_Y ? 0 : 1);
+    const overlapPair = (() => {
+      const cutters = mine.filter((s) => (s.pos === 'LF' || s.pos === 'RF') && s.key !== passer?.key);
+      for (const c of cutters.sort(() => Math.random() - 0.5)) {
+        const over = mine.find((s) => (s.pos === 'LB' || s.pos === 'RB') && sideOfSlot(s) === sideOfSlot(c) && s.key !== actorKey);
+        if (over) return { cutter: c, over };
+      }
+      return undefined;
+    })();
+    const triThird = mine.find((s) => s.key !== actorKey && s.pos !== 'CM' && (FORWARDS.includes(s.pos) || isWing(s)));
+    const swapMate = mine.filter((s) => s.key !== actorKey && FORWARDS.includes(s.pos)).sort((x, y) => Math.abs(y.base.y - actorSlot.base.y) - Math.abs(x.base.y - actorSlot.base.y))[0];
+    const restartBack = mine.find((s) => (s.pos === 'LB' || s.pos === 'RB') && s.key !== actorKey);
+    const partner =
+      actorSlot.pos === 'CM'
+        ? mine.find((s) => s.key !== actorKey && FORWARDS.includes(s.pos))
+        : find(`${S}-CM`);
     let play: Play;
     if (backlog > 4 && !critical) play = 'longe'; // jogada curta para não acumular fila
     else if (text.includes('cabece') || text.includes('voleio') || text.includes('bicicleta')) play = 'ponta';
@@ -1007,31 +1034,37 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     else if (text.includes('contra-ataque')) play = 'contra';
     else if (text.includes('cavadinha') || text.includes('chapéu')) play = 'solo';
     else {
-      const table: [Play, number][] = [
-        ['central', 3],
-        ['ponta', 2.2],
-        ['lancamento', 1.5],
-        ['tabela', 2],
-        ['solo', 2],
-        ['contra', 1.4],
-        ['longe', ev.type === 'gol' ? 1 : 2],
-      ];
-      let roll = Math.random() * table.reduce((sum, [, w]) => sum + w, 0);
-      play = 'central';
-      for (const [name, w] of table) {
-        roll -= w;
-        if (roll <= 0) {
-          play = name;
-          break;
-        }
-      }
+      // Leitura do adversário: quantos defensores no meio, quantos abertos, altura da linha e pressão sobre a bola
+      const defenders = all.filter((s) => s.side === O && s.pos !== 'GK' && Math.abs(s.x - goalX) < 300);
+      const refPt: Point = heldBy ?? { x: st.ballX, y: st.ballY };
+      const backsX = all.filter((s) => s.side === O && (s.pos === 'LB' || s.pos === 'RB')).map((s) => Math.abs(s.x - goalX));
+      const backsAvg = backsX.length ? backsX.reduce((n, v) => n + v, 0) / backsX.length : 150;
+      const style = teamStyles?.[actorSlot.pos];
+      play = choosePlay(intel, {
+        side: S,
+        evType: ev.type,
+        actor: { pos: actorSlot.pos, name: actorName, ovr: actorSlot.ovr, style },
+        team: teamStyles,
+        can: {
+          ponta: wings.length > 0,
+          tabela: !!partner && partner.key !== actorKey,
+          ultrapassagem: !!overlapPair && !!cmSlot,
+          triangulo: !!cmSlot && actorSlot.pos !== 'CM' && !!triThird,
+          troca: !!swapMate,
+          recomeco: !!restartBack && !!cmSlot,
+          infiltracao: actorSlot.pos !== 'GK',
+        },
+        opp: {
+          central: defenders.filter((s) => Math.abs(s.y - MID_Y) < 75).length,
+          wide: defenders.filter((s) => Math.abs(s.y - MID_Y) >= 110).length,
+          line: clamp((backsAvg / 700 - 0.15) / 0.4, 0, 1),
+          pressure: clamp((95 - nearestOpp(all, S, refPt).d) / 60, 0, 1),
+        },
+      });
     }
     if (play === 'ponta' && !wings.length) play = 'central';
-    const partner =
-      actorSlot.pos === 'CM'
-        ? mine.find((s) => s.key !== actorKey && FORWARDS.includes(s.pos))
-        : find(`${S}-CM`);
     if (play === 'tabela' && (!partner || partner.key === actorKey)) play = 'central';
+    if (!special) recordPlay(intel, S, play, actorName, ev.type);
 
     const near = (d: number): Point => ({ x: goalX - dir * d, y: MID_Y + rand(-55, 55) });
     const run = (key: string, p: Point, speed = 1.4): Setup => ({ key, x: p.x, y: p.y, speed });
@@ -1136,6 +1169,42 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
       q.push(waitStep(300, [run(actorKey, { x: goalX - dir * rand(130, 170), y: MID_Y + rand(-55, 55) }, 1.6)]));
       q.push(mk({ kind: 'pass', to: { slot: actorKey }, dur: 460, caption: `Tabela! ${partner.name} devolve para ${actorName}` }));
       carryTo(near(rand(80, 105)), 3200, 1.3, false);
+    } else if (play === 'ultrapassagem' && overlapPair) {
+      // O ponta traz a bola para dentro, o lateral do mesmo lado ultrapassa por fora e cruza
+      const { cutter, over } = overlapPair;
+      const edgeY = cutter.base.y < MID_Y ? FY0 + 42 : FY1 - 42;
+      q.push(mk({ kind: 'pass', to: { slot: cutter.key }, dur: 560 }));
+      q.push(mk({ kind: 'carry', to: { x: goalX - dir * rand(170, 200), y: edgeY + (edgeY < MID_Y ? 1 : -1) * rand(60, 90) }, dur: 1800, arrive: true, caption: `${cutter.name} puxa para dentro` }));
+      q.push(waitStep(380, [run(over.key, { x: goalX - dir * rand(95, 120), y: edgeY }, 1.8)], `${over.name} ultrapassa ${cutter.name}`));
+      q.push(mk({ kind: 'pass', to: { slot: over.key }, dur: 460 }));
+      q.push(mk({ kind: 'carry', to: { x: goalX - dir * rand(60, 85), y: edgeY }, dur: 1500, arrive: true }));
+      q.push(waitStep(380, [run(actorKey, { x: goalX - dir * rand(70, 95), y: MID_Y + rand(-18, 18) }, 1.5)]));
+      q.push(mk({ kind: 'pass', to: { slot: actorKey }, dur: 700, arc: 16, caption: `${over.name} cruza para ${actorName}` }));
+    } else if (play === 'triangulo' && cmSlot && triThird) {
+      // Triangulação entre o meio, um companheiro e o finalizador, que aparece livre
+      q.push(mk({ kind: 'pass', to: { slot: triThird.key }, dur: 420, caption: `Triangulação: ${cmSlot.name} toca para ${triThird.name}` }));
+      q.push(mk({ kind: 'pass', to: { slot: actorKey }, dur: 400 }));
+      q.push(mk({ kind: 'pass', to: { slot: cmSlot.key }, dur: 380 }));
+      q.push(waitStep(300, [run(actorKey, { x: goalX - dir * rand(120, 160), y: MID_Y + rand(-60, 60) }, 1.7)]));
+      q.push(mk({ kind: 'pass', to: { slot: actorKey }, dur: 520, arc: 6, caption: `${cmSlot.name} acha ${actorName} na saída da triangulação` }));
+      carryTo(near(rand(80, 105)), 2800, 1.3, false);
+    } else if (play === 'infiltracao') {
+      // O finalizador se infiltra entre os zagueiros e recebe em profundidade
+      q.push(waitStep(420, [run(actorKey, { x: goalX - dir * rand(110, 140), y: MID_Y + rand(-60, 60) }, 1.9)], `${actorName} se infiltra entre os zagueiros`));
+      q.push(mk({ kind: 'pass', to: { slot: actorKey }, dur: 760, arc: 8, caption: `${starter?.name ?? 'O meio'} acha ${actorName} em profundidade` }));
+      carryTo(near(rand(75, 100)), 2600, 1.5, canDribble && Math.random() < 0.3);
+    } else if (play === 'recomeco' && restartBack && cmSlot) {
+      // Sem espaço à frente: recua, reorganiza e reconstrói a jogada por outro caminho
+      q.push(mk({ kind: 'pass', to: { slot: restartBack.key }, dur: 480, caption: `${cmSlot.name} recua para ${restartBack.name} e reorganiza a jogada` }));
+      if (cmSlot.key !== actorKey) q.push(mk({ kind: 'pass', to: { slot: cmSlot.key }, dur: 460 }));
+      q.push(waitStep(300, [run(actorKey, { x: goalX - dir * rand(150, 190), y: MID_Y + rand(-70, 70) }, 1.5)], 'Nova construção'));
+      if (cmSlot.key !== actorKey) q.push(mk({ kind: 'pass', to: { slot: actorKey }, dur: 600 }));
+      carryTo(near(rand(100, 130)), 3200, undefined, canDribble && Math.random() < 0.5);
+    } else if (play === 'troca' && swapMate) {
+      // Troca de posição momentânea: os dois atacantes cruzam e confundem a marcação
+      q.push(waitStep(480, [run(actorKey, { x: swapMate.x, y: swapMate.y }, 1.4), run(swapMate.key, { x: actorSlot.x, y: actorSlot.y }, 1.4)], `${actorName} e ${swapMate.name} trocam de posição`));
+      q.push(mk({ kind: 'pass', to: { slot: actorKey }, dur: 600 }));
+      carryTo(near(rand(95, 125)), 3200, undefined, canDribble && Math.random() < 0.5);
     } else if (play === 'solo') {
       q.push(mk({ kind: 'pass', to: { slot: actorKey }, dur: 560 }));
       carryTo(near(rand(150, 190)), 3600, undefined, ev.type !== 'defesa' || Math.random() < 0.5);
@@ -1740,6 +1809,24 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           // Lateral: a bola sai pela linha lateral e o outro time repõe com as mãos. No fim do 1º tempo o App pede uma para o apito.
           const wantHalfEnd = !!endHalfRef?.current && !deadBallRef?.current;
           const throwInNow = h.pos !== 'GK' && ((toGoal > 90 && toGoal < FX1 - FX0 - 90 && Math.random() < 0.06) || wantHalfEnd);
+          let amb: ReturnType<typeof ambientChoice> = null;
+          const decideAmbient = () => {
+            if (canShoot && toGoal < 170) return null;
+            const mates = all.filter((x) => x.side === h.side && x.key !== h.key && x.pos !== 'GK');
+            const fwdOf = (x: Slot) => (x.x - h.x) * d;
+            return ambientChoice(intelRef.current, {
+              side: h.side,
+              holder: { pos: h.pos, name: h.name, ovr: h.ovr, style: stylesRef.current?.[h.side]?.[h.pos] as Style | undefined },
+              pressure,
+              toGoal,
+              wide: Math.abs(h.y - MID_Y) > 85,
+              forwardOpen: mates.some((x) => fwdOf(x) > 40 && nearestOpp(all, h.side, x).d > 55),
+              centralJam: all.filter((x) => x.side !== h.side && x.pos !== 'GK' && Math.abs(x.y - MID_Y) < 80 && Math.abs(x.x - h.x) < 130).length >= 3,
+              farSideFree: mates.some((x) => (x.y < MID_Y) !== (h.y < MID_Y) && fwdOf(x) > -40 && nearestOpp(all, h.side, x).d > 70),
+              hasOverlapper: mates.some((x) => fwdOf(x) < -15 && (x.y < MID_Y) === (h.y < MID_Y) && dist(x, h) < 260),
+              hasBackOption: mates.some((x) => fwdOf(x) < -20 && ['LB', 'RB', 'CM'].includes(x.pos) && dist(x, h) < 300),
+            });
+          };
           if (throwInNow) {
             const S = h.side;
             const O = otherSide(S);
@@ -1827,6 +1914,37 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
                 },
               });
             }
+          } else if (h.pos !== 'GK' && (amb = decideAmbient()) !== null) {
+            // Decisão de jogo corrido: recomeçar a construção, ultrapassar ou inverter o jogo (ver lib/game/playIntel)
+            const mates = all.filter((s) => s.side === h.side && s.key !== h.key && s.pos !== 'GK');
+            if (amb === 'recomeco') {
+              const back = mates.filter((s) => (s.x - h.x) * d < -20 && ['LB', 'RB', 'CM'].includes(s.pos)).sort((a, b) => dist(a, h) - dist(b, h))[0];
+              if (back) {
+                recordPass(intelRef.current, h.key, back.key);
+                st.queue.push({ kind: 'pass', to: { slot: back.key }, dur: passDur(dist(h, back)), ambient: true, caption: `${h.name} recua para ${back.name} e reorganiza a jogada` });
+              }
+            } else if (amb === 'inversao') {
+              const far = mates.filter((s) => (s.y < MID_Y) !== (h.y < MID_Y) && (s.x - h.x) * d > -40).sort((a, b) => nearestOpp(all, h.side, b).d - nearestOpp(all, h.side, a).d)[0];
+              if (far) {
+                recordPass(intelRef.current, h.key, far.key);
+                st.queue.push({ kind: 'pass', to: { slot: far.key }, dur: passDur(dist(h, far)) + 140, ambient: true, arc: 16, caption: `${h.name} inverte o jogo para ${far.name}` });
+              }
+            } else {
+              const over = mates.filter((s) => (s.x - h.x) * d < -15 && (s.y < MID_Y) === (h.y < MID_Y) && dist(s, h) < 260).sort((a, b) => dist(a, h) - dist(b, h))[0];
+              if (over) {
+                const outward = h.y < MID_Y ? -1 : 1;
+                recordPass(intelRef.current, h.key, over.key);
+                st.queue.push({
+                  kind: 'carry',
+                  to: { x: clamp(h.x + d * rand(40, 70), FX0 + 30, FX1 - 30), y: clamp(h.y - outward * rand(18, 34), FY0 + 30, FY1 - 30) },
+                  dur: 900,
+                  ambient: true,
+                  setup: [{ key: over.key, x: clamp(h.x + d * rand(90, 130), FX0 + 30, FX1 - 30), y: clamp(h.y + outward * rand(6, 22), FY0 + 25, FY1 - 25), speed: 1.8 }],
+                  caption: `${over.name} ultrapassa ${h.name}`,
+                });
+                st.queue.push({ kind: 'pass', to: { slot: over.key }, dur: 480, ambient: true });
+              }
+            }
           } else if (
             h.pos !== 'GK' &&
             toGoal > 70 &&
@@ -1853,7 +1971,9 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
             if (cross && cf) {
               st.queue.push({ kind: 'pass', to: { slot: cf.key }, dur: 640, ambient: true, arc: 12, caption: `${h.name} cruza para ${cf.name}` });
             } else {
-              const r = choosePass(h, all);
+              const hStyle = stylesRef.current?.[h.side]?.[h.pos] as Style | undefined;
+              const r = choosePass(h, all, (cand, fwd) => passBias(intelRef.current, h.key, cand.key) + passTaste({ name: h.name, ovr: h.ovr, style: hStyle }, fwd));
+              if (r) recordPass(intelRef.current, h.key, r.key);
               if (r) {
                 const dd = dist(h, r);
                 const long = dd > 230;

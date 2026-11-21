@@ -200,6 +200,10 @@ export function describeFx(slot: Position, roleId: string, focus: Focus, fit: Fi
   return list;
 }
 
+// Função e foco de cada vaga (a inteligência das jogadas lê isso para decidir como o time joga)
+export const stylesOf = (choices: { slot: Position; role: string; focus: Focus }[]): Partial<Record<Position, { role: string; focus: string }>> =>
+  Object.fromEntries(choices.map((c) => [c.slot, { role: c.role, focus: c.focus }])) as Partial<Record<Position, { role: string; focus: string }>>;
+
 // ---------- Análise tática do time ----------
 // Tudo sai das escolhas reais: o mapa de atuação de cada vaga somado (onde o time joga) e os efeitos da simulação (teamFx).
 // A nota é medida contra o time com as funções padrão: sem mexer em nada, todos os eixos ficam no meio.
