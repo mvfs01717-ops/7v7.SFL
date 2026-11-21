@@ -102,7 +102,7 @@ const ROLE: Record<string, Partial<Record<DribbleMove, number>>> = {
 };
 const REPEAT = 6;
 
-export function chooseDribble(intel: Intel, c: DribbleCtx, rnd: () => number = Math.random): DribbleMove {
+export function chooseDribble(intel: Intel, c: DribbleCtx, rnd: () => number = Math.random, allowed: (m: DribbleMove) => boolean = () => true): DribbleMove {
   const p = personalityOf(c.holder.name, c.holder.ovr);
   const base: Record<DribbleMove, number> = { finta: 2, pedalada: 1.1, corte: 1, caneta: 0.35, giro: 0.9, direcao: 1.2, protecao: 0.8, aceleracao: 1.2, curto: 1.2, velocidade: 0.9 };
   const w = { ...base } as Record<DribbleMove, number>;
@@ -131,11 +131,12 @@ export function chooseDribble(intel: Intel, c: DribbleCtx, rnd: () => number = M
     v *= Math.max(0.45, 1 / (1 + 0.5 * rep));
     if (ok > bad) v *= 1.1;
     if (bad >= 2 && ok === 0) v *= 0.7;
-    w[m] = v;
+    w[m] = allowed(m) ? v : 0;
   });
   const total = DRIBBLE_MOVES.reduce((s, m) => s + w[m], 0);
+  if (total <= 0) return 'finta';
   let roll = rnd() * total;
-  for (const m of DRIBBLE_MOVES) { roll -= w[m]; if (roll <= 0) return m; }
+  for (const m of DRIBBLE_MOVES) { roll -= w[m]; if (roll <= 0 && w[m] > 0) return m; }
   return 'finta';
 }
 export function recordDribble(intel: Intel, side: Side, move: DribbleMove, win: boolean) {

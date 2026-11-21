@@ -4,6 +4,8 @@ import type { Ambience } from '@/lib/game/ambience';
 import { mixHex, stadiumFor } from '@/lib/game/stadium';
 import { perfSample, useLite } from '@/lib/settings';
 import { useCosmetics } from '@/lib/cosmetics';
+import { newGaitState, stepGait, type GaitState } from '@/lib/game/locomotion';
+import { animOn, animSpeed, countUse } from '@/lib/game/animLibrary';
 import { chooseDribble, dribbleBody, dribbleGeometry, moveFit, recordDribble, DRIBBLE_CAPTION, type DribbleCtx, type DribbleMove } from '@/lib/game/dribbles';
 import { ambientChoice, choosePlay, createIntel, passBias, passTaste, recordPass, recordPlay, type Intel, type PlayKind, type Style } from '@/lib/game/playIntel';
 import { ReplayPlayer, type ClipData } from '@/components/game/ReplayPlayer';
@@ -618,6 +620,9 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     tackleAt: 0,
   });
   const nodes = useRef<Record<string, SVGGElement | null>>({});
+  // Passada: chuteiras alternando e marcha de cada jogador (ver lib/game/locomotion)
+  const feetNodes = useRef<Record<string, SVGGElement | null>>({});
+  const gaitRef = useRef<Record<string, GaitState>>({});
   const ballNode = useRef<SVGGElement | null>(null);
   const ringNode = useRef<SVGGElement | null>(null);
   // Barra de fôlego em cima de cada jogador: aparece com a bola ou quando está muito cansado
@@ -799,7 +804,9 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
       toGoal: Math.abs((d > 0 ? FX1 : FX0) - h.x),
       wide: Math.abs(h.y - MID_Y) > 85,
     };
-    const move = forcedMove ?? chooseDribble(intelRef.current, ctx);
+    const move = forcedMove ?? chooseDribble(intelRef.current, ctx, Math.random, (m) => animOn(`dri.${m}`));
+    countUse(`dri.${move}`);
+    const pace = animSpeed(`dri.${move}`);
     const chance = clamp(0.58 + (h.ovr - opp.ovr) / 80 + moveFit(move, ctx), 0.3, 0.88);
     const win = forceWin || Math.random() < chance;
     recordDribble(intelRef.current, h.side, move, win);
@@ -809,7 +816,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
       steps.push({
         kind: 'carry',
         to: { x: clamp(p.to.x, FX0 + 20, FX1 - 20), y: clamp(p.to.y, FY0 + 20, FY1 - 20) },
-        dur: p.dur,
+        dur: Math.round(p.dur / pace),
         ambient,
         dribble: true,
         speed: p.speed,
@@ -1627,7 +1634,8 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         const ux = sp > 12 ? holderNow.vx / sp : dirOf(holderNow.side);
         const uy = sp > 12 ? holderNow.vy / sp : 0;
         const k = 1 - Math.exp(-dt / 60);
-        const touch = st.active && st.active.step.kind === 'carry' && !st.active.step.dribble && sp > 20 ? Math.max(0, Math.sin(now / 120)) * 5 : 0;
+        const gs = gaitRef.current[holderNow.key];
+        const touch = st.active && st.active.step.kind === 'carry' && !st.active.step.dribble && sp > 20 ? Math.max(0, Math.sin(gs && !liteRef.current ? gs.phase : now / 120)) * (gs && gs.gait === 'sprint' ? 8 : 5) : 0;
         const df = dribFx.current;
         const bfx = st.active && st.active.step.dribble && df ? dribbleBody(df.move, df.phase, clamp((now - df.t0) / df.dur, 0, 1), df.sg) : null;
         st.ballX += (holderNow.x + ux * (11 + touch) + (bfx ? bfx.ballFwd * dirOf(holderNow.side) : 0) - st.ballX) * k;
@@ -2194,7 +2202,29 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
       all.forEach((s) => {
         s.x = clamp(s.x, FX0 + 8, FX1 - 8);
         s.y = clamp(s.y, FY0 + 8, FY1 - 8);
-        nodes.current[s.key]?.setAttribute('transform', `translate(${s.x.toFixed(1)} ${s.y.toFixed(1)})`);
+        // Passada: marcha pelo ritmo e direção, chuteiras presas à distância percorrida (não desliza) e postura do corpo
+        let post = '';
+        if (!liteRef.current && !st.kickoff) {
+          const gs = (gaitRef.current[s.key] = gaitRef.current[s.key] ?? newGaitState());
+          const defending = st.poss !== s.side && s.pos !== 'GK';
+          const r = stepGait(gs, { vx: s.vx, vy: s.vy, maxSpeed: s.maxSpeed, dt, now, watch: defending ? { x: st.ballX, y: st.ballY, px: s.x, py: s.y } : undefined, speedMul: animSpeed(`loc.${gs.gait}`) }, (g) => animOn(`loc.${g}`));
+          if (r.changed) countUse(`loc.${r.gait}`);
+          const swing = Math.sin(gs.phase);
+          const fg = feetNodes.current[s.key];
+          if (fg) {
+            const e1 = fg.children[0] as SVGElement | undefined;
+            const e2 = fg.children[1] as SVGElement | undefined;
+            fg.setAttribute('opacity', r.gait === 'parado' ? '0' : '1');
+            fg.setAttribute('transform', `rotate(${((gs.face * 180) / Math.PI).toFixed(0)})`);
+            e1?.setAttribute('cx', (r.fx.amp * swing).toFixed(1));
+            e1?.setAttribute('cy', (-(7.5 + r.fx.lift)).toFixed(1));
+            e2?.setAttribute('cx', (-r.fx.amp * swing).toFixed(1));
+            e2?.setAttribute('cy', (7.5 + r.fx.lift).toFixed(1));
+          }
+          const bob = 1 + r.fx.bob * Math.abs(Math.sin(gs.phase));
+          post = ` scale(${(r.fx.sx * bob).toFixed(3)} ${(r.fx.sy * bob).toFixed(3)})`;
+        }
+        nodes.current[s.key]?.setAttribute('transform', `translate(${s.x.toFixed(1)} ${s.y.toFixed(1)})${post}`);
       });
 
       // Animação do desarme (carrinho ou bote em pé)
@@ -2947,6 +2977,11 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
                   </>
                 );
               })()}
+              {!lite && (
+                <g ref={(el: SVGGElement | null) => { feetNodes.current[s.key] = el; }} opacity={0} style={{ pointerEvents: 'none' }}>
+                  {[0, 1].map((i) => <ellipse key={i} rx={3.6} ry={2.3} fill="#14181f" stroke="rgba(255,255,255,.75)" strokeWidth={0.7} />)}
+                </g>
+              )}
               <g
                 ref={(el: SVGGElement | null) => {
                   staminaBars.current[s.key] = { ...(staminaBars.current[s.key] ?? { fill: null }), box: el };

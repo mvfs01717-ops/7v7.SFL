@@ -8,6 +8,7 @@ import {
 import { stadiumCss } from '@/lib/game/stadiumCss';
 import { supabase } from '@/lib/supabase';
 import { isFreeAgent } from '@/lib/game/helpers';
+import AnimAdmin from '@/components/AnimAdmin';
 
 type Position = 'GK' | 'LB' | 'RB' | 'CM' | 'LF' | 'RF' | 'CF';
 type Team = {
@@ -336,7 +337,7 @@ export default function AdminScreen({
   const [sort, setSort] = useState('overall');
   const [editing, setEditing] = useState<Player | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [tab, setTab] = useState<'players' | 'clubs' | 'data' | 'history'>('players');
+  const [tab, setTab] = useState<'players' | 'clubs' | 'data' | 'history' | 'anim'>('players');
   const [audit, setAudit] = useState<AuditRow[]>([]);
   const [auditError, setAuditError] = useState('');
   const [auditLoading, setAuditLoading] = useState(false);
@@ -804,7 +805,12 @@ export default function AdminScreen({
         <button role="tab" className={tab === 'history' ? 'ad-tab on' : 'ad-tab'} onClick={() => setTab('history')}>
           <Check size={15} /> Histórico
         </button>
+        <button role="tab" className={tab === 'anim' ? 'ad-tab on' : 'ad-tab'} onClick={() => setTab('anim')}>
+          <Check size={15} /> Animações
+        </button>
       </div>
+
+      {tab === 'anim' && <AnimAdmin />}
 
       {tab === 'players' && (
         <section className="ad-card">
