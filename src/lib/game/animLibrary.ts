@@ -3,8 +3,8 @@
 import { GAITS, type Gait } from '@/lib/game/locomotion';
 import { DRIBBLE_MOVES, type DribbleMove } from '@/lib/game/dribbles';
 
-export type AnimCategory = 'locomocao' | 'drible';
-export const CATEGORY_LABEL: Record<AnimCategory, string> = { locomocao: 'Movimentação e locomoção', drible: 'Dribles' };
+export type AnimCategory = 'locomocao' | 'drible' | 'passe' | 'finalizacao' | 'dominio' | 'defesa';
+export const CATEGORY_LABEL: Record<AnimCategory, string> = { locomocao: 'Movimentação (discos)', drible: 'Dribles', dominio: 'Domínio e primeiro toque', passe: 'Passes', finalizacao: 'Finalizações', defesa: 'Defesa e goleiro' };
 
 export type AnimDef = {
   id: string; // identificador único
@@ -22,16 +22,16 @@ export type AnimDef = {
 };
 
 const GAIT_DEF: Record<Gait, Omit<AnimDef, 'id' | 'category'>> = {
-  parado: { type: 'postura', label: 'Parado (postura)', when: 'Velocidade quase zero', dur: 0, body: 'Respiração visual leve, pés juntos', ball: 'Bola parada ou sob domínio', next: ['caminhada', 'arrancada'], interrupt: 'Livre', needs: 'Nenhum', roles: 'Todas' },
-  caminhada: { type: 'locomoção', label: 'Caminhada', when: 'Até 30% da velocidade máxima', dur: 0, body: 'Passada curta e lenta', ball: 'Condução curta', next: ['leve', 'parado', 'freada'], interrupt: 'Livre', needs: 'Nenhum', roles: 'Todas' },
-  leve: { type: 'locomoção', label: 'Corrida leve', when: '30% a 58% da velocidade máxima', dur: 0, body: 'Passada média, balanço leve', ball: 'Condução normal', next: ['corrida', 'caminhada', 'direcao'], interrupt: 'Livre', needs: 'Nenhum', roles: 'Todas' },
-  corrida: { type: 'locomoção', label: 'Corrida normal', when: '58% a 82% da velocidade máxima', dur: 0, body: 'Passada ampla, corpo ligeiramente à frente', ball: 'Condução em ritmo', next: ['sprint', 'leve', 'direcao', 'freada'], interrupt: 'Livre', needs: 'Nenhum', roles: 'Todas' },
-  sprint: { type: 'locomoção', label: 'Sprint', when: 'Acima de 82% da velocidade máxima', dur: 0, body: 'Passada máxima, corpo alongado e baixo', ball: 'Condução em velocidade (toque mais longo)', next: ['freada', 'direcao', 'corrida'], interrupt: 'Livre', needs: 'Fôlego: cansaço reduz a velocidade máxima', roles: 'Todas' },
-  arrancada: { type: 'ação', label: 'Arrancada explosiva', when: 'Aceleração forte saindo de baixa velocidade', dur: 260, body: 'Corpo se projeta à frente, passada curta e rápida', ball: 'Toque à frente', next: ['sprint', 'corrida'], interrupt: 'Ao final', needs: 'Nenhum', roles: 'Todas (mais comum em pontas e atacantes móveis)' },
-  freada: { type: 'ação', label: 'Parada brusca / desaceleração', when: 'Desaceleração forte vindo de velocidade alta', dur: 260, body: 'Corpo recua, passos curtos e pés afastados', ball: 'Bola controlada junto ao pé', next: ['caminhada', 'parado', 'arrancada'], interrupt: 'Ao final', needs: 'Nenhum', roles: 'Todas' },
-  direcao: { type: 'ação', label: 'Mudança de direção', when: 'Giro rápido da trajetória em velocidade', dur: 260, body: 'Corpo se contrai, pés afastados para apoiar', ball: 'Bola acompanha o giro', next: ['corrida', 'arrancada'], interrupt: 'Ao final', needs: 'Nenhum', roles: 'Todas' },
-  lateral: { type: 'locomoção', label: 'Corrida lateral', when: 'Corpo voltado para a bola e movimento de lado (defensores)', dur: 0, body: 'Passos laterais, base aberta', ball: 'Sem bola (acompanha o portador)', next: ['costas', 'corrida'], interrupt: 'Livre', needs: 'Nenhum', roles: 'Defensivas, laterais e volantes' },
-  costas: { type: 'locomoção', label: 'Deslocamento de costas', when: 'Recuo olhando para a bola', dur: 0, body: 'Passos curtos para trás, corpo de frente para o jogo', ball: 'Sem bola (recomposição)', next: ['lateral', 'corrida'], interrupt: 'Livre', needs: 'Nenhum', roles: 'Defensivas, laterais e volantes' },
+  parado: { type: 'postura', label: 'Parado (postura)', when: 'Velocidade quase zero', dur: 0, body: 'Disco parado, sem rastro nem indicador de direção', ball: 'Bola parada ou sob domínio', next: ['caminhada', 'arrancada'], interrupt: 'Livre', needs: 'Nenhum', roles: 'Todas' },
+  caminhada: { type: 'locomoção', label: 'Caminhada', when: 'Até 30% da velocidade máxima', dur: 0, body: 'Disco se desloca devagar, sem esticada', ball: 'Condução curta', next: ['leve', 'parado', 'freada'], interrupt: 'Livre', needs: 'Nenhum', roles: 'Todas' },
+  leve: { type: 'locomoção', label: 'Corrida leve', when: '30% a 58% da velocidade máxima', dur: 0, body: 'Disco com leve pulsar no ritmo da corrida', ball: 'Condução normal', next: ['corrida', 'caminhada', 'direcao'], interrupt: 'Livre', needs: 'Nenhum', roles: 'Todas' },
+  corrida: { type: 'locomoção', label: 'Corrida normal', when: '58% a 82% da velocidade máxima', dur: 0, body: 'Disco estica de leve na direção da corrida e deixa rastro curto', ball: 'Condução em ritmo', next: ['sprint', 'leve', 'direcao', 'freada'], interrupt: 'Livre', needs: 'Nenhum', roles: 'Todas' },
+  sprint: { type: 'locomoção', label: 'Sprint', when: 'Acima de 82% da velocidade máxima', dur: 0, body: 'Disco estica na direção do movimento, rastro de velocidade e pulsar mais forte', ball: 'Condução em velocidade (toque mais longo)', next: ['freada', 'direcao', 'corrida'], interrupt: 'Livre', needs: 'Fôlego: cansaço reduz a velocidade máxima', roles: 'Todas' },
+  arrancada: { type: 'ação', label: 'Arrancada explosiva', when: 'Aceleração forte saindo de baixa velocidade', dur: 260, body: 'Disco se projeta à frente, rastro longo e indicador de direção aceso', ball: 'Toque à frente', next: ['sprint', 'corrida'], interrupt: 'Ao final', needs: 'Nenhum', roles: 'Todas (mais comum em pontas e atacantes móveis)' },
+  freada: { type: 'ação', label: 'Parada brusca / desaceleração', when: 'Desaceleração forte vindo de velocidade alta', dur: 260, body: 'Disco se comprime no eixo do movimento, rastro some rápido', ball: 'Bola controlada junto ao pé', next: ['caminhada', 'parado', 'arrancada'], interrupt: 'Ao final', needs: 'Nenhum', roles: 'Todas' },
+  direcao: { type: 'ação', label: 'Mudança de direção', when: 'Giro rápido da trajetória em velocidade', dur: 260, body: 'Disco se contrai na curva, indicador de direção gira e a curva marca o gramado', ball: 'Bola acompanha o giro', next: ['corrida', 'arrancada'], interrupt: 'Ao final', needs: 'Nenhum', roles: 'Todas' },
+  lateral: { type: 'locomoção', label: 'Corrida lateral', when: 'Corpo voltado para a bola e movimento de lado (defensores)', dur: 0, body: 'Disco de frente para a bola enquanto se desloca de lado', ball: 'Sem bola (acompanha o portador)', next: ['costas', 'corrida'], interrupt: 'Livre', needs: 'Nenhum', roles: 'Defensivas, laterais e volantes' },
+  costas: { type: 'locomoção', label: 'Deslocamento de costas', when: 'Recuo olhando para a bola', dur: 0, body: 'Disco recua de frente para a bola', ball: 'Sem bola (recomposição)', next: ['lateral', 'corrida'], interrupt: 'Livre', needs: 'Nenhum', roles: 'Defensivas, laterais e volantes' },
 };
 
 const DRIBBLE_DEF: Record<DribbleMove, Omit<AnimDef, 'id' | 'category'>> = {
@@ -47,7 +47,15 @@ const DRIBBLE_DEF: Record<DribbleMove, Omit<AnimDef, 'id' | 'category'>> = {
   velocidade: { type: 'drible', label: 'Drible em velocidade', when: 'Longe do gol, muito espaço, sem pressão', dur: 900, body: 'Corrida longa em velocidade máxima passando por fora', ball: 'Bola em toques longos', next: ['finta'], interrupt: 'Se o marcador alcança, a jogada acaba', needs: 'Ousadia', roles: 'Pontas e atacantes móveis' },
 };
 
+
+const FX_DEF: { id: string; category: AnimCategory; label: string; type: string; when: string; dur: number; body: string; ball: string; next: string[]; interrupt: string; needs: string; roles: string }[] = [
+  { id: 'fx.touch', category: 'dominio', label: 'Amortecimento no domínio', type: 'domínio', when: 'Todo passe ou bola que chega ao jogador', dur: 320, body: 'Disco comprime no eixo da bola e cede um pouco, depois volta', ball: 'A bola passa a acompanhar o disco; passes fortes amortecem mais', next: ['loc.arrancada', 'dri.giro', 'fx.pass'], interrupt: 'Dribles e desarmes têm prioridade sobre a pose', needs: 'Nenhum (força do passe muda a intensidade)', roles: 'Todas' },
+  { id: 'fx.pass', category: 'passe', label: 'Contato e impulso do passe', type: 'passe', when: 'Todo passe', dur: 240, body: 'Recuo curto e avanço do disco na direção do passe; anel de impacto nos passes fortes', ball: 'A bola sai na direção do avanço, com trajetória e arco do passe', next: ['fx.touch'], interrupt: 'Dribles e desarmes têm prioridade sobre a pose', needs: 'Nenhum', roles: 'Todas' },
+  { id: 'fx.shot', category: 'finalizacao', label: 'Preparação e impacto do chute', type: 'finalização', when: 'Todo chute de um jogador de linha', dur: 450, body: 'Preparação: disco recua e comprime por 150 ms com a bola parada. Contato: avanço forte, esticada e clarão', ball: 'A bola só sai depois da preparação; chutes mais rápidos têm impacto maior e mais rastro', next: ['fx.save', 'fx.touch'], interrupt: 'Se o chute for desligado aqui, sai sem preparação', needs: 'Nenhum (a duração do chute define a força)', roles: 'Todas' },
+  { id: 'fx.save', category: 'defesa', label: 'Impacto da defesa do goleiro', type: 'defesa', when: 'Chute que chega ao goleiro', dur: 380, body: 'Goleiro absorve o impacto: comprime e cede, com anel azul e clarão', ball: 'A bola passa a ficar com o goleiro', next: ['fx.pass'], interrupt: 'Livre', needs: 'Nenhum', roles: 'Goleiros (tradicional, construtor e líbero)' },
+];
 export const LIBRARY: AnimDef[] = [
+  ...FX_DEF,
   ...GAITS.map((g) => ({ id: `loc.${g}`, category: 'locomocao' as const, ...GAIT_DEF[g] })),
   ...DRIBBLE_MOVES.map((m) => ({ id: `dri.${m}`, category: 'drible' as const, ...DRIBBLE_DEF[m] })),
 ];

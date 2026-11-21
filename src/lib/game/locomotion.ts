@@ -31,9 +31,13 @@ export function classifyGait(i: GaitIn, enabled: (g: Gait) => boolean = () => tr
   return pick(base, 'corrida');
 }
 
-export type GaitFx = { amp: number; rate: number; sx: number; sy: number; bob: number; lift: number };
-// amp: abertura da passada (px); rate: radianos de passada por pixel andado; sx/sy: postura do corpo; bob: balanço vertical; lift: afastamento lateral dos pés
+export type GaitFx = { amp: number; rate: number; sx: number; sy: number; bob: number; lift: number; trail: number };
+// rate: ritmo do toque na bola por pixel andado; sx/sy: esticada do disco ao longo/através da direção do movimento; bob: pulsar do disco; trail: rastro de velocidade (0 a 1)
+const TRAIL: Record<Gait, number> = { parado: 0, caminhada: 0, leve: 0, corrida: 0.3, sprint: 0.85, arrancada: 1, freada: 0.2, direcao: 0.3, lateral: 0, costas: 0 };
 export function gaitFx(g: Gait, ratio: number, speedMul = 1): GaitFx {
+  return { ...gaitBase(g, ratio, speedMul), trail: TRAIL[g] };
+}
+function gaitBase(g: Gait, ratio: number, speedMul: number): Omit<GaitFx, 'trail'> {
   const r = Math.min(1.2, Math.max(0, ratio));
   switch (g) {
     case 'caminhada': return { amp: 4 + 3 * r, rate: 0.2 * speedMul, sx: 1, sy: 1, bob: 0.01, lift: 0 };

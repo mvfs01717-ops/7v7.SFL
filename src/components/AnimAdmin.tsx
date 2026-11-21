@@ -1,47 +1,46 @@
 import { useEffect, useRef, useState } from 'react';
 import { CATEGORY_LABEL, LIBRARY, clearUses, loadAnimSettings, loadUses, saveAnimSettings, type AnimCategory, type AnimDef, type AnimSettings } from '@/lib/game/animLibrary';
 import { gaitFx, type Gait } from '@/lib/game/locomotion';
+import { axisTransform, poseOf, type PoseKind } from '@/lib/game/discFx';
 import { dribbleBody, dribbleGeometry, type DribbleMove } from '@/lib/game/dribbles';
 
 // Ritmo de cada marcha na prévia (fração da velocidade máxima)
 const PREVIEW_RATIO: Record<Gait, number> = { parado: 0, caminhada: 0.2, leve: 0.45, corrida: 0.7, sprint: 1, arrancada: 0.6, freada: 0.3, direcao: 0.6, lateral: 0.45, costas: 0.4 };
+const POSE_OF: Record<string, PoseKind> = { 'fx.touch': 'touch', 'fx.pass': 'pass', 'fx.shot': 'shot', 'fx.save': 'save' };
 
-// Prévia: executa a MESMA função de movimento usada na partida (gaitFx / dribbleBody / dribbleGeometry)
+// Prévia: executa a MESMA função de movimento usada na partida (gaitFx / dribbleBody / dribbleGeometry / poseOf)
 function Preview({ def, speed }: { def: AnimDef; speed: number }) {
   const body = useRef<SVGGElement>(null);
-  const feet = useRef<SVGGElement>(null);
+  const ghost = useRef<SVGGElement>(null);
   const ball = useRef<SVGCircleElement>(null);
   const foe = useRef<SVGCircleElement>(null);
-  const label = useRef<SVGTextElement>(null);
+  const ring = useRef<SVGCircleElement>(null);
   useEffect(() => {
     let raf = 0;
     const t0 = performance.now();
     const id = def.id.split('.')[1];
     const loop = (now: number) => {
       const t = ((now - t0) / 1000) * speed;
+      ring.current?.setAttribute('opacity', '0');
       if (def.category === 'locomocao') {
         const g = id as Gait;
         const ratio = PREVIEW_RATIO[g];
         const fx = gaitFx(g, ratio);
         const px = ((t * ratio * 120) % 240) - 120;
-        const phase = ((px + 120) * fx.rate * 1.6);
-        const sw = Math.sin(phase);
-        const face = g === 'costas' ? Math.PI : g === 'lateral' ? Math.PI / 2 : 0;
         const dir = g === 'costas' ? -1 : 1;
         const x = g === 'lateral' ? 0 : dir * px;
         const y = g === 'lateral' ? px * 0.6 : g === 'direcao' ? Math.sin(t * 4) * 14 : 0;
-        const bob = 1 + fx.bob * Math.abs(sw);
-        body.current?.setAttribute('transform', `translate(${(110 + x).toFixed(1)} ${(70 + y).toFixed(1)}) scale(${(fx.sx * bob).toFixed(3)} ${(fx.sy * bob).toFixed(3)})`);
-        if (feet.current) {
-          feet.current.setAttribute('opacity', g === 'parado' ? '0' : '1');
-          feet.current.setAttribute('transform', `rotate(${((face * 180) / Math.PI).toFixed(0)})`);
-          const [a, b] = [feet.current.children[0], feet.current.children[1]];
-          a?.setAttribute('cx', (fx.amp * sw).toFixed(1)); a?.setAttribute('cy', String(-(7.5 + fx.lift)));
-          b?.setAttribute('cx', (-fx.amp * sw).toFixed(1)); b?.setAttribute('cy', String(7.5 + fx.lift));
-        }
+        const head = g === 'lateral' ? Math.PI / 2 * Math.sign(px || 1) : g === 'costas' ? Math.PI : 0;
+        const bob = 1 + fx.bob * Math.abs(Math.sin(t * 8));
+        body.current?.setAttribute('transform', axisTransform(110 + x, 70 + y, head, 0, fx.sx * bob, fx.sy * bob));
+        const tr = fx.trail * Math.min(1, ratio * 1.1);
+        const ux = Math.cos(head) * -1, uy = Math.sin(head) * -1;
+        const [a, b] = [ghost.current?.children[0], ghost.current?.children[1]];
+        a?.setAttribute('cx', String(ux * 9)); a?.setAttribute('cy', String(uy * 9)); a?.setAttribute('opacity', String(0.26 * tr * 2));
+        b?.setAttribute('cx', String(ux * 18)); b?.setAttribute('cy', String(uy * 18)); b?.setAttribute('opacity', String(0.14 * tr * 2));
         ball.current?.setAttribute('opacity', '0');
         foe.current?.setAttribute('opacity', '0');
-      } else {
+      } else if (def.category === 'drible') {
         const move = id as DribbleMove;
         const foeP = { x: 130, y: 70 };
         const plan = dribbleGeometry(move, { x: 50, y: 70 }, foeP, -1, 1);
@@ -54,7 +53,7 @@ function Preview({ def, speed }: { def: AnimDef; speed: number }) {
         }
         const fx = dribbleBody(move, phase, done ? 0 : pr, -1);
         body.current?.setAttribute('transform', `translate(${pos.x.toFixed(1)} ${(pos.y + fx.shift).toFixed(1)}) rotate(${fx.rot.toFixed(1)}) scale(${fx.sx.toFixed(3)} ${fx.sy.toFixed(3)})`);
-        feet.current?.setAttribute('opacity', '0');
+        ghost.current?.setAttribute('opacity', '0');
         ball.current?.setAttribute('opacity', '1');
         ball.current?.setAttribute('cx', (pos.x + 11 + fx.ballFwd).toFixed(1));
         ball.current?.setAttribute('cy', (pos.y + 2 + fx.ballLat).toFixed(1));
@@ -62,8 +61,32 @@ function Preview({ def, speed }: { def: AnimDef; speed: number }) {
         foe.current?.setAttribute('opacity', '1');
         foe.current?.setAttribute('cx', (foeP.x + sway * 0.4).toFixed(1));
         foe.current?.setAttribute('cy', (foeP.y + sway).toFixed(1));
+      } else {
+        // Efeitos de contato: pose do disco no eixo da bola, bola em trajeto e anel de impacto
+        const kind = POSE_OF[def.id] ?? 'pass';
+        const cyc = 1400, el = (t * 1000) % cyc;
+        const kicker = kind === 'touch' || kind === 'save' ? 'rx' : 'tx';
+        const origin = kicker === 'tx' ? { x: 70, y: 70 } : { x: 170, y: 70 };
+        const age = kind === 'shot' ? el - 150 : el - 200;
+        const pz = kicker === 'tx' ? (kind === 'shot' && el < 150 ? poseOf('wind', el, 1) : poseOf(kind, Math.max(0, age), 1)) : poseOf(kind, Math.max(0, el - 450), 1);
+        const ang = kicker === 'tx' ? 0 : 0;
+        body.current?.setAttribute('transform', pz ? axisTransform(origin.x, origin.y, ang, pz.dx, pz.sa, pz.sp) : axisTransform(origin.x, origin.y, ang, 0, 1, 1));
+        const travel = kicker === 'tx' ? (el - 200) / 450 : (el - 0) / 450;
+        const bp = Math.min(1, Math.max(0, travel));
+        const bx = kicker === 'tx' ? 80 + bp * 100 : 80 + bp * 80;
+        const showBall = kicker === 'tx' ? el > 200 || kind === 'shot' && el > 150 : el < 460;
+        ball.current?.setAttribute('opacity', showBall ? '1' : '0');
+        ball.current?.setAttribute('cx', String(kicker === 'tx' && el <= 200 ? 82 : bx));
+        ball.current?.setAttribute('cy', '71');
+        foe.current?.setAttribute('opacity', '0');
+        ghost.current?.setAttribute('opacity', '0');
+        if (pz && pz.glow > 0 && ring.current) {
+          ring.current.setAttribute('cx', String(origin.x + (kicker === 'tx' ? 12 : 0)));
+          ring.current.setAttribute('cy', '70');
+          ring.current.setAttribute('r', String(14 + 16 * (1 - pz.glow)));
+          ring.current.setAttribute('opacity', String(0.55 * pz.glow));
+        }
       }
-      if (label.current) label.current.textContent = def.label;
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
@@ -74,15 +97,17 @@ function Preview({ def, speed }: { def: AnimDef; speed: number }) {
       <rect width="240" height="140" rx="10" fill="#14532d" />
       <path d="M0 70H240M120 0V140" stroke="rgba(255,255,255,.18)" />
       <circle ref={foe} r="13" fill="#334155" stroke="rgba(255,255,255,.5)" opacity="0" />
+      <circle ref={ring} r="14" fill="#fff3b0" opacity="0" />
       <g ref={body}>
+        <g ref={ghost}>
+          <circle r="12" fill="#a50044" opacity="0" />
+          <circle r="10" fill="#a50044" opacity="0" />
+        </g>
         <circle r="13" fill="#a50044" stroke="rgba(0,0,0,.5)" />
         <text textAnchor="middle" dy="4" fontSize="12" fontWeight="800" fill="#fff">J</text>
-        <g ref={feet} opacity="0">
-          {[0, 1].map((i) => <ellipse key={i} rx="3.6" ry="2.3" fill="#14181f" stroke="rgba(255,255,255,.75)" strokeWidth=".7" />)}
-        </g>
       </g>
       <circle ref={ball} r="3.6" fill="#fff" stroke="#111" strokeWidth=".8" opacity="0" />
-      <text ref={label} x="8" y="132" fontSize="9" fill="rgba(255,255,255,.8)" />
+      <text x="8" y="132" fontSize="9" fill="rgba(255,255,255,.8)">{def.label}</text>
     </svg>
   );
 }

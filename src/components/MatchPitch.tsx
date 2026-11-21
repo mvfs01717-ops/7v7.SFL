@@ -5,6 +5,7 @@ import { mixHex, stadiumFor } from '@/lib/game/stadium';
 import { perfSample, useLite } from '@/lib/settings';
 import { useCosmetics } from '@/lib/cosmetics';
 import { newGaitState, stepGait, type GaitState } from '@/lib/game/locomotion';
+import { axisTransform, newRing, poseOf, POSE_MS, type PoseKind, type Ring } from '@/lib/game/discFx';
 import { animOn, animSpeed, countUse } from '@/lib/game/animLibrary';
 import { chooseDribble, dribbleBody, dribbleGeometry, moveFit, recordDribble, DRIBBLE_CAPTION, type DribbleCtx, type DribbleMove } from '@/lib/game/dribbles';
 import { ambientChoice, choosePlay, createIntel, passBias, passTaste, recordPass, recordPlay, type Intel, type PlayKind, type Style } from '@/lib/game/playIntel';
@@ -116,6 +117,8 @@ type Step = {
   speed?: number;
   // Movimentos combinados que começam junto com o passo (corrida do atacante, mergulho do goleiro...)
   setup?: Setup[];
+  // Preparação do chute já feita (o disco recuou antes de a bola sair)
+  prepped?: boolean;
   after?: () => void;
 };
 type Override = { x: number; y: number; until: number; speed?: number };
@@ -621,7 +624,11 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
   });
   const nodes = useRef<Record<string, SVGGElement | null>>({});
   // Passada: chuteiras alternando e marcha de cada jogador (ver lib/game/locomotion)
-  const feetNodes = useRef<Record<string, SVGGElement | null>>({});
+  const fxNodes = useRef<Record<string, SVGGElement | null>>({});
+  const poseRef = useRef<Record<string, { kind: PoseKind; t0: number; ang: number; pow: number }>>({});
+  const ringNodes = useRef<(SVGCircleElement | null)[]>([]);
+  const ringsRef = useRef<Ring[]>(Array.from({ length: 6 }, newRing));
+  const ringNext = useRef(0);
   const gaitRef = useRef<Record<string, GaitState>>({});
   const ballNode = useRef<SVGGElement | null>(null);
   const ringNode = useRef<SVGGElement | null>(null);
@@ -845,11 +852,36 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     return steps;
   }
 
+  // Efeitos de disco: pose do jogador (recuo, avanço, amortecimento) e anel/clarão de impacto
+  const POSE_ID: Record<PoseKind, string> = { wind: 'fx.shot', shot: 'fx.shot', pass: 'fx.pass', touch: 'fx.touch', save: 'fx.save' };
+  function pose(key: string, kind: PoseKind, ang: number, pow: number) {
+    if (!animOn(POSE_ID[kind])) return;
+    if (kind !== 'wind') countUse(POSE_ID[kind]);
+    poseRef.current[key] = { kind, t0: tnow(), ang, pow };
+  }
+  function ringAt(x: number, y: number, color: string, flash: boolean, r1 = 30, dur = 380, id = 'fx.shot') {
+    if (liteRef.current || !animOn(id)) return;
+    const rg = ringsRef.current[ringNext.current % ringsRef.current.length];
+    ringNext.current += 1;
+    Object.assign(rg, { on: true, born: tnow(), x, y, r0: flash ? 10 : 13, r1, dur, color, flash });
+  }
+
   // Começa um passo da fila (passe, condução, chute ou recuperação)
   function startStep(step: Step, now: number) {
     const st = engine.current;
     const all = slotsRef.current;
     const holder = st.holder ? find(st.holder) : undefined;
+
+    // Chute: o disco se prepara (recua e comprime) antes de a bola sair
+    if (step.kind === 'shot' && holder && !step.prepped && holder.pos !== 'GK' && !liteRef.current && animOn('fx.shot')) {
+      const aim = 'slot' in step.to ? find(step.to.slot) : (step.to as Point);
+      const ang = aim ? Math.atan2(aim.y - holder.y, aim.x - holder.x) : 0;
+      const pow = clamp(560 / step.dur, 0.6, 1.4);
+      pose(holder.key, 'wind', ang, pow);
+      st.queue.unshift({ ...step, prepped: true });
+      st.active = { step: { kind: 'wait', to: { x: holder.x, y: holder.y }, dur: 150, scripted: step.scripted, critical: step.critical }, from: { x: st.ballX, y: st.ballY }, start: now, dest: null };
+      return;
+    }
 
     // Movimentos combinados com o passo (corridas, mergulho do goleiro...)
     step.setup?.forEach((m) => {
@@ -911,6 +943,17 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
       recordMapPass(mapRefRef.current.current, holder.key, recv.key);
     }
     if (caption) setCaption(caption);
+    // Contato com a bola: impulso do disco e clarão/anel conforme a força
+    if (holder && (step.kind === 'pass' || step.kind === 'shot')) {
+      const tgt = lead ?? ('slot' in step.to ? find(step.to.slot) : (step.to as Point));
+      if (tgt) {
+        const ang = Math.atan2(tgt.y - holder.y, tgt.x - holder.x);
+        const pow = clamp(560 / step.dur, 0.5, 1.4);
+        pose(holder.key, step.kind, ang, pow);
+        if (step.kind === 'shot') ringAt(holder.x + Math.cos(ang) * 12, holder.y + Math.sin(ang) * 12, '#fff3b0', true, 22 + 10 * pow, 260);
+        else if (step.dur < 520) ringAt(holder.x, holder.y, 'rgba(255,255,255,.8)', false, 24, 300, 'fx.pass');
+      }
+    }
     st.active = { step, from: { x: st.ballX, y: st.ballY }, start: now, lead, dest };
     st.holder = null;
   }
@@ -1691,6 +1734,19 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           if (dest) {
             st.holder = dest;
             st.poss = sideOf(dest);
+            // Domínio: o disco amortece a bola (e o goleiro faz o impacto da defesa)
+            const rc = get(dest);
+            if (rc && step.kind !== 'wait') {
+              const ang = Math.atan2(ty - from.y, tx - from.x);
+              const pow = clamp(520 / step.dur, 0.5, 1.4);
+              if (rc.pos === 'GK' && step.kind === 'shot') {
+                pose(dest, 'save', ang, 1);
+                ringAt(rc.x, rc.y, '#9be7ff', true, 34, 420, 'fx.save');
+              } else {
+                pose(dest, 'touch', ang, pow);
+                if (step.kind === 'shot') ringAt(rc.x, rc.y, 'rgba(255,255,255,.9)', false, 26, 320, 'fx.touch');
+              }
+            }
           }
           step.after?.();
         }
@@ -2202,29 +2258,36 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
       all.forEach((s) => {
         s.x = clamp(s.x, FX0 + 8, FX1 - 8);
         s.y = clamp(s.y, FY0 + 8, FY1 - 8);
-        // Passada: marcha pelo ritmo e direção, chuteiras presas à distância percorrida (não desliza) e postura do corpo
-        let post = '';
+        // Movimento do disco: marcha pelo ritmo, direção e giro; o disco estica ao longo da corrida, deixa rastro e mostra a direção.
+        // Chute, passe, domínio e defesa aplicam uma pose curta (recuo, avanço, amortecimento) no eixo da bola.
+        let tf = '';
         if (!liteRef.current && !st.kickoff) {
           const gs = (gaitRef.current[s.key] = gaitRef.current[s.key] ?? newGaitState());
           const defending = st.poss !== s.side && s.pos !== 'GK';
           const r = stepGait(gs, { vx: s.vx, vy: s.vy, maxSpeed: s.maxSpeed, dt, now, watch: defending ? { x: st.ballX, y: st.ballY, px: s.x, py: s.y } : undefined, speedMul: animSpeed(`loc.${gs.gait}`) }, (g) => animOn(`loc.${g}`));
           if (r.changed) countUse(`loc.${r.gait}`);
-          const swing = Math.sin(gs.phase);
-          const fg = feetNodes.current[s.key];
-          if (fg) {
-            const e1 = fg.children[0] as SVGElement | undefined;
-            const e2 = fg.children[1] as SVGElement | undefined;
-            fg.setAttribute('opacity', r.gait === 'parado' ? '0' : '1');
-            fg.setAttribute('transform', `rotate(${((gs.face * 180) / Math.PI).toFixed(0)})`);
-            e1?.setAttribute('cx', (r.fx.amp * swing).toFixed(1));
-            e1?.setAttribute('cy', (-(7.5 + r.fx.lift)).toFixed(1));
-            e2?.setAttribute('cx', (-r.fx.amp * swing).toFixed(1));
-            e2?.setAttribute('cy', (7.5 + r.fx.lift).toFixed(1));
-          }
+          const pz = poseRef.current[s.key];
+          const pp = pz ? poseOf(pz.kind, now - pz.t0, pz.pow) : null;
+          if (pz && !pp) delete poseRef.current[s.key];
           const bob = 1 + r.fx.bob * Math.abs(Math.sin(gs.phase));
-          post = ` scale(${(r.fx.sx * bob).toFixed(3)} ${(r.fx.sy * bob).toFixed(3)})`;
+          tf = pp && pz ? axisTransform(s.x, s.y, pz.ang, pp.dx, pp.sa, pp.sp) : axisTransform(s.x, s.y, gs.head, 0, r.fx.sx * bob, r.fx.sy * bob);
+          const fg = fxNodes.current[s.key];
+          if (fg) {
+            const holding = st.holder === s.key;
+            const showChev = holding ? gs.ratio > 0.08 : r.gait === 'arrancada' || r.gait === 'direcao';
+            const tr = r.fx.trail * Math.min(1, gs.ratio * 1.1);
+            fg.setAttribute('opacity', tr > 0.05 || showChev ? '1' : '0');
+            if (tr > 0.05 || showChev) {
+              const ux = Math.cos(gs.head), uy = Math.sin(gs.head);
+              const g1 = fg.children[0] as SVGElement | undefined, g2 = fg.children[1] as SVGElement | undefined, chev = fg.children[2] as SVGElement | undefined;
+              g1?.setAttribute('cx', (-ux * 9).toFixed(1)); g1?.setAttribute('cy', (-uy * 9).toFixed(1)); g1?.setAttribute('opacity', (0.26 * tr).toFixed(2));
+              g2?.setAttribute('cx', (-ux * 18).toFixed(1)); g2?.setAttribute('cy', (-uy * 18).toFixed(1)); g2?.setAttribute('opacity', (0.14 * tr).toFixed(2));
+              chev?.setAttribute('transform', `rotate(${((gs.head * 180) / Math.PI).toFixed(0)})`);
+              chev?.setAttribute('opacity', showChev ? (holding ? '0.7' : '0.9') : '0');
+            }
+          }
         }
-        nodes.current[s.key]?.setAttribute('transform', `translate(${s.x.toFixed(1)} ${s.y.toFixed(1)})${post}`);
+        nodes.current[s.key]?.setAttribute('transform', tf || `translate(${s.x.toFixed(1)} ${s.y.toFixed(1)})`);
       });
 
       // Animação do desarme (carrinho ou bote em pé)
@@ -2572,6 +2635,20 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         rc.frames.push(frame);
         while (rc.frames.length && rc.frames[0][0] < now - 7200) rc.frames.shift();
       }
+      // Anéis e clarões de impacto (chute, passe forte, defesa)
+      ringsRef.current.forEach((rg, i) => {
+        const node = ringNodes.current[i];
+        if (!node || !rg.on) return;
+        const a = (now - rg.born) / rg.dur;
+        if (a >= 1) { rg.on = false; node.setAttribute('opacity', '0'); return; }
+        const rr = rg.r0 + (rg.r1 - rg.r0) * (1 - Math.pow(1 - a, 2));
+        node.setAttribute('cx', rg.x.toFixed(1));
+        node.setAttribute('cy', rg.y.toFixed(1));
+        node.setAttribute('r', rr.toFixed(1));
+        node.setAttribute('fill', rg.flash ? rg.color : 'none');
+        node.setAttribute('stroke', rg.flash ? 'none' : rg.color);
+        node.setAttribute('opacity', ((rg.flash ? 0.55 : 0.8) * (1 - a)).toFixed(2));
+      });
       const prev = pts[pts.length - 2];
       const ballSpeed = prev && dt > 0 ? Math.hypot(st.ballX - prev.x, st.ballY - lift - prev.y) / dt : 0;
       for (let i = 0; i < 5; i += 1) {
@@ -2947,6 +3024,13 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
               {amb.time === 'night' && <ellipse cx={6} cy={12.5} rx={lite ? 14 : 18} ry={lite ? 4.6 : 6.4} fill={lite ? 'rgba(0,0,0,.34)' : 'url(#pc-sh)'} fillOpacity={lite ? 1 : 0.34} transform="rotate(8 6 12.5)" />}
               {amb.time === 'day' && <ellipse cx={1} cy={13} rx={lite ? 11 : 14.5} ry={lite ? 3.6 : 5.2} fill={lite ? (rain ? 'rgba(0,0,0,.14)' : 'rgba(0,0,0,.3)') : 'url(#pc-sh)'} fillOpacity={lite ? 1 : rain ? 0.14 : 0.3} />}
               {amb.time === 'afternoon' && <ellipse cx={15} cy={12} rx={lite ? 23 : 28} ry={lite ? 3.8 : 5.2} fill={lite ? (rain ? 'rgba(0,0,0,.14)' : 'rgba(0,0,0,.3)') : 'url(#pc-sh)'} fillOpacity={lite ? 1 : rain ? 0.14 : 0.3} transform="rotate(5 15 12)" />}
+              {!lite && (
+                <g ref={(el: SVGGElement | null) => { fxNodes.current[s.key] = el; }} opacity={0} style={{ pointerEvents: 'none' }}>
+                  <circle r={12} fill={s.pos === 'GK' ? '#101418' : team.primary_color} opacity={0} />
+                  <circle r={10} fill={s.pos === 'GK' ? '#101418' : team.primary_color} opacity={0} />
+                  <path d="M17 -4.5 L22.5 0 L17 4.5" fill="none" stroke="#fff" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" opacity={0} />
+                </g>
+              )}
               {(() => {
                 const keeper = s.pos === 'GK';
                 const base = keeper ? keeperColor(club.primary_color, opponent.primary_color) : team.primary_color;
@@ -2977,11 +3061,6 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
                   </>
                 );
               })()}
-              {!lite && (
-                <g ref={(el: SVGGElement | null) => { feetNodes.current[s.key] = el; }} opacity={0} style={{ pointerEvents: 'none' }}>
-                  {[0, 1].map((i) => <ellipse key={i} rx={3.6} ry={2.3} fill="#14181f" stroke="rgba(255,255,255,.75)" strokeWidth={0.7} />)}
-                </g>
-              )}
               <g
                 ref={(el: SVGGElement | null) => {
                   staminaBars.current[s.key] = { ...(staminaBars.current[s.key] ?? { fill: null }), box: el };
@@ -3025,6 +3104,13 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         {[0, 1, 2, 3, 4].map((i) => (
           <circle key={`trail-${i}`} ref={(el: SVGCircleElement | null) => { trailNodes.current[i] = el; }} r={5.5 - i * 0.6} fill="#ffffff" opacity={0} />
         ))}
+        {!lite && (
+          <g style={{ pointerEvents: 'none' }}>
+            {Array.from({ length: 6 }).map((_, i) => (
+              <circle key={`ring-${i}`} ref={(el: SVGCircleElement | null) => { ringNodes.current[i] = el; }} r={12} fill="none" stroke="#fff" strokeWidth={2} opacity={0} />
+            ))}
+          </g>
+        )}
         <g ref={ballNode} transform={`translate(${MID_X} ${MID_Y})`}>
           <ellipse ref={ballShadow} cx={amb.time === 'afternoon' ? 5 : 1.5} cy={6.5} rx={lite ? 6.5 : 8.5} ry={lite ? 2.6 : 3.6} fill={lite ? 'rgba(0,0,0,.42)' : 'url(#pc-sh)'} fillOpacity={lite ? 1 : 0.42} />
           <g ref={liftNode}>
