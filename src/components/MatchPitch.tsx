@@ -7,6 +7,7 @@ import { useCosmetics } from '@/lib/cosmetics';
 import { newGaitState, stepGait, type GaitState } from '@/lib/game/locomotion';
 import { axisTransform, newRing, poseOf, POSE_MS, type PoseKind, type Ring } from '@/lib/game/discFx';
 import { animOn, animSpeed, countUse, forcedAnim } from '@/lib/game/animLibrary';
+import { ballAt, blockChance, counterRead, deflect, heatAdd, heatShift, logDecision, newHeat, pickWinner, secondBallRuns, urgency, type LaneHeat } from '@/lib/game/emergent';
 import { chooseContact, chooseTackle, CONTACT_ID, laneCut, segPoint, type ContactPlan } from '@/lib/game/contact';
 import { chooseDribble, dribbleBody, dribbleGeometry, moveFit, recordDribble, DRIBBLE_CAPTION, type DribbleCtx, type DribbleMove } from '@/lib/game/dribbles';
 import { ambientChoice, choosePlay, createIntel, passBias, passTaste, recordPass, recordPlay, type Intel, type PlayKind, type Style } from '@/lib/game/playIntel';
@@ -657,6 +658,15 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
   const looseRef = useRef<{ key: string; vx: number; vy: number; until: number } | null>(null);
   const shieldRef = useRef<Record<string, number>>({});
   const coverUse = useRef<Record<string, number>>({});
+  // Jogabilidade emergente: segunda bola, contra-ataque, placar/tempo e leitura de região
+  const sbRef = useRef<{ vx: number; vy: number; t0: number; until: number; from: Side | null; cap: string; runs: ReturnType<typeof secondBallRuns> } | null>(null);
+  const counterRef = useRef<{ side: Side; until: number } | null>(null);
+  const heatRef = useRef<Record<Side, LaneHeat>>({ user: newHeat(), bot: newHeat() });
+  const cautiousRef = useRef<Record<Side, { n: number; at: number }>>({ user: { n: 0, at: 0 }, bot: { n: 0, at: 0 } });
+  const sitRef = useRef({ minute: 0, user: 0, bot: 0 });
+  const urgRef = useRef<Record<Side, { u: number; at: number }>>({ user: { u: 0, at: 0 }, bot: { u: 0, at: 0 } });
+  const adaptLog = useRef<Record<Side, number>>({ user: 0, bot: 0 });
+  sitRef.current = { minute: events[0]?.minute ?? 0, user: events.filter((e) => e.type === 'gol' && e.team === 'user').length, bot: events.filter((e) => e.type === 'gol' && e.team === 'bot').length };
   // Animação do desarme: o marcador estica no chão (carrinho) ou dá o bote, a bota aparece, o impacto pisca e o desarmado tropeça
   const tackleFx = useRef<{ def: string; hold: string; t0: number; span: number; slide: boolean; win: boolean; ax: number; ay: number; contact: number } | null>(null);
   const dribFx = useRef<{ key: string; opp: string; t0: number; dur: number; sg: number; win: boolean; phase: 'fake' | 'burst'; dx: number; move: DribbleMove } | null>(null);
@@ -886,6 +896,57 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     Object.assign(rg, { on: true, born: tnow(), x, y, r0: flash ? 10 : 13, r1, dur, color, flash });
   }
 
+  // Urgência da equipe pelo placar e tempo (gradual) e cautela por passes interceptados; recalculada no máximo a cada segundo
+  function urgOf(side: Side, now: number): number {
+    const c = urgRef.current[side];
+    if (now - c.at < 1000) return c.u;
+    const sit = sitRef.current;
+    const ck = cautiousRef.current[side];
+    const caut = Math.min(0.3, ck.n * 0.1 * Math.exp(-(now - ck.at) / 25000));
+    const u = urgency(sit.minute, sit[side], sit[otherSide(side)], caut);
+    if (Math.abs(u - c.u) > 0.25 && Math.abs(u) > 0.3) logDecision(side === 'user' ? club.abbreviation : opponent.abbreviation, u > 0 ? 'urgência' : 'cautela', `min ${sit.minute}, placar ${sit.user}x${sit.bot}: ${u > 0 ? 'precisa atacar' : 'protege o resultado'} (${u.toFixed(2)})`);
+    c.u = u;
+    c.at = now;
+    return u;
+  }
+
+  // Segunda bola: a bola sobra solta (rebote, bloqueio, disputa) e quem chegar primeiro fica com ela
+  function launchSB(x: number, y: number, vx: number, vy: number, from: Side | null, cap: string) {
+    const st = engine.current;
+    const all = slotsRef.current;
+    const now = tnow();
+    st.active = null;
+    st.holder = null;
+    if (!animOn('ia.segundabola')) {
+      // Desligada no painel: o jogador mais perto da bola fica com ela na hora (sem disputa)
+      const bp = { x, y };
+      const w = all.filter((a) => a.pos !== 'GK').sort((a, b) => dist(a, bp) - dist(b, bp))[0];
+      if (w) {
+        st.holder = w.key;
+        st.poss = w.side;
+      }
+      return;
+    }
+    st.ballX = clamp(x, FX0 + 8, FX1 - 8);
+    st.ballY = clamp(y, FY0 + 8, FY1 - 8);
+    const runs = secondBallRuns(
+      { x: st.ballX, y: st.ballY, vx, vy },
+      all.map((s) => ({ key: s.key, x: s.x, y: s.y, maxSpeed: s.maxSpeed, ovr: s.ovr, side: s.side, gk: s.pos === 'GK' })),
+      { x0: FX0 + 10, x1: FX1 - 10, y0: FY0 + 10, y1: FY1 - 10 },
+      (k) => workRefLocal.current?.current.slow[k] ?? 0,
+    );
+    st.overrides = {};
+    runs.slice(0, 5).forEach((r, i) => {
+      if (r.eta < 9 || i < 2) st.overrides[r.key] = { x: r.ix, y: r.iy, until: now + 2300, speed: 1.55 };
+    });
+    sbRef.current = { vx, vy, t0: now, until: now + 2600, from, cap, runs };
+    st.ambientAt = now + 2700;
+    if (cap) setCaption(cap);
+    countUse('ia.segundabola');
+    const top = runs.slice(0, 3).map((r) => `${find(r.key)?.name ?? r.key} ${r.eta < 9 ? r.eta.toFixed(2) + 's' : '—'}`).join(', ');
+    logDecision('bola solta', 'segunda bola', `${cap || 'sobra'} → chegam: ${top}`);
+  }
+
   // Contato com a bola: escolhe como o jogador domina (amortece, orienta, de primeira, erra...) e aplica a consequência no jogo
   function contactOn(rc: Slot, step: Step, ang: number, now: number) {
     const st = engine.current;
@@ -959,6 +1020,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
   // Começa um passo da fila (passe, condução, chute ou recuperação)
   function startStep(step: Step, now: number) {
     const st = engine.current;
+    sbRef.current = null;
     const all = slotsRef.current;
     const holder = st.holder ? find(st.holder) : undefined;
 
@@ -1031,6 +1093,10 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           delete st.overrides[recv.key];
           caption = `${best.slot.name} fecha a linha de passe e intercepta${holder ? ` o passe de ${holder.name}` : ''}`;
           countUse('def.linha');
+          const ck = cautiousRef.current[recv.side];
+          ck.n = ck.n * Math.exp(-(now - ck.at) / 25000) + 1;
+          ck.at = now;
+          logDecision(best.slot.name, 'interceptação', `fechou a linha de passe de ${holder.name} (chance ${(best.p * 100).toFixed(0)}%)`);
         }
       }
     } else if (!caption && recv) {
@@ -1586,13 +1652,14 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
             captureClip(ev.id, 'defesa', ev.text, actorKey, 500);
             if (useCorner) st.queue.unshift(...cornerSteps(backlog > 3));
             else if (outcome !== 'hold') {
-              st.queue.unshift({
-                kind: 'move',
-                to: { slot: defenderKey() },
-                dur: 700,
-                caption: `${gk?.name ?? 'O goleiro'} espalma e a zaga afasta`,
-                scripted: true,
-              });
+              if (gk) {
+                // Rebote: a bola sobra na entrada da área, para o lado, e vira disputa de segunda bola
+                const a = Math.atan2(0, -dir) + (Math.random() < 0.5 ? -1 : 1) * rand(0.35, 1.0);
+                const v = rand(230, 340);
+                launchSB(gk.x - dir * 14, gk.y, Math.cos(a) * v, Math.sin(a) * v, S, `${gk.name} espalma e a bola sobra na entrada da área`);
+              } else {
+                st.queue.unshift({ kind: 'move', to: { slot: defenderKey() }, dur: 700, caption: 'O goleiro espalma e a zaga afasta', scripted: true });
+              }
             }
           },
         }),
@@ -1618,13 +1685,12 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
               // Avisa o resto da tela (som, trave balançando, tremor de câmera)
               window.dispatchEvent(new CustomEvent('pitch-post', { detail: { x: goalX, y: side < 0 ? GOAL_TOP : GOAL_BOTTOM } }));
               captureClip(ev.id, 'quase', ev.text, actorKey, 400);
-              st.queue.unshift({
-                kind: 'move',
-                to: { slot: defenderKey() },
-                dur: 700,
-                caption: 'Na trave! A zaga afasta o perigo',
-                scripted: true,
-              });
+              {
+                // A bola volta da trave para o campo (ângulo oposto ao do chute): segunda bola
+                const a = Math.atan2(0, -dir) + side * rand(0.2, 0.9);
+                const v = rand(260, 380);
+                launchSB(goalX - dir * 10, side < 0 ? GOAL_TOP + 8 : GOAL_BOTTOM - 8, Math.cos(a) * v, Math.sin(a) * v, S, 'Na trave! A bola volta e vira segunda bola');
+              }
             },
           }),
         );
@@ -1847,6 +1913,54 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         st.ballY += (holderNow.y + uy * 11 + 2 + wob + cfy + sfy + (bfx ? bfx.ballLat : 0) - st.ballY) * k;
       };
 
+      // Segunda bola: a bola solta rola com atrito e quica nas bordas; quem chega primeiro (ou ganha a disputa) fica com ela
+      const sbs = sbRef.current;
+      if (sbs && (st.holder || st.active || celebrating || kickoffOn)) sbRef.current = null;
+      else if (sbs) {
+        const fr = Math.exp(-dt / 420);
+        sbs.vx *= fr;
+        sbs.vy *= fr;
+        st.ballX += (sbs.vx * dt) / 1000;
+        st.ballY += (sbs.vy * dt) / 1000;
+        if (st.ballX < FX0 + 6 || st.ballX > FX1 - 6) {
+          sbs.vx *= -0.45;
+          st.ballX = clamp(st.ballX, FX0 + 6, FX1 - 6);
+        }
+        if (st.ballY < FY0 + 6 || st.ballY > FY1 - 6) {
+          sbs.vy *= -0.45;
+          st.ballY = clamp(st.ballY, FY0 + 6, FY1 - 6);
+        }
+        const bp: Point = { x: st.ballX, y: st.ballY };
+        const spd = Math.hypot(sbs.vx, sbs.vy);
+        const reach = all.filter((x) => x.pos !== 'GK' && dist(x, bp) < 13 && spd < 260 && now - sbs.t0 > 120);
+        const timeout = now > sbs.until;
+        if (reach.length || timeout) {
+          const pool = reach.length ? reach : [all.filter((x) => x.pos !== 'GK').sort((a, b) => dist(a, bp) - dist(b, bp))[0]];
+          const runs = sbs.runs.filter((r) => pool.some((x) => x.key === r.key));
+          const pw = runs.length >= 2 ? pickWinner(runs.map((r) => ({ ...r, eta: 0 })), (k) => get(k)?.ovr ?? 70, Math.random) : null;
+          const win = pw ? get(pw.winner.key) : pool[0];
+          const contestN = pool.filter((x) => x.side !== win?.side).length > 0 ? pool.length : 1;
+          if (win) {
+            st.holder = win.key;
+            st.poss = win.side;
+            sbRef.current = null;
+            st.overrides = {};
+            st.ambientAt = now + 180 + (contestN > 1 ? 220 : 0);
+            const ang = Math.atan2(sbs.vy, sbs.vx);
+            pose(win.key, 'touch', ang, 1);
+            if (contestN > 1) {
+              pool.filter((x) => x.key !== win.key).forEach((x) => pose(x.key, 'touch', Math.atan2(win.y - x.y, win.x - x.x), 0.9));
+              ringAt(win.x, win.y, 'rgba(255,190,110,.9)', true, 30, 340, 'ia.segundabola');
+            }
+            const turnover = !!sbs.from && sbs.from !== win.side;
+            if (turnover) counterRef.current = { side: win.side, until: now + 3500 };
+            const cap = contestN >= 3 ? `Disputa a três pela segunda bola: ${win.name} sai com ela` : contestN === 2 ? `${win.name} vence a disputa da segunda bola` : `${win.name} chega primeiro na segunda bola`;
+            setCaption(cap);
+            logDecision(win.name, 'ganha a segunda bola', `${contestN > 1 ? contestN + ' discos disputaram' : 'chegou primeiro'}${turnover ? ' (posse trocou)' : ''}`);
+          }
+        }
+      }
+
       // Move a bola
       let lift = 0; // altura da bola (passes e chutes por cima)
       if (st.active && st.active.step.kind === 'wait') {
@@ -1893,6 +2007,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           if ((step.arc ?? 0) >= 12) bounce.current = { start: now, h: Math.min(16, (step.arc ?? 0) * (rainRef.current ? 0.12 : 0.32)) };
           st.active = null;
           if (dest) {
+            if (st.poss !== sideOf(dest) && !step.scripted) counterRef.current = { side: sideOf(dest), until: now + 3500 };
             st.holder = dest;
             st.poss = sideOf(dest);
             // Domínio: o disco amortece a bola (e o goleiro faz o impacto da defesa)
@@ -2001,6 +2116,13 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
                     pose(dfn.key, 'touch', ang, 1.3);
                     pose(h.key, 'touch', ang + Math.PI, 1.3);
                     ringAt((h.x + dfn.x) / 2, (h.y + dfn.y) / 2, 'rgba(255,190,110,.9)', true, 30, 360, 'def.disputa');
+                    if (Math.random() < 0.4) {
+                      // A disputa rebenta a bola: ela escapa solta entre os dois
+                      const a = ang + (Math.random() < 0.5 ? 1 : -1) * rand(1.2, 1.9);
+                      const v = rand(130, 210);
+                      launchSB((h.x + dfn.x) / 2, (h.y + dfn.y) / 2, Math.cos(a) * v, Math.sin(a) * v, h.side, 'A disputa deixa a bola solta');
+                      return;
+                    }
                     if (win) setCaption(`${dfn.name} ganha a disputa de ombro com ${h.name}`);
                   }
                   // Quem ganha a bola faz ela pular para longe do desarmado
@@ -2009,6 +2131,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
                     // A bola é do marcador: quem perdeu fica desequilibrado, quem ganhou sai jogando
                     st.holder = dfn.key;
                     st.poss = dfn.side;
+                    counterRef.current = { side: dfn.side, until: now + 4200 };
                     st.overrides[h.key] = { x: h.x, y: h.y, until: t + 800, speed: 0.15 };
                     st.overrides[dfn.key] = {
                       x: clamp(dfn.x - dirH * 55, FX0 + 20, FX1 - 20),
@@ -2067,6 +2190,29 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           const near = nearestOpp(all, h.side, h);
           // Pressão do zagueiro: 0 = atacante livre (zagueiro a 95 ou mais), 1 = marcador colado (35 ou menos)
           const pressure = clamp((95 - near.d) / 60, 0, 1);
+          const uu = urgOf(h.side, now);
+          heatAdd(heatRef.current[h.side], h.y, FY0, FY1, now);
+          // Contra-ataque: logo após recuperar a bola o jogador lê espaço nas costas, adversários perto, companheiro livre e passe vertical
+          let ctr: { mode: 'vertical' | 'conducao'; r?: Slot } | null = null;
+          const cs0 = counterRef.current;
+          if (cs0 && cs0.side === h.side && animOn('ia.contra')) {
+            counterRef.current = null;
+            if (now < cs0.until && h.pos !== 'GK') {
+              const matesC = all.filter((x) => x.side === h.side && x.key !== h.key && x.pos !== 'GK');
+              const ahead = matesC.filter((x) => (x.x - h.x) * d > 45 && nearestOpp(all, h.side, x).d > 55);
+              const tgt = ahead.sort((a, b) => (b.x - a.x) * d)[0];
+              const lane = !!tgt && !all.some((o) => o.side !== h.side && o.pos !== 'GK' && segPoint(o.x, o.y, h.x, h.y, tgt.x, tgt.y).d < 26);
+              const ahOpp = all.filter((o) => o.side !== h.side && o.pos !== 'GK' && (o.x - h.x) * d > 20);
+              const room = ahOpp.length ? Math.min(...ahOpp.map((o) => ((o.x - h.x) * d) - Math.abs(o.y - h.y) * 0.4)) : 400;
+              const cr = counterRead(
+                { behindSpace: ahOpp.length, nearOpp: all.filter((o) => o.side !== h.side && o.pos !== 'GK' && dist(o, h) < 95).length, mateAhead: !!tgt, laneOpen: lane, carryRoom: room, urgency: uu },
+                Math.random,
+              );
+              logDecision(h.name, `contra-ataque: ${cr.mode}`, cr.why);
+              if (cr.mode === 'vertical' && tgt) ctr = { mode: 'vertical', r: tgt };
+              else if (cr.mode === 'conducao') ctr = { mode: 'conducao' };
+            }
+          }
           // Atacante perto do gol chuta em vez de passar, livre ou pressionado (o placar continua sendo decidido
           // pela simulação, então esses chutes de rotina terminam em defesa ou para fora, nunca em gol)
           const canShoot = FORWARDS.includes(h.pos) && toGoal < 240 && near.d > 26;
@@ -2078,7 +2224,8 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
             if (canShoot && toGoal < 170) return null;
             const mates = all.filter((x) => x.side === h.side && x.key !== h.key && x.pos !== 'GK');
             const fwdOf = (x: Slot) => (x.x - h.x) * d;
-            return ambientChoice(intelRef.current, {
+            const mates2 = all.filter((x) => x.side === h.side && x.key !== h.key && x.pos !== 'GK');
+            const ac = ambientChoice(intelRef.current, {
               side: h.side,
               holder: { pos: h.pos, name: h.name, ovr: h.ovr, style: stylesRef.current?.[h.side]?.[h.pos] as Style | undefined },
               pressure,
@@ -2090,8 +2237,24 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
               hasOverlapper: mates.some((x) => fwdOf(x) < -15 && (x.y < MID_Y) === (h.y < MID_Y) && dist(x, h) < 260),
               hasBackOption: mates.some((x) => fwdOf(x) < -20 && ['LB', 'RB', 'CM'].includes(x.pos) && dist(x, h) < 300),
             });
+            // Placar e tempo: quem precisa do resultado evita recuar a bola; quem protege o resultado segura mais
+            if (ac === 'recomeco' && uu > 0.3 && Math.random() < 0.6) return null;
+            if (ac === null && uu < -0.3 && Math.random() < 0.3 && mates2.some((x) => (x.x - h.x) * d < -20 && ['LB', 'RB', 'CM'].includes(x.pos) && dist(x, h) < 300)) return 'recomeco' as typeof ac;
+            return ac;
           };
-          if (throwInNow) {
+          if (ctr && !throwInNow) {
+            countUse('ia.contra');
+            const runners = all.filter((x) => x.side === h.side && x.key !== h.key && x.pos !== 'GK' && FORWARDS.includes(x.pos) && x.key !== ctr?.r?.key).slice(0, 2);
+            runners.forEach((x, i) => {
+              st.overrides[x.key] = { x: clamp(h.x + d * rand(140, 210), FX0 + 40, FX1 - 40), y: clamp(MID_Y + (i === 0 ? -1 : 1) * rand(50, 110), FY0 + 30, FY1 - 30), until: now + 1500, speed: 1.5 };
+            });
+            if (ctr.mode === 'vertical' && ctr.r) {
+              recordPass(intelRef.current, h.key, ctr.r.key);
+              st.queue.push({ kind: 'pass', to: { slot: ctr.r.key }, dur: passDur(dist(h, ctr.r)) - 40, ambient: true, arc: 6, caption: `Contra-ataque: ${h.name} lança ${ctr.r.name} nas costas da defesa` });
+            } else {
+              st.queue.push({ kind: 'carry', to: { x: clamp(h.x + d * rand(120, 170), FX0 + 30, FX1 - 30), y: clamp(h.y + clamp((MID_Y - h.y) * 0.35, -45, 45), FY0 + 30, FY1 - 30) }, dur: 900, speed: 1.35, ambient: true, caption: `Contra-ataque: ${h.name} sai conduzindo` });
+            }
+          } else if (throwInNow) {
             const S = h.side;
             const O = otherSide(S);
             const d0 = dirOf(S);
@@ -2149,18 +2312,53 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
                 },
               );
             }
-          } else if (canShoot && Math.random() < (pressure > 0.4 ? 0.6 : 0.9)) {
+          } else if (canShoot && Math.random() < clamp((pressure > 0.4 ? 0.6 : 0.9) + uu * 0.08, 0.4, 0.97)) {
             const O = otherSide(h.side);
             const gk = get(`${O}-GK`);
             // Livre: quase sempre manda no gol. Pressionado: erra a maioria. Overall alto ajuda um pouco.
             const onTarget = clamp(lerp(0.9, 0.22, pressure) + (h.ovr - 75) * 0.004, 0.12, 0.96);
-            if (gk && Math.random() < onTarget) {
+            // Bloqueio: defensor perto da linha do chute (e não colado no chutador) pode travar a bola; ela sobra solta
+            let blk: { o: Slot; x: number; y: number; t: number; p: number } | null = null;
+            for (const o of all) {
+              if (o.side === h.side || o.pos === 'GK') continue;
+              const sg = segPoint(o.x, o.y, h.x, h.y, goalX, MID_Y);
+              const p = blockChance(sg.d, sg.t, o.ovr, pressure);
+              if (p > 0 && (!blk || p > blk.p)) blk = { o, x: sg.x, y: sg.y, t: sg.t, p };
+            }
+            if (blk && animOn('ia.bloqueio') && Math.random() < blk.p) {
+              const b = blk;
+              const sp = rand(190, 300);
+              st.queue.push({
+                kind: 'shot',
+                to: { x: b.x, y: b.y },
+                dur: Math.max(160, 420 * b.t),
+                ambient: true,
+                caption: `${b.o.name} bloqueia o chute de ${h.name}`,
+                setup: [{ key: b.o.key, x: b.x, y: b.y, speed: 2.4 }],
+                after: () => {
+                  const v = deflect(h, b.o, { x: goalX, y: MID_Y }, Math.random, sp);
+                  countUse('ia.bloqueio');
+                  logDecision(b.o.name, 'bloqueio', `bloqueou chute de ${h.name} (chance ${(b.p * 100).toFixed(0)}%)`);
+                  pose(b.o.key, 'save', Math.atan2(v.vy, v.vx), 1);
+                  ringAt(b.x, b.y, '#9be7ff', true, 30, 360, 'ia.bloqueio');
+                  launchSB(b.x, b.y, v.vx, v.vy, h.side, `${b.o.name} bloqueia e a bola sobra solta`);
+                },
+              });
+            } else if (gk && Math.random() < onTarget) {
               st.queue.push({
                 kind: 'shot',
                 to: { slot: gk.key },
                 dur: 420,
                 ambient: true,
                 caption: `${h.name} chuta e ${gk.name} defende`,
+                // Defesa com rebote: chute forte contra goleiro de overall menor devolve a bola para a entrada da área
+                after: () => {
+                  if (Math.random() < clamp(0.22 + (h.ovr - gk.ovr) / 160, 0.08, 0.4)) {
+                    const a = Math.atan2(0, -d) + (Math.random() < 0.5 ? -1 : 1) * rand(0.35, 1.0);
+                    const v = rand(210, 320);
+                    launchSB(gk.x - d * 14, gk.y, Math.cos(a) * v, Math.sin(a) * v, h.side, `${gk.name} defende, mas a bola sobra`);
+                  }
+                },
               });
             } else {
               const wideY = MID_Y + (Math.random() < 0.5 ? -1 : 1) * (GOAL_BOTTOM - MID_Y + rand(10, 38));
@@ -2236,7 +2434,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
               st.queue.push({ kind: 'pass', to: { slot: cf.key }, dur: 640, ambient: true, arc: 12, caption: `${h.name} cruza para ${cf.name}` });
             } else {
               const hStyle = stylesRef.current?.[h.side]?.[h.pos] as Style | undefined;
-              const r = choosePass(h, all, (cand, fwd) => passBias(intelRef.current, h.key, cand.key) + passTaste({ name: h.name, ovr: h.ovr, style: hStyle }, fwd));
+              const r = choosePass(h, all, (cand, fwd) => passBias(intelRef.current, h.key, cand.key) + passTaste({ name: h.name, ovr: h.ovr, style: hStyle }, fwd) + uu * clamp(fwd, -1.5, 1.5) * 0.35);
               if (r) recordPass(intelRef.current, h.key, r.key);
               if (r) {
                 const dd = dist(h, r);
@@ -2315,6 +2513,14 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           }
         }
       }
+      // Adaptação: o time que defende desloca a marcação para a região por onde o adversário vem construindo (só o que já viu)
+      const adaptShift = holderSlot && animOn('ia.adapta') ? heatShift(heatRef.current[possSide], now) : 0;
+      if (Math.abs(adaptShift) > 0.35 && now - adaptLog.current[otherSide(possSide)] > 12000) {
+        adaptLog.current[otherSide(possSide)] = now;
+        countUse('ia.adapta');
+        logDecision(otherSide(possSide) === 'user' ? club.abbreviation : opponent.abbreviation, 'adaptação', `adversário insiste pelo ${adaptShift < 0 ? 'lado de cima' : adaptShift > 0 ? 'lado de baixo' : 'centro'}: marcação desloca (${adaptShift.toFixed(2)})`);
+      }
+      const urgSide: Record<Side, number> = { user: urgOf('user', now), bot: urgOf('bot', now) };
       // Decide para onde cada jogador quer ir e se move com velocidade e aceleração
       all.forEach((s, i) => {
         const d = dirOf(s.side);
@@ -2378,7 +2584,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           // Ordem do técnico (só no time do usuário): sobe a linha, fecha atrás ou abre o time nas pontas
           const ord = s.side === 'user' ? orderRef.current : null;
           const wide = s.pos === 'LB' || s.pos === 'RB' || s.pos === 'LF' || s.pos === 'RF';
-          const ordDepth = ord === 'pressionar' ? 0.09 : ord === 'recuar' ? -0.12 : ord === 'pontas' && isFwd && inPoss ? 0.03 : 0;
+          const ordDepth = (ord === 'pressionar' ? 0.09 : ord === 'recuar' ? -0.12 : ord === 'pontas' && isFwd && inPoss ? 0.03 : 0) + urgSide[s.side] * (isFwd ? 0.05 : 0.025);
           // Função e foco: o mapa de atuação mexe na altura, na largura e em quanto o jogador acompanha a bola
           const rs = shapesRef.current?.[s.side]?.[s.pos];
           const f = clamp(
@@ -2431,6 +2637,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
             }
             tx = lerp(tx, st.ballX, 0.12);
             ty = lerp(ty, st.ballY, 0.12);
+            if (adaptShift) ty = clamp(ty + adaptShift * 48, FY0 + 20, FY1 - 20);
             // Proteção da área e recuo: com a bola perto do gol, a defesa fecha o centro e recua
             const ownGX = d > 0 ? FX0 : FX1;
             if ((s.pos === 'LB' || s.pos === 'RB' || s.pos === 'CM') && Math.abs(st.ballX - ownGX) < 240 && animOn('def.area')) {

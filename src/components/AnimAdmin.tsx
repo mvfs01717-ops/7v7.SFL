@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { clearDecisions, readDecisions } from '@/lib/game/emergent';
 import { forcedAnim, setForcedAnim, CATEGORY_LABEL, LIBRARY, clearUses, loadAnimSettings, loadUses, saveAnimSettings, type AnimCategory, type AnimDef, type AnimSettings } from '@/lib/game/animLibrary';
 import { gaitFx, type Gait } from '@/lib/game/locomotion';
 import { axisTransform, poseOf, type PoseKind } from '@/lib/game/discFx';
@@ -61,7 +62,7 @@ function Preview({ def, speed }: { def: AnimDef; speed: number }) {
         foe.current?.setAttribute('opacity', '1');
         foe.current?.setAttribute('cx', (foeP.x + sway * 0.4).toFixed(1));
         foe.current?.setAttribute('cy', (foeP.y + sway).toFixed(1));
-      } else if (def.id.startsWith('dom.') || (def.id.startsWith('def.') && def.id !== 'def.emPe')) {
+      } else if (def.id.startsWith('dom.') || def.category === 'ia' || (def.id.startsWith('def.') && def.id !== 'def.emPe')) {
         // Contato e defesa com a MESMA lógica de sobra da bola usada na partida (contact.ts): bola chega, assenta ou escapa; marcador reage
         const cyc = 2200, el = (t * 1000) % cyc;
         const k = def.id.split('.')[1];
@@ -77,6 +78,9 @@ function Preview({ def, speed }: { def: AnimDef; speed: number }) {
           else if (k === 'primeira') { bx = px + 11 + Math.max(0, q - 60) * 0.35; by = py + 2; }
           else if (k === 'erro') { const r = Math.min(1, q / 700); bx = px + 11 + 70 * (1 - Math.pow(1 - Math.min(1, q / 500), 2)); by = py + 22 * Math.min(1, q / 500); px = ax + (bx - 11 - ax) * Math.max(0, r - 0.2) * 1.1; py = ay + (by - ay) * Math.max(0, r - 0.2) * 1.1; }
           else if (k === 'protecao') { showFoe = 1; fxp = 160 - Math.min(1, q / 600) * 14; bx = px - 11; by = py + 2; sa = 0.94; }
+          else if (k === 'segundabola' || k === 'bloqueio') { showFoe = 1; const r = Math.min(1, q / 900); const e = 1 - Math.exp(-q / 380); bx = ax + 70 * e; by = ay - 24 * e; px = ax + (k === 'segundabola' ? 40 : 0) * Math.min(1, r * 1.2); py = ay - (k === 'segundabola' ? 18 : 0) * r; fxp = 200 - 70 * r; fyp = 70 - 28 * r; }
+          else if (k === 'contra') { bx = ax + 11 + q * 0.12; by = ay + 2; px = ax + q * 0.12; showFoe = 1; fxp = 190 - q * 0.02; fyp = 70; }
+          else if (k === 'adapta') { showFoe = 1; bx = px + 11; by = py + 2; fyp = 70 + 40 * Math.min(1, q / 900); fxp = 170; }
           else if (k === 'linha' || k === 'cobertura' || k === 'area') { showFoe = 1; bx = px + 11; by = py + 2; fxp = 200 - 36 * Math.min(1, q / 900); fyp = 70 - 20 * Math.min(1, q / 900); }
           else if (k === 'carrinho' || k === 'disputa') { showFoe = 1; const r = Math.min(1, q / 500); bx = px + 11; by = py + 2; fxp = 210 - r * 62; sa = k === 'disputa' ? 1 - 0.1 * Math.sin(r * Math.PI) : 1; }
           else { bx = px + 11; by = py + 2; }
@@ -172,6 +176,7 @@ export default function AnimAdmin() {
     saveAnimSettings(next);
   };
   const cats = Object.keys(CATEGORY_LABEL) as AnimCategory[];
+  const [log, setLog] = useState(() => readDecisions());
   return (
     <div className="aa">
       <style>{CSS}</style>
@@ -228,6 +233,22 @@ export default function AnimAdmin() {
         <button className="aa-btn" onClick={() => { clearUses(); setUses({}); }}>Zerar contagem</button>{' '}
         <button className="aa-btn" onClick={() => { setSettings({}); saveAnimSettings({}); }}>Restaurar padrão</button>
       </div>
+      <section>
+        <h3>Registro de decisões</h3>
+        <p className="aa-note">As últimas decisões da IA nas partidas jogadas neste aparelho (segunda bola, bloqueios, contra-ataques, urgência por placar, adaptação).</p>
+        <div style={{ margin: '8px 0' }}>
+          <button className="aa-btn" onClick={() => setLog(readDecisions())}>Atualizar registro</button>{' '}
+          <button className="aa-btn" onClick={() => { clearDecisions(); setLog([]); }}>Limpar registro</button>
+        </div>
+        <div style={{ display: 'grid', gap: 4, maxHeight: 260, overflow: 'auto', fontSize: 12 }}>
+          {log.length === 0 && <span style={{ opacity: 0.6 }}>Nenhuma decisão registrada ainda.</span>}
+          {log.slice(0, 40).map((l, i) => (
+            <div key={`${l.t}-${i}`} style={{ padding: '4px 8px', borderRadius: 6, background: 'rgba(255,255,255,.05)' }}>
+              <b>{l.who}</b> · {l.kind} — <span style={{ opacity: 0.8 }}>{l.why}</span>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
