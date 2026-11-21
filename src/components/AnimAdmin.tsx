@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { CATEGORY_LABEL, LIBRARY, clearUses, loadAnimSettings, loadUses, saveAnimSettings, type AnimCategory, type AnimDef, type AnimSettings } from '@/lib/game/animLibrary';
+import { forcedAnim, setForcedAnim, CATEGORY_LABEL, LIBRARY, clearUses, loadAnimSettings, loadUses, saveAnimSettings, type AnimCategory, type AnimDef, type AnimSettings } from '@/lib/game/animLibrary';
 import { gaitFx, type Gait } from '@/lib/game/locomotion';
 import { axisTransform, poseOf, type PoseKind } from '@/lib/game/discFx';
 import { dribbleBody, dribbleGeometry, type DribbleMove } from '@/lib/game/dribbles';
@@ -46,12 +46,12 @@ function Preview({ def, speed }: { def: AnimDef; speed: number }) {
         const plan = dribbleGeometry(move, { x: 50, y: 70 }, foeP, -1, 1);
         const total = plan.reduce((s, p) => s + p.dur, 0) + 700;
         const el = (t * 1000) % total;
-        let acc = 0, from = { x: 50, y: 70 }, pos = { ...from }, phase: 'fake' | 'burst' = 'fake', pr = 0, done = true;
+        let acc = 0, from = { x: 50, y: 70 }, pos = { ...from }, phase: 'fake' | 'burst' = 'fake', pr = 0, done = true, ssg = -1;
         for (const p of plan) {
-          if (el < acc + p.dur) { pr = (el - acc) / p.dur; pos = { x: from.x + (p.to.x - from.x) * pr, y: from.y + (p.to.y - from.y) * pr }; phase = p.phase; done = false; break; }
+          if (el < acc + p.dur) { pr = (el - acc) / p.dur; pos = { x: from.x + (p.to.x - from.x) * pr, y: from.y + (p.to.y - from.y) * pr }; phase = p.phase; ssg = -(p.sg ?? 1); done = false; break; }
           acc += p.dur; from = p.to; pos = { ...p.to };
         }
-        const fx = dribbleBody(move, phase, done ? 0 : pr, -1);
+        const fx = dribbleBody(move, phase, done ? 0 : pr, ssg);
         body.current?.setAttribute('transform', `translate(${pos.x.toFixed(1)} ${(pos.y + fx.shift).toFixed(1)}) rotate(${fx.rot.toFixed(1)}) scale(${fx.sx.toFixed(3)} ${fx.sy.toFixed(3)})`);
         ghost.current?.setAttribute('opacity', '0');
         ball.current?.setAttribute('opacity', '1');
@@ -137,6 +137,7 @@ export default function AnimAdmin() {
   const [settings, setSettings] = useState<AnimSettings>(() => ({ ...loadAnimSettings() }));
   const [uses, setUses] = useState<Record<string, number>>(() => loadUses());
   const [open, setOpen] = useState<string | null>(null);
+  const [forced, setForced] = useState<string | null>(() => forcedAnim());
   const patch = (id: string, change: { on?: boolean; speed?: number }) => {
     const next = { ...settings, [id]: { ...settings[id], ...change } };
     setSettings(next);
@@ -169,6 +170,9 @@ export default function AnimAdmin() {
                       <input type="range" min={0.5} max={1.8} step={0.1} value={sp} onChange={(e) => patch(a.id, { speed: Number(e.target.value) })} aria-label={`Velocidade de ${a.label}`} />
                     </label>
                     <button className={on ? 'aa-btn on' : 'aa-btn'} onClick={() => patch(a.id, { on: !on })} aria-pressed={on}>{on ? 'Ativa' : 'Desligada'}</button>
+                    {a.category === 'drible' && (
+                      <button className={forced === a.id ? 'aa-btn on' : 'aa-btn'} title="Em partida, os dribles passam a ser sempre este (para testar)" onClick={() => { const next = forced === a.id ? null : a.id; setForcedAnim(next); setForced(next); }}>{forced === a.id ? 'Forçado' : 'Forçar'}</button>
+                    )}
                     <button className="aa-btn" onClick={() => setOpen(open === a.id ? null : a.id)}>{open === a.id ? 'Fechar' : 'Testar'}</button>
                   </div>
                   {open === a.id && (

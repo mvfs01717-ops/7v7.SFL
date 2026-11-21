@@ -6,7 +6,7 @@ import { perfSample, useLite } from '@/lib/settings';
 import { useCosmetics } from '@/lib/cosmetics';
 import { newGaitState, stepGait, type GaitState } from '@/lib/game/locomotion';
 import { axisTransform, newRing, poseOf, POSE_MS, type PoseKind, type Ring } from '@/lib/game/discFx';
-import { animOn, animSpeed, countUse } from '@/lib/game/animLibrary';
+import { animOn, animSpeed, countUse, forcedAnim } from '@/lib/game/animLibrary';
 import { chooseDribble, dribbleBody, dribbleGeometry, moveFit, recordDribble, DRIBBLE_CAPTION, type DribbleCtx, type DribbleMove } from '@/lib/game/dribbles';
 import { ambientChoice, choosePlay, createIntel, passBias, passTaste, recordPass, recordPlay, type Intel, type PlayKind, type Style } from '@/lib/game/playIntel';
 import { ReplayPlayer, type ClipData } from '@/components/game/ReplayPlayer';
@@ -810,8 +810,19 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
       space: clamp(nearestOpp(all, h.side, ahead).d / 100, 0, 1),
       toGoal: Math.abs((d > 0 ? FX1 : FX0) - h.x),
       wide: Math.abs(h.y - MID_Y) > 85,
+      sgIn: sg === (MID_Y - h.y >= 0 ? 1 : -1),
+      // Caneta: o espaço atrás do marcador precisa estar livre de outros adversários
+      behind: clamp(
+        Math.min(99, ...all.filter((s) => s.side !== h.side && s.key !== opp.key).map((s) => dist(s, { x: opp.x + d * 55, y: opp.y }))) / 80,
+        0,
+        1,
+      ),
+      lane: all.some((m) => m.side === h.side && m.key !== h.key && m.pos !== 'GK' && (m.x - h.x) * d > 20 && dist(m, h) < 280 && nearestOpp(all, h.side, m).d > 45),
+      canShoot: Math.abs((d > 0 ? FX1 : FX0) - h.x) < 260 && Math.abs(h.y - MID_Y) < 150,
     };
-    const move = forcedMove ?? chooseDribble(intelRef.current, ctx, Math.random, (m) => animOn(`dri.${m}`));
+    const forcedId = forcedAnim();
+    const testMove = forcedId && forcedId.startsWith('dri.') ? (forcedId.slice(4) as DribbleMove) : undefined;
+    const move = forcedMove ?? testMove ?? chooseDribble(intelRef.current, ctx, Math.random, (m) => animOn(`dri.${m}`));
     countUse(`dri.${move}`);
     const pace = animSpeed(`dri.${move}`);
     const chance = clamp(0.58 + (h.ovr - opp.ovr) / 80 + moveFit(move, ctx), 0.3, 0.88);
@@ -827,15 +838,18 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         ambient,
         dribble: true,
         speed: p.speed,
-        feint: { phase: p.phase, opp: opp.key, sg, win, move },
+        feint: { phase: p.phase, opp: opp.key, sg: sg * (p.sg ?? 1), win, move },
         caption: i === 0 ? (win ? DRIBBLE_CAPTION[move].win(h.name, opp.name) : DRIBBLE_CAPTION[move].lose(h.name, opp.name)) : undefined,
         after:
           i === 0
             ? () => {
                 const t = tnow();
                 if (win) {
-                  // O marcador fica para trás, desequilibrado
-                  st.overrides[opp.key] = { x: opp.x, y: opp.y, until: t + 1000, speed: 0.18 };
+                  // O marcador "morde" a finta (vai para onde o drible mostrou) ou fica para trás, desequilibrado
+                  const bite = plan[0].bite;
+                  st.overrides[opp.key] = bite
+                    ? { x: clamp(opp.x + bite.x, FX0 + 20, FX1 - 20), y: clamp(opp.y + bite.y, FY0 + 20, FY1 - 20), until: t + 750, speed: 1.3 }
+                    : { x: opp.x, y: opp.y, until: t + 1000, speed: 0.18 };
                 } else {
                   st.queue = [];
                   st.active = null;
