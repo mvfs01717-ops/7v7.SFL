@@ -141,6 +141,43 @@ export function heatShift(h: LaneHeat, now: number): number {
   return dir * Math.min(1, (top / tot - 0.5) * 2.2);
 }
 
+// ---------- Momento da partida ----------
+// Pontos de pressão por time, com decaimento (meia-vida ~40 s de jogo). Valor de -1 (adversário por cima) a 1 (time por cima).
+export type Momentum = { user: number; bot: number; at: number };
+export const newMomentum = (): Momentum => ({ user: 0, bot: 0, at: 0 });
+export function momAdd(m: Momentum, side: Side, v: number, now: number) {
+  const f = Math.exp(-(now - m.at) / 58000);
+  m.user *= f;
+  m.bot *= f;
+  m.at = now;
+  m[side] += v;
+}
+export function momValue(m: Momentum, side: Side, now: number): number {
+  const f = Math.exp(-(now - m.at) / 58000);
+  const a = m[side] * f;
+  const b = m[side === 'user' ? 'bot' : 'user'] * f;
+  return (a - b) / (a + b + 3);
+}
+
+// ---------- Escanteios ----------
+export type CornerKind = 'area' | 'curto' | 'primeira';
+export const CORNER_KINDS: CornerKind[] = ['area', 'curto', 'primeira'];
+export type CornerMem = Record<CornerKind, number>;
+export const newCornerMem = (): CornerMem => ({ area: 0, curto: 0, primeira: 0 });
+// Variedade: quanto mais uma variação foi usada, menos ela é escolhida; só as variações ligadas entram
+export function chooseCorner(mem: CornerMem, rnd: () => number, on: (k: CornerKind) => boolean = () => true): CornerKind {
+  const list = CORNER_KINDS.filter((k) => k === 'area' || on(k));
+  const w = list.map((k) => (k === 'area' ? 1.3 : 1) / (1 + mem[k] * 0.7));
+  let x = rnd() * w.reduce((a, b) => a + b, 0);
+  for (let i = 0; i < list.length; i += 1) {
+    x -= w[i];
+    if (x <= 0) return list[i];
+  }
+  return 'area';
+}
+// O adversário só reage a uma variação que já viu duas vezes ou mais
+export const cornerRead = (mem: CornerMem, k: CornerKind): boolean => mem[k] >= 2;
+
 // ---------- Registro de decisões ----------
 // Fica em memória e é espelhado no armazenamento do aparelho (no máximo a cada 3 s) para o painel ADM ler depois da partida.
 export type DecisionLog = { t: number; who: string; kind: string; why: string };

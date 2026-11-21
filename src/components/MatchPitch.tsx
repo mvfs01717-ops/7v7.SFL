@@ -7,7 +7,7 @@ import { useCosmetics } from '@/lib/cosmetics';
 import { newGaitState, stepGait, type GaitState } from '@/lib/game/locomotion';
 import { axisTransform, newRing, poseOf, POSE_MS, type PoseKind, type Ring } from '@/lib/game/discFx';
 import { animOn, animSpeed, countUse, forcedAnim } from '@/lib/game/animLibrary';
-import { ballAt, blockChance, counterRead, deflect, heatAdd, heatShift, logDecision, newHeat, pickWinner, secondBallRuns, urgency, type LaneHeat } from '@/lib/game/emergent';
+import { chooseCorner, cornerRead, momAdd, momValue, newCornerMem, newMomentum, type CornerKind, type CornerMem, type Momentum, ballAt, blockChance, counterRead, deflect, heatAdd, heatShift, logDecision, newHeat, pickWinner, secondBallRuns, urgency, type LaneHeat } from '@/lib/game/emergent';
 import { chooseContact, chooseTackle, CONTACT_ID, laneCut, segPoint, type ContactPlan } from '@/lib/game/contact';
 import { chooseDribble, dribbleBody, dribbleGeometry, moveFit, recordDribble, DRIBBLE_CAPTION, type DribbleCtx, type DribbleMove } from '@/lib/game/dribbles';
 import { ambientChoice, choosePlay, createIntel, passBias, passTaste, recordPass, recordPlay, type Intel, type PlayKind, type Style } from '@/lib/game/playIntel';
@@ -664,6 +664,11 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
   const heatRef = useRef<Record<Side, LaneHeat>>({ user: newHeat(), bot: newHeat() });
   const cautiousRef = useRef<Record<Side, { n: number; at: number }>>({ user: { n: 0, at: 0 }, bot: { n: 0, at: 0 } });
   const sitRef = useRef({ minute: 0, user: 0, bot: 0 });
+  const momRef = useRef<Momentum>(newMomentum());
+  const momEl = useRef<HTMLDivElement>(null);
+  const momNext = useRef(0);
+  const momTalk = useRef(0);
+  const cornerMem = useRef<Record<Side, CornerMem>>({ user: newCornerMem(), bot: newCornerMem() });
   const urgRef = useRef<Record<Side, { u: number; at: number }>>({ user: { u: 0, at: 0 }, bot: { u: 0, at: 0 } });
   const adaptLog = useRef<Record<Side, number>>({ user: 0, bot: 0 });
   sitRef.current = { minute: events[0]?.minute ?? 0, user: events.filter((e) => e.type === 'gol' && e.team === 'user').length, bot: events.filter((e) => e.type === 'gol' && e.team === 'bot').length };
@@ -841,7 +846,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     const move = forcedMove ?? testMove ?? chooseDribble(intelRef.current, ctx, Math.random, (m) => animOn(`dri.${m}`));
     countUse(`dri.${move}`);
     const pace = animSpeed(`dri.${move}`);
-    const chance = clamp(0.58 + (h.ovr - opp.ovr) / 80 + moveFit(move, ctx), 0.3, 0.88);
+    const chance = clamp(0.58 + (h.ovr - opp.ovr) / 80 + moveFit(move, ctx) - fatigueOf(h.key) * 0.1 + fatigueOf(opp.key) * 0.06, 0.3, 0.88);
     const win = forceWin || Math.random() < chance;
     recordDribble(intelRef.current, h.side, move, win);
     const plan = dribbleGeometry(move, h, opp, sg, d);
@@ -896,6 +901,17 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     Object.assign(rg, { on: true, born: tnow(), x, y, r0: flash ? 10 : 13, r1, dur, color, flash });
   }
 
+  // Fadiga (0 a 1) de um jogador: vem do fôlego calculado no App (slow vai de 0 a 0,2). Cansado erra mais, reage mais devagar e perde disputas.
+  function fatigueOf(key: string): number {
+    if (!animOn('ia.fadiga')) return 0;
+    return clamp((workRefLocal.current?.current.slow[key] ?? 0) / 0.2, 0, 1);
+  }
+  // Momento da partida: soma pressão (finalizações, recuperações, bolas ganhas) e posse com o campo ganho
+  function pushMom(side: Side, v: number) {
+    if (!animOn('ia.momento')) return;
+    momAdd(momRef.current, side, v, tnow());
+  }
+
   // Urgência da equipe pelo placar e tempo (gradual) e cautela por passes interceptados; recalculada no máximo a cada segundo
   function urgOf(side: Side, now: number): number {
     const c = urgRef.current[side];
@@ -903,7 +919,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     const sit = sitRef.current;
     const ck = cautiousRef.current[side];
     const caut = Math.min(0.3, ck.n * 0.1 * Math.exp(-(now - ck.at) / 25000));
-    const u = urgency(sit.minute, sit[side], sit[otherSide(side)], caut);
+    const u = clamp(urgency(sit.minute, sit[side], sit[otherSide(side)], caut) + (animOn('ia.momento') ? momValue(momRef.current, side, now) * 0.15 : 0), -1, 1);
     if (Math.abs(u - c.u) > 0.25 && Math.abs(u) > 0.3) logDecision(side === 'user' ? club.abbreviation : opponent.abbreviation, u > 0 ? 'urgência' : 'cautela', `min ${sit.minute}, placar ${sit.user}x${sit.bot}: ${u > 0 ? 'precisa atacar' : 'protege o resultado'} (${u.toFixed(2)})`);
     c.u = u;
     c.at = now;
@@ -979,6 +995,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         spaceOpen: Math.max(fa, fb) > 62,
         canShoot: FORWARDS.includes(rc.pos) && toGoal < 240 && near.d > 26,
         mateAhead: mates.some((x) => (x.x - rc.x) * d > 40 && nearestOpp(all, rc.side, x).d > 55),
+        tired: fatigueOf(rc.key),
       },
       Math.random,
       (k) => animOn(CONTACT_ID[k]),
@@ -1076,8 +1093,35 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
       };
       st.overrides[recv.key] = { x: lead.x, y: lead.y, until: now + step.dur + 300, speed: 1.15 };
       if (!caption && holder) caption = `Passe de ${holder.name} para ${recv.name}`;
+      // Erro de passe: pressão, distância, força, overall e cansaço fazem a bola sair com direção errada (nunca nos lances do plano)
+      if (step.ambient && !step.scripted && holder && animOn('ia.passeerrado')) {
+        const nearH = nearestOpp(all, holder.side, holder);
+        const dd = dist(holder, lead);
+        const f = fatigueOf(holder.key);
+        const pr = clamp(0.012 + clamp((70 - nearH.d) / 70, 0, 1) * 0.09 + (dd > 230 ? 0.04 : 0) + (step.dur < 420 ? 0.03 : 0) + (76 - holder.ovr) * 0.0025 + f * 0.08, 0.01, 0.28);
+        if (Math.random() < pr) {
+          const ang0 = Math.atan2(lead.y - holder.y, lead.x - holder.x);
+          const off = Math.tan((Math.random() < 0.5 ? -1 : 1) * rand(0.12, 0.42)) * dd;
+          lead = { x: clamp(lead.x - Math.sin(ang0) * off, FX0 + 10, FX1 - 10), y: clamp(lead.y + Math.cos(ang0) * off, FY0 + 10, FY1 - 10) };
+          st.overrides[recv.key] = { x: lead.x, y: lead.y, until: now + step.dur + 300, speed: 1.3 };
+          countUse('ia.passeerrado');
+          logDecision(holder.name, 'passe errado', `${(pr * 100).toFixed(0)}% de risco (pressão ${nearH.d.toFixed(0)} px, fadiga ${(f * 100).toFixed(0)}%), desvio ${Math.abs(off).toFixed(0)} px`);
+          if (Math.abs(off) > 38) {
+            const origAfter = step.after;
+            const lx = lead.x;
+            const ly = lead.y;
+            const hs = holder.side;
+            const hn = holder.name;
+            step = { ...step, after: () => { origAfter?.(); launchSB(lx, ly, Math.cos(ang0) * 70, Math.sin(ang0) * 70, hs, `${hn} passa mal e a bola fica sem dono`); } };
+            dest = null;
+            caption = `${hn} erra o passe`;
+          } else {
+            caption = `${recv.name} se estica para alcançar o passe de ${holder.name}`;
+          }
+        }
+      }
       // Passes de rotina podem ser interceptados por quem fecha a linha de passe (perto do trajeto, não só do destino)
-      if (step.ambient && !step.scripted && holder) {
+      if (dest && step.ambient && !step.scripted && holder) {
         let best: { slot: Slot; p: number; x: number; y: number; t: number } | null = null;
         for (const o of all) {
           if (o.side === recv.side || o.pos === 'GK') continue;
@@ -1093,6 +1137,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           delete st.overrides[recv.key];
           caption = `${best.slot.name} fecha a linha de passe e intercepta${holder ? ` o passe de ${holder.name}` : ''}`;
           countUse('def.linha');
+          pushMom(best.slot.side, 1);
           const ck = cautiousRef.current[recv.side];
           ck.n = ck.n * Math.exp(-(now - ck.at) / 25000) + 1;
           ck.at = now;
@@ -1135,6 +1180,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     const goalX = dir > 0 ? FX1 : FX0;
     const critical = ev.type === 'gol';
     const scriptedBusy = st.queue.some((s) => s.scripted) || !!(st.active && st.active.step.scripted);
+    if (ev.type !== 'posse') pushMom(S, ev.type === 'gol' ? 5 : ev.type === 'finalização' ? 2.4 : 1.8);
 
     // Lance de posse não interrompe uma jogada que já está acontecendo
     if (ev.type === 'posse' && scriptedBusy) return;
@@ -1456,6 +1502,45 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     };
     const defenderKey = () => `${O}-${pick<Pos>(['LB', 'RB', 'CM'])}`;
 
+    // Cobrança de escanteio com variações (na área, toque curto, primeira trave). A escolha foge do que já foi usado e o adversário
+    // só se prepara para uma variação que já viu duas vezes. O desfecho do lance continua sendo o do plano.
+    const cornerDeliver = (taker: Slot, targetSlot: Slot, corner: Point, cy: number, setup: Setup[], wrap: (st: Step) => Step): { steps: Step[]; kind: CornerKind } => {
+      const mem = cornerMem.current[S];
+      const kind = chooseCorner(mem, Math.random, (k) => animOn(`ia.escanteio.${k}`));
+      const seen = cornerRead(mem, kind);
+      mem[kind] += 1;
+      countUse(`ia.escanteio.${kind}`);
+      const defenders = all.filter((x) => x.side === O && x.pos !== 'GK').sort((a, b) => dist(a, corner) - dist(b, corner));
+      const put = (key: string, p: Point) => setup.push({ key, x: p.x, y: p.y, speed: 1.9 });
+      const abbr = S === 'user' ? club.abbreviation : opponent.abbreviation;
+      let steps: Step[];
+      if (kind === 'curto') {
+        const mate = mine.find((x) => x.key !== taker.key && x.key !== targetSlot.key && x.pos !== 'GK');
+        if (!mate) {
+          steps = [wrap({ kind: 'pass', to: { slot: targetSlot.key }, dur: 760, arc: 18, caption: `${taker.name} cobra o escanteio` })];
+        } else {
+          const sp: Point = { x: corner.x - dir * 50, y: cy < MID_Y ? cy + 46 : cy - 46 };
+          put(mate.key, sp);
+          if (seen && defenders[0]) put(defenders[0].key, { x: sp.x + dir * 22, y: sp.y + (cy < MID_Y ? -10 : 10) });
+          steps = [
+            wrap({ kind: 'pass', to: { slot: mate.key }, dur: 400, caption: `Escanteio curto: ${taker.name} toca para ${mate.name}${seen && defenders[0] ? `, mas ${defenders[0].name} já espera o toque curto` : ''}` }),
+            wrap({ kind: 'wait', to: { x: sp.x, y: sp.y }, dur: 260 }),
+            wrap({ kind: 'pass', to: { slot: targetSlot.key }, dur: 660, arc: 16, caption: `${mate.name} levanta na área` }),
+          ];
+        }
+      } else if (kind === 'primeira') {
+        const p1: Point = { x: goalX - dir * 34, y: MID_Y + (cy < MID_Y ? -26 : 26) };
+        put(targetSlot.key, p1);
+        if (seen && defenders[0]) put(defenders[0].key, { x: p1.x - dir * 6, y: p1.y + (cy < MID_Y ? 12 : -12) });
+        steps = [wrap({ kind: 'pass', to: { slot: targetSlot.key }, dur: 600, arc: 12, caption: `${taker.name} cobra rasteiro na primeira trave${seen && defenders[0] ? `, onde ${defenders[0].name} já esperava` : ''}` })];
+      } else {
+        if (seen && defenders[0]) put(defenders[0].key, { x: goalX - dir * 62, y: MID_Y + (targetSlot.y > MID_Y ? 14 : -14) });
+        steps = [wrap({ kind: 'pass', to: { slot: targetSlot.key }, dur: 760, arc: 18, caption: `${taker.name} cobra o escanteio${seen && defenders[0] ? ` e ${defenders[0].name} já marca o homem da área` : ''}` })];
+      }
+      logDecision(abbr, `escanteio: ${kind}`, `${taker.name} cobra${seen ? ' (adversário já viu essa variação)' : ''}`);
+      return { steps, kind };
+    };
+
     // Escanteio: o goleiro espalma para fora, o time cobra e a bola entra na área
     const cornerSteps = (quick = false): Step[] => {
       const cy = Math.random() < 0.5 ? FY0 + 6 : FY1 - 6;
@@ -1474,12 +1559,13 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         setup.push({ key: s.key, x: p.x, y: p.y, speed: 1.5 });
       });
       const abbr = S === 'user' ? club.abbreviation : opponent.abbreviation;
+      const dl = cornerDeliver(taker, target, corner, cy, setup, (x) => ({ ...x, scripted: true }));
       return [
         // A bola sai pela linha de fundo (fora do campo) antes de ser colocada no canto
         { kind: 'shot', to: { x: goalX + dir * 22, y: cy < MID_Y ? cy + 18 : cy - 18 }, dur: 420, caption: 'Defendeu e a bola sai pela linha de fundo: escanteio!', scripted: true, after: () => { st.poss = S; } },
         { kind: 'shot', to: corner, dur: quick ? 300 : 450, caption: `Escanteio para ${abbr}`, scripted: true, setup },
         { kind: 'wait', to: corner, dur: quick ? 600 : 1500, caption: `Escanteio para ${abbr}`, scripted: true, setup },
-        { kind: 'pass', to: { slot: target.key }, dur: 760, arc: 18, caption: `${taker.name} cobra o escanteio`, scripted: true },
+        ...dl.steps,
       ];
     };
 
@@ -1507,6 +1593,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         const p = boxSpot(rand(40, 90), rand(-42, 42));
         setup.push({ key: s.key, x: p.x, y: p.y, speed: 1.5 });
       });
+      const dl = direct ? null : cornerDeliver(taker, actorSlot, corner, cy, setup, mk);
       // Antes do escanteio a bola precisa sair: o time chega pela ponta, cruza e a zaga desvia pela linha de fundo
       const maker =
         wings.find((w) => w.key !== taker.key) ?? mine.find((s) => s.key !== actorKey && s.key !== taker.key) ?? actorSlot;
@@ -1550,9 +1637,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
       }
       q.push(mk({ kind: 'shot', to: corner, dur: 450, caption: `Escanteio para ${abbrOf}`, setup, after: () => { st.poss = S; } }));
       q.push(waitStep(1500, setup, direct ? `${taker.name} vai cobrar o escanteio direto` : `${taker.name} se prepara para o escanteio`));
-      if (!direct) {
-        q.push(mk({ kind: 'pass', to: { slot: actorKey }, dur: 760, arc: 18, caption: `${taker.name} cobra o escanteio` }));
-      }
+      if (dl) q.push(...dl.steps);
     }
 
     if (ev.type === 'gol') {
@@ -1913,6 +1998,28 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         st.ballY += (holderNow.y + uy * 11 + 2 + wob + cfy + sfy + (bfx ? bfx.ballLat : 0) - st.ballY) * k;
       };
 
+      // Momento da partida: a cada segundo, posse com campo ganho soma pressão; a barra do campo e a narração acompanham
+      if (now >= momNext.current) {
+        momNext.current = now + 1000;
+        if (!celebrating && !kickoffOn && animOn('ia.momento')) {
+          const ps = st.holder ? sideOf(st.holder) : st.poss;
+          const prog = ps === 'user' ? (st.ballX - FX0) / (FX1 - FX0) : (FX1 - st.ballX) / (FX1 - FX0);
+          pushMom(ps, 0.25 + 0.6 * clamp(prog, 0, 1));
+        }
+        const mu = momValue(momRef.current, 'user', now);
+        if (momEl.current) {
+          momEl.current.style.setProperty('--m', String(clamp(0.5 + mu * 0.5, 0.05, 0.95)));
+          momEl.current.style.opacity = animOn('ia.momento') ? '1' : '0';
+        }
+        if (animOn('ia.momento') && Math.abs(mu) > 0.42 && now - momTalk.current > 45000) {
+          momTalk.current = now;
+          const top: Side = mu > 0 ? 'user' : 'bot';
+          countUse('ia.momento');
+          logDecision(top === 'user' ? club.abbreviation : opponent.abbreviation, 'momento', `time por cima (${Math.abs(mu).toFixed(2)})`);
+          setCaption(`${top === 'user' ? club.name : opponent.name} está por cima e pressiona`);
+        }
+      }
+
       // Segunda bola: a bola solta rola com atrito e quica nas bordas; quem chega primeiro (ou ganha a disputa) fica com ela
       const sbs = sbRef.current;
       if (sbs && (st.holder || st.active || celebrating || kickoffOn)) sbRef.current = null;
@@ -1954,6 +2061,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
             }
             const turnover = !!sbs.from && sbs.from !== win.side;
             if (turnover) counterRef.current = { side: win.side, until: now + 3500 };
+            pushMom(win.side, 0.7);
             const cap = contestN >= 3 ? `Disputa a três pela segunda bola: ${win.name} sai com ela` : contestN === 2 ? `${win.name} vence a disputa da segunda bola` : `${win.name} chega primeiro na segunda bola`;
             setCaption(cap);
             logDecision(win.name, 'ganha a segunda bola', `${contestN > 1 ? contestN + ' discos disputaram' : 'chegou primeiro'}${turnover ? ' (posse trocou)' : ''}`);
@@ -2072,7 +2180,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
             const huy = hs > 8 ? h.vy / hs : 0;
             const helpers = all.filter((x) => x.side === dfn.side && x.key !== dfn.key && x.pos !== 'GK' && dist(x, h) < 75).length;
             const tk = chooseTackle(
-              { ovrD: dfn.ovr, ovrH: h.ovr, hRatio: hs / h.maxSpeed, behind: (dfn.x - h.x) * hux + (dfn.y - h.y) * huy < -4, helpers, shielding: (shieldRef.current[h.key] ?? 0) > now },
+              { tiredD: fatigueOf(dfn.key), tiredH: fatigueOf(h.key), ovrD: dfn.ovr, ovrH: h.ovr, hRatio: hs / h.maxSpeed, behind: (dfn.x - h.x) * hux + (dfn.y - h.y) * huy < -4, helpers, shielding: (shieldRef.current[h.key] ?? 0) > now },
               Math.random,
               (k) => animOn(`def.${k}`),
             );
@@ -2132,6 +2240,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
                     st.holder = dfn.key;
                     st.poss = dfn.side;
                     counterRef.current = { side: dfn.side, until: now + 4200 };
+                    pushMom(dfn.side, 1);
                     st.overrides[h.key] = { x: h.x, y: h.y, until: t + 800, speed: 0.15 };
                     st.overrides[dfn.key] = {
                       x: clamp(dfn.x - dirH * 55, FX0 + 20, FX1 - 20),
@@ -2244,6 +2353,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           };
           if (ctr && !throwInNow) {
             countUse('ia.contra');
+            pushMom(h.side, 1.2);
             const runners = all.filter((x) => x.side === h.side && x.key !== h.key && x.pos !== 'GK' && FORWARDS.includes(x.pos) && x.key !== ctr?.r?.key).slice(0, 2);
             runners.forEach((x, i) => {
               st.overrides[x.key] = { x: clamp(h.x + d * rand(140, 210), FX0 + 40, FX1 - 40), y: clamp(MID_Y + (i === 0 ? -1 : 1) * rand(50, 110), FY0 + 30, FY1 - 30), until: now + 1500, speed: 1.5 };
@@ -3605,6 +3715,11 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         </p>
       )}
         </>
+      )}
+      {!hideOverlays && (
+        <div ref={momEl} className="pc-mom" aria-hidden="true" style={{ position: 'absolute', left: 10, right: 10, top: 2, height: 3, borderRadius: 3, background: 'rgba(0,0,0,.35)', opacity: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+          <i style={{ position: 'absolute', inset: 0, background: `linear-gradient(90deg, ${club.primary_color} calc(var(--m, .5) * 100%), ${opponent.primary_color} calc(var(--m, .5) * 100%))`, opacity: 0.9, transition: 'all .8s ease' }} />
+        </div>
       )}
       {replay && <GoalReplay key={`replay-${replay.id}`} data={replay} club={club} opponent={opponent} onDone={() => setReplay(null)} />}
       {crowd && !hideOverlays && <span className="pc-db">🔊 {Math.round(68 + crowd.noise * 0.5)} dB</span>}

@@ -21,6 +21,7 @@ export type ContactCtx = {
   spaceOpen: boolean; // existe espaço de verdade para dirigir a bola
   canShoot: boolean; // perto do gol, atacante
   mateAhead: boolean; // há companheiro livre à frente
+  tired?: number; // fadiga de quem recebe (0 a 1)
 };
 export type ContactPlan = {
   kind: ContactKind;
@@ -47,7 +48,8 @@ export function chooseContact(c: ContactCtx, rnd: () => number, on: (k: ContactK
     if (c.ambient && skill > 0.3 && (c.canShoot || c.mateAhead)) w.primeira = (pressured ? 1.4 : 0.6) * (0.5 + skill);
     if (pressured) w.protecao = 0.8 + (1 - skill) * 0.4;
     // Erro de domínio: passe forte, marcador colado, jogador de overall baixo. Só em jogo corrido.
-    if (c.ambient && force > 1 && pressured) w.erro = 0.25 + (1 - skill) * 0.9;
+    if (c.ambient && force > 1 && pressured) w.erro = 0.25 + (1 - skill) * 0.9 + (c.tired ?? 0) * 0.9;
+    if (c.ambient && (c.tired ?? 0) > 0.5 && !pressured && force > 1) w.erro = (w.erro ?? 0) + 0.3;
   }
   let tot = 0;
   const list: [ContactKind, number][] = [];
@@ -70,7 +72,7 @@ export function chooseContact(c: ContactCtx, rnd: () => number, on: (k: ContactK
   const base = { fwd: 0, lat: 0, settle: 260, hold: 0, loose: false, steer: 0 };
   switch (kind) {
     case 'amortecimento': // a bola chega rápida: passa do disco e vai perdendo velocidade até assentar
-      return { kind, ...base, fwd: 12 + 14 * Math.min(1.4, force), settle: 420, hold: 380 + (1 - skill) * 220 };
+      return { kind, ...base, fwd: 12 + 14 * Math.min(1.4, force), settle: 420, hold: 380 + (1 - skill) * 220 + (c.tired ?? 0) * 260 };
     case 'orientado': // o primeiro toque já leva a bola para o espaço livre
       return { kind, ...base, fwd: 8, lat: 15 * c.spaceSide, settle: 300, hold: 110, steer: 1 };
     case 'primeira': // toque único: a bola nem assenta e a decisão vem na hora
@@ -110,6 +112,8 @@ export type TackleCtx = {
   ovrH: number;
   hRatio: number; // velocidade de quem tem a bola / máxima
   behind: boolean; // o marcador vem por trás ou de lado
+  tiredD?: number; // fadiga do marcador (0 a 1)
+  tiredH?: number; // fadiga de quem tem a bola
   helpers: number; // outros defensores a até 75px (pressão coordenada)
   shielding: boolean; // quem tem a bola está se protegendo
 };
@@ -136,6 +140,7 @@ export function chooseTackle(c: TackleCtx, rnd: () => number, on: (k: TackleKind
   if (kind === 'carrinho') winMod = c.behind && c.hRatio > 0.55 ? 0.05 : -0.08;
   if (kind === 'disputa') winMod = 0; // a disputa aproxima a chance de 50%
   winMod += Math.min(2, c.helpers) * 0.04; // quem tem cobertura por perto desarma mais
+  winMod += (c.tiredH ?? 0) * 0.07 - (c.tiredD ?? 0) * 0.09; // cansaço pesa mais em quem dá o bote
   if (c.shielding) winMod -= 0.1; // quem protege a bola é mais difícil de desarmar
   return { kind, winMod };
 }
