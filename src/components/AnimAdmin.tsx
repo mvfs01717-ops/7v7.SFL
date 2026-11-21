@@ -61,6 +61,34 @@ function Preview({ def, speed }: { def: AnimDef; speed: number }) {
         foe.current?.setAttribute('opacity', '1');
         foe.current?.setAttribute('cx', (foeP.x + sway * 0.4).toFixed(1));
         foe.current?.setAttribute('cy', (foeP.y + sway).toFixed(1));
+      } else if (def.id.startsWith('dom.') || (def.id.startsWith('def.') && def.id !== 'def.emPe')) {
+        // Contato e defesa com a MESMA lógica de sobra da bola usada na partida (contact.ts): bola chega, assenta ou escapa; marcador reage
+        const cyc = 2200, el = (t * 1000) % cyc;
+        const k = def.id.split('.')[1];
+        const arrive = 500;
+        const q = Math.max(0, el - arrive);
+        const ax = 120, ay = 70;
+        let px = ax, py = ay, bx = 0, by = 0, sa = 1, sp = 1, fxp = 190, fyp = 70, showFoe = 0;
+        if (el < arrive) { bx = 30 + (ax - 8 - 30) * (el / arrive); by = ay + 2; }
+        else {
+          const decay = Math.pow(Math.max(0, 1 - q / (k === 'erro' ? 650 : k === 'primeira' ? 120 : 420)), 2);
+          if (k === 'orientado') { py = ay + Math.min(1, q / 400) * 34; px = ax + Math.min(1, q / 400) * 12; bx = px + 11 + 8 * decay; by = py + 12 * decay; }
+          else if (k === 'amortecimento' || k === 'aereo') { sa = 1 - 0.1 * Math.sin(Math.min(1, q / 320) * Math.PI); bx = px + 11 + 24 * decay; by = py + 2; }
+          else if (k === 'primeira') { bx = px + 11 + Math.max(0, q - 60) * 0.35; by = py + 2; }
+          else if (k === 'erro') { const r = Math.min(1, q / 700); bx = px + 11 + 70 * (1 - Math.pow(1 - Math.min(1, q / 500), 2)); by = py + 22 * Math.min(1, q / 500); px = ax + (bx - 11 - ax) * Math.max(0, r - 0.2) * 1.1; py = ay + (by - ay) * Math.max(0, r - 0.2) * 1.1; }
+          else if (k === 'protecao') { showFoe = 1; fxp = 160 - Math.min(1, q / 600) * 14; bx = px - 11; by = py + 2; sa = 0.94; }
+          else if (k === 'linha' || k === 'cobertura' || k === 'area') { showFoe = 1; bx = px + 11; by = py + 2; fxp = 200 - 36 * Math.min(1, q / 900); fyp = 70 - 20 * Math.min(1, q / 900); }
+          else if (k === 'carrinho' || k === 'disputa') { showFoe = 1; const r = Math.min(1, q / 500); bx = px + 11; by = py + 2; fxp = 210 - r * 62; sa = k === 'disputa' ? 1 - 0.1 * Math.sin(r * Math.PI) : 1; }
+          else { bx = px + 11; by = py + 2; }
+        }
+        body.current?.setAttribute('transform', `translate(${px.toFixed(1)} ${py.toFixed(1)}) scale(${sa.toFixed(3)} ${sp.toFixed(3)})`);
+        ball.current?.setAttribute('opacity', '1');
+        ball.current?.setAttribute('cx', bx.toFixed(1));
+        ball.current?.setAttribute('cy', by.toFixed(1));
+        ghost.current?.setAttribute('opacity', '0');
+        foe.current?.setAttribute('opacity', String(showFoe));
+        foe.current?.setAttribute('cx', fxp.toFixed(1));
+        foe.current?.setAttribute('cy', fyp.toFixed(1));
       } else {
         // Efeitos de contato: pose do disco no eixo da bola, bola em trajeto e anel de impacto
         const kind = POSE_OF[def.id] ?? 'pass';

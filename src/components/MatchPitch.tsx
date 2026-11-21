@@ -7,6 +7,7 @@ import { useCosmetics } from '@/lib/cosmetics';
 import { newGaitState, stepGait, type GaitState } from '@/lib/game/locomotion';
 import { axisTransform, newRing, poseOf, POSE_MS, type PoseKind, type Ring } from '@/lib/game/discFx';
 import { animOn, animSpeed, countUse, forcedAnim } from '@/lib/game/animLibrary';
+import { chooseContact, chooseTackle, CONTACT_ID, laneCut, segPoint, type ContactPlan } from '@/lib/game/contact';
 import { chooseDribble, dribbleBody, dribbleGeometry, moveFit, recordDribble, DRIBBLE_CAPTION, type DribbleCtx, type DribbleMove } from '@/lib/game/dribbles';
 import { ambientChoice, choosePlay, createIntel, passBias, passTaste, recordPass, recordPlay, type Intel, type PlayKind, type Style } from '@/lib/game/playIntel';
 import { ReplayPlayer, type ClipData } from '@/components/game/ReplayPlayer';
@@ -651,6 +652,11 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
   const dustNext = useRef(0);
   const motion = useRef<Record<string, { x: number; y: number; vx: number; vy: number; hx: number; hy: number; hAt: number; cool: number }>>({});
   const slideRef = useRef<Record<string, { until: number; fx: number; fy: number }>>({});
+  // Contato com a bola: controle em andamento (sobra da bola que assenta), bola solta após erro de domínio e proteção da posse
+  const ctlRef = useRef<Record<string, { t0: number; plan: ContactPlan; ang: number; side: number }>>({});
+  const looseRef = useRef<{ key: string; vx: number; vy: number; until: number } | null>(null);
+  const shieldRef = useRef<Record<string, number>>({});
+  const coverUse = useRef<Record<string, number>>({});
   // Animação do desarme: o marcador estica no chão (carrinho) ou dá o bote, a bota aparece, o impacto pisca e o desarmado tropeça
   const tackleFx = useRef<{ def: string; hold: string; t0: number; span: number; slide: boolean; win: boolean; ax: number; ay: number; contact: number } | null>(null);
   const dribFx = useRef<{ key: string; opp: string; t0: number; dur: number; sg: number; win: boolean; phase: 'fake' | 'burst'; dx: number; move: DribbleMove } | null>(null);
@@ -880,6 +886,76 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     Object.assign(rg, { on: true, born: tnow(), x, y, r0: flash ? 10 : 13, r1, dur, color, flash });
   }
 
+  // Contato com a bola: escolhe como o jogador domina (amortece, orienta, de primeira, erra...) e aplica a consequência no jogo
+  function contactOn(rc: Slot, step: Step, ang: number, now: number) {
+    const st = engine.current;
+    if (liteRef.current || st.kickoff) return;
+    const all = slotsRef.current;
+    const d = dirOf(rc.side);
+    const near = nearestOpp(all, rc.side, rc);
+    const toGoal = Math.abs((d > 0 ? FX1 : FX0) - rc.x);
+    // Lado com mais espaço, em relação à direção da bola (positivo = à direita de quem olha na direção da bola)
+    const nx = -Math.sin(ang);
+    const ny = Math.cos(ang);
+    const free = (sg: number) => {
+      const px = rc.x + nx * sg * 50;
+      const py = rc.y + ny * sg * 50;
+      if (px < FX0 + 14 || px > FX1 - 14 || py < FY0 + 14 || py > FY1 - 14) return -1;
+      return nearestOpp(all, rc.side, { x: px, y: py }).d;
+    };
+    const fa = free(1);
+    const fb = free(-1);
+    const spaceSide = fa >= fb ? 1 : -1;
+    const mates = all.filter((x) => x.side === rc.side && x.key !== rc.key && x.pos !== 'GK');
+    const plan = chooseContact(
+      {
+        dur: step.dur,
+        arc: step.arc ?? 0,
+        ambient: !!step.ambient && !step.scripted,
+        ovr: rc.ovr,
+        oppD: near.d,
+        spaceSide,
+        spaceOpen: Math.max(fa, fb) > 62,
+        canShoot: FORWARDS.includes(rc.pos) && toGoal < 240 && near.d > 26,
+        mateAhead: mates.some((x) => (x.x - rc.x) * d > 40 && nearestOpp(all, rc.side, x).d > 55),
+      },
+      Math.random,
+      (k) => animOn(CONTACT_ID[k]),
+    );
+    if (plan.kind === 'dominio') {
+      st.ambientAt = Math.max(st.ambientAt, now + 60);
+      return;
+    }
+    countUse(CONTACT_ID[plan.kind]);
+    ctlRef.current[rc.key] = { t0: tnow(), plan, ang, side: spaceSide };
+    // A decisão seguinte só vem depois do controle (primeira = quase na hora)
+    st.ambientAt = now + plan.hold;
+    const sp = animSpeed(CONTACT_ID[plan.kind]);
+    if (plan.kind === 'orientado') {
+      // O toque leva a bola e o disco para o espaço livre
+      st.overrides[rc.key] = { x: clamp(rc.x + nx * spaceSide * 48 + Math.cos(ang) * 14, FX0 + 24, FX1 - 24), y: clamp(rc.y + ny * spaceSide * 48 + Math.sin(ang) * 14, FY0 + 24, FY1 - 24), until: now + 420, speed: 1.2 * sp };
+      ringAt(rc.x, rc.y, 'rgba(160,230,255,.85)', false, 26, 320, CONTACT_ID.orientado);
+      setCaption(`${rc.name} domina orientado para o espaço`);
+    } else if (plan.kind === 'amortecimento') {
+      ringAt(rc.x, rc.y, 'rgba(255,255,255,.7)', false, 30, 420, CONTACT_ID.amortecimento);
+    } else if (plan.kind === 'primeira') {
+      ringAt(rc.x, rc.y, 'rgba(255,240,170,.9)', true, 22, 220, CONTACT_ID.primeira);
+      setCaption(`${rc.name} de primeira`);
+    } else if (plan.kind === 'aereo') {
+      ringAt(rc.x, rc.y, 'rgba(255,255,255,.55)', false, 34, 480, CONTACT_ID.aereo);
+      setCaption(`${rc.name} domina a bola que vinha do alto`);
+    } else if (plan.kind === 'protecao') {
+      shieldRef.current[rc.key] = now + 900;
+      ringAt(rc.x, rc.y, 'rgba(255,200,120,.8)', false, 28, 380, CONTACT_ID.protecao);
+    } else if (plan.kind === 'erro') {
+      // A bola escapa para frente e para o lado; o jogador corre atrás. Se um adversário chegar antes, rouba.
+      const sgn = plan.lat < 0 ? -1 : 1;
+      const v = 150 + 60 * Math.random();
+      looseRef.current = { key: rc.key, vx: Math.cos(ang) * v + nx * sgn * 70, vy: Math.sin(ang) * v + ny * sgn * 70, until: now + 1100 };
+      setCaption(`${rc.name} perde o tempo da bola no domínio`);
+    }
+  }
+
   // Começa um passo da fila (passe, condução, chute ou recuperação)
   function startStep(step: Step, now: number) {
     const st = engine.current;
@@ -938,13 +1014,23 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
       };
       st.overrides[recv.key] = { x: lead.x, y: lead.y, until: now + step.dur + 300, speed: 1.15 };
       if (!caption && holder) caption = `Passe de ${holder.name} para ${recv.name}`;
-      // Passes de rotina podem ser interceptados
-      if (step.ambient && Math.random() < 0.1) {
-        const near = nearestOpp(all, recv.side, lead);
-        if (near.slot && near.d < 90) {
-          dest = near.slot.key;
-          st.overrides[near.slot.key] = { x: lead.x, y: lead.y, until: now + step.dur + 300, speed: 1.2 };
-          caption = `${near.slot.name} intercepta o passe${holder ? ` de ${holder.name}` : ''}`;
+      // Passes de rotina podem ser interceptados por quem fecha a linha de passe (perto do trajeto, não só do destino)
+      if (step.ambient && !step.scripted && holder) {
+        let best: { slot: Slot; p: number; x: number; y: number; t: number } | null = null;
+        for (const o of all) {
+          if (o.side === recv.side || o.pos === 'GK') continue;
+          const sg = segPoint(o.x, o.y, holder.x, holder.y, lead.x, lead.y);
+          const p = laneCut(sg.d, sg.t, step.dur, o.ovr);
+          if (p > 0 && (!best || p > best.p)) best = { slot: o, p, x: sg.x, y: sg.y, t: sg.t };
+        }
+        if (best && Math.random() < best.p) {
+          dest = best.slot.key;
+          lead = { x: best.x, y: best.y };
+          step = { ...step, dur: Math.max(200, step.dur * best.t), arc: 0 };
+          st.overrides[best.slot.key] = { x: best.x, y: best.y, until: now + step.dur + 300, speed: 1.4 };
+          delete st.overrides[recv.key];
+          caption = `${best.slot.name} fecha a linha de passe e intercepta${holder ? ` o passe de ${holder.name}` : ''}`;
+          countUse('def.linha');
         }
       }
     } else if (!caption && recv) {
@@ -1695,9 +1781,70 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         const touch = st.active && st.active.step.kind === 'carry' && !st.active.step.dribble && sp > 20 ? Math.max(0, Math.sin(gs && !liteRef.current ? gs.phase : now / 120)) * (gs && gs.gait === 'sprint' ? 8 : 5) : 0;
         const df = dribFx.current;
         const bfx = st.active && st.active.step.dribble && df ? dribbleBody(df.move, df.phase, clamp((now - df.t0) / df.dur, 0, 1), df.sg) : null;
-        st.ballX += (holderNow.x + ux * (11 + touch) + (bfx ? bfx.ballFwd * dirOf(holderNow.side) : 0) - st.ballX) * k;
+        // Bola solta após erro de domínio: rola com atrito, o jogador corre atrás; adversário que chegar antes rouba
+        const lo = looseRef.current;
+        if (lo) {
+          if (lo.key !== holderNow.key || now > lo.until || st.queue.length) looseRef.current = null;
+          else {
+            const fr = Math.exp(-dt / 330);
+            lo.vx *= fr;
+            lo.vy *= fr;
+            st.ballX = clamp(st.ballX + (lo.vx * dt) / 1000, FX0 + 6, FX1 - 6);
+            st.ballY = clamp(st.ballY + (lo.vy * dt) / 1000, FY0 + 6, FY1 - 6);
+            st.overrides[holderNow.key] = { x: st.ballX, y: st.ballY, until: now + 140, speed: 1.6 };
+            const thief = nearestOpp(all, holderNow.side, { x: st.ballX, y: st.ballY });
+            if (thief.slot && thief.d < 15 && thief.d < dist(holderNow, { x: st.ballX, y: st.ballY }) - 4) {
+              st.holder = thief.slot.key;
+              st.poss = thief.slot.side;
+              st.ambientAt = now + 450;
+              looseRef.current = null;
+              delete ctlRef.current[holderNow.key];
+              countUse('def.recupera');
+              setCaption(`${thief.slot.name} aproveita o erro de domínio de ${holderNow.name} e rouba a bola`);
+              return;
+            }
+            if (dist(holderNow, { x: st.ballX, y: st.ballY }) < 14) {
+              looseRef.current = null;
+              delete st.overrides[holderNow.key];
+              st.ambientAt = now + 220;
+              countUse('dom.recupera');
+              setCaption(`${holderNow.name} se recupera e controla a bola`);
+            }
+            return;
+          }
+        }
+        // Controle em andamento: a sobra da bola (amortecimento, orientado...) diminui até a bola assentar
+        const cc = ctlRef.current[holderNow.key];
+        let cfx = 0;
+        let cfy = 0;
+        if (cc) {
+          const pr = (tnow() - cc.t0) / cc.plan.settle;
+          if (pr >= 1) delete ctlRef.current[holderNow.key];
+          else {
+            const dec = Math.pow(1 - pr, 2);
+            const nxl = -Math.sin(cc.ang);
+            const nyl = Math.cos(cc.ang);
+            const lat = cc.plan.lat * dec;
+            cfx = Math.cos(cc.ang) * cc.plan.fwd * dec + nxl * lat;
+            cfy = Math.sin(cc.ang) * cc.plan.fwd * dec + nyl * lat;
+          }
+        }
+        // Proteção da posse: a bola fica do lado oposto ao marcador
+        let sfx = 0;
+        let sfy = 0;
+        if ((shieldRef.current[holderNow.key] ?? 0) > now) {
+          const o = nearestOpp(all, holderNow.side, holderNow);
+          if (o.slot && o.d < 70) {
+            const ax = holderNow.x - o.slot.x;
+            const ay = holderNow.y - o.slot.y;
+            const al = Math.hypot(ax, ay) || 1;
+            sfx = (ax / al) * 9;
+            sfy = (ay / al) * 9;
+          }
+        }
+        st.ballX += (holderNow.x + ux * (11 + touch) + cfx + sfx + (bfx ? bfx.ballFwd * dirOf(holderNow.side) : 0) - st.ballX) * k;
         const wob = st.active && st.active.step.dribble ? (df && df.phase === 'fake' ? df.sg * Math.sin(clamp((now - df.t0) / df.dur, 0, 1) * Math.PI * 2) * 9 : Math.sin(now / 45) * 6) : 0;
-        st.ballY += (holderNow.y + uy * 11 + 2 + wob + (bfx ? bfx.ballLat : 0) - st.ballY) * k;
+        st.ballY += (holderNow.y + uy * 11 + 2 + wob + cfy + sfy + (bfx ? bfx.ballLat : 0) - st.ballY) * k;
       };
 
       // Move a bola
@@ -1759,6 +1906,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
               } else {
                 pose(dest, 'touch', ang, pow);
                 if (step.kind === 'shot') ringAt(rc.x, rc.y, 'rgba(255,255,255,.9)', false, 26, 320, 'fx.touch');
+                else if (step.kind === 'pass') contactOn(rc, step, ang, now);
               }
             }
           }
@@ -1796,11 +1944,30 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         if (h && h.pos !== 'GK') {
           const near = nearestOpp(all, h.side, h);
           const dfn = near.slot;
+          // Marcador colado: o portador protege a bola com o corpo (ela passa para o lado oposto ao marcador)
+          if (dfn && near.d < 46 && (shieldRef.current[h.key] ?? 0) < now - 1500 && animOn(CONTACT_ID.protecao) && Math.random() < (0.8 * dt) / 1000) {
+            shieldRef.current[h.key] = now + 900;
+            countUse(CONTACT_ID.protecao);
+            ringAt(h.x, h.y, 'rgba(255,200,120,.8)', false, 28, 380, CONTACT_ID.protecao);
+          }
           if (dfn && near.d < 30 && Math.random() < (0.9 * dt) / 1000) {
-            // Quem tem overall maior leva vantagem; o marcador perto do gol do adversário chega mais atrasado
-            const win = Math.random() < clamp(0.5 + (dfn.ovr - h.ovr) / 90, 0.25, 0.75);
+            // Escolha do desarme pelo contexto: de onde o marcador vem, velocidade da bola, equilíbrio de forças, cobertura e proteção
+            const hs = Math.hypot(h.vx, h.vy);
+            const hux = hs > 8 ? h.vx / hs : dirOf(h.side);
+            const huy = hs > 8 ? h.vy / hs : 0;
+            const helpers = all.filter((x) => x.side === dfn.side && x.key !== dfn.key && x.pos !== 'GK' && dist(x, h) < 75).length;
+            const tk = chooseTackle(
+              { ovrD: dfn.ovr, ovrH: h.ovr, hRatio: hs / h.maxSpeed, behind: (dfn.x - h.x) * hux + (dfn.y - h.y) * huy < -4, helpers, shielding: (shieldRef.current[h.key] ?? 0) > now },
+              Math.random,
+              (k) => animOn(`def.${k}`),
+            );
+            countUse(`def.${tk.kind}`);
+            // Quem tem overall maior leva vantagem; carrinho bem encaixado e cobertura ajudam, proteção da posse atrapalha
+            const base = clamp(0.5 + (dfn.ovr - h.ovr) / 90, 0.25, 0.75);
+            const win = Math.random() < clamp(tk.kind === 'disputa' ? 0.5 + (base - 0.5) * 0.5 + tk.winMod : base + tk.winMod, 0.15, 0.85);
             const dirH = dirOf(h.side);
-            const slide = Math.random() < 0.25;
+            const slide = tk.kind === 'carrinho';
+            const dispute = tk.kind === 'disputa';
             st.tackleAt = now + 1000;
             {
               const ddx = h.x - dfn.x;
@@ -1828,6 +1995,14 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
                   const t = tnow();
                   st.overrides = {};
                   if (tackleFx.current) tackleFx.current.contact = t;
+                  if (dispute) {
+                    // Disputa de ombro: os dois discos se empurram no contato
+                    const ang = Math.atan2(h.y - dfn.y, h.x - dfn.x);
+                    pose(dfn.key, 'touch', ang, 1.3);
+                    pose(h.key, 'touch', ang + Math.PI, 1.3);
+                    ringAt((h.x + dfn.x) / 2, (h.y + dfn.y) / 2, 'rgba(255,190,110,.9)', true, 30, 360, 'def.disputa');
+                    if (win) setCaption(`${dfn.name} ganha a disputa de ombro com ${h.name}`);
+                  }
                   // Quem ganha a bola faz ela pular para longe do desarmado
                   if (win) bounce.current = { start: t, h: slide ? 11 : 7 };
                   if (win) {
@@ -1853,7 +2028,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
                     );
                   } else {
                     // O jogador escapa e o marcador fica para trás
-                    st.overrides[dfn.key] = { x: dfn.x, y: dfn.y, until: t + 900, speed: 0.18 };
+                    st.overrides[dfn.key] = { x: dfn.x, y: dfn.y, until: t + (slide ? 1250 : 900), speed: 0.18 };
                     st.overrides[h.key] = {
                       x: clamp(h.x + dirH * 70, FX0 + 20, FX1 - 20),
                       y: clamp(h.y + rand(-26, 26), FY0 + 20, FY1 - 20),
@@ -2127,6 +2302,19 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         }
       }
 
+      // Cobertura: o segundo defensor mais perto fica atrás do que pressiona, do lado do centro (pressão coordenada)
+      let coverKey = '';
+      if (holderSlot && presserKey && presserDist < 240) {
+        let cd = Infinity;
+        for (const s of all) {
+          if (s.side === possSide || s.pos === 'GK' || s.key === presserKey) continue;
+          const dd = dist(s, ref);
+          if (dd < cd && dd < 300) {
+            cd = dd;
+            coverKey = s.key;
+          }
+        }
+      }
       // Decide para onde cada jogador quer ir e se move com velocidade e aceleração
       all.forEach((s, i) => {
         const d = dirOf(s.side);
@@ -2218,14 +2406,37 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
             tx = ref.x - d * 16;
             ty = ref.y;
             speedMul = ord === 'pressionar' ? 1.28 : 1.12;
+          } else if (s.key === coverKey && holderSlot && animOn('def.cobertura')) {
+            // Cobertura defensiva: atrás do companheiro que pressiona, fechando o lado do gol
+            tx = ref.x - d * 62;
+            ty = ref.y + (MID_Y - ref.y) * 0.35;
+            speedMul = 1.05;
+            if (gaitRef.current[s.key]?.gait !== 'parado' && now - (coverUse.current[s.key] ?? 0) > 2500) {
+              coverUse.current[s.key] = now;
+              countUse('def.cobertura');
+            }
           } else {
             const m = get(`${otherSide(s.side)}-${MARK[s.pos]}`);
             if (m) {
               tx = lerp(tx, m.x - d * 28, 0.6);
               ty = lerp(ty, m.y, 0.6);
+              // Fechamento da linha de passe: o marcador se coloca entre a bola e o jogador que marca
+              if (holderSlot && m.key !== holderSlot.key && animOn('def.linha')) {
+                const dm = dist(holderSlot, m);
+                if (dm > 70 && dm < 340) {
+                  tx = lerp(tx, lerp(holderSlot.x, m.x, 0.58) - d * 6, 0.5);
+                  ty = lerp(ty, lerp(holderSlot.y, m.y, 0.58), 0.5);
+                }
+              }
             }
             tx = lerp(tx, st.ballX, 0.12);
             ty = lerp(ty, st.ballY, 0.12);
+            // Proteção da área e recuo: com a bola perto do gol, a defesa fecha o centro e recua
+            const ownGX = d > 0 ? FX0 : FX1;
+            if ((s.pos === 'LB' || s.pos === 'RB' || s.pos === 'CM') && Math.abs(st.ballX - ownGX) < 240 && animOn('def.area')) {
+              tx = lerp(tx, ownGX + d * 92, 0.4);
+              ty = lerp(ty, MID_Y + (st.ballY - MID_Y) * 0.4, 0.4);
+            }
           }
         }
 
