@@ -22,6 +22,7 @@ export type ContactCtx = {
   canShoot: boolean; // perto do gol, atacante
   mateAhead: boolean; // há companheiro livre à frente
   tired?: number; // fadiga de quem recebe (0 a 1)
+  cons?: number; // consistência da função/nível (multiplica o risco de erro de domínio)
 };
 export type ContactPlan = {
   kind: ContactKind;
@@ -50,6 +51,7 @@ export function chooseContact(c: ContactCtx, rnd: () => number, on: (k: ContactK
     // Erro de domínio: passe forte, marcador colado, jogador de overall baixo. Só em jogo corrido.
     if (c.ambient && force > 1 && pressured) w.erro = 0.25 + (1 - skill) * 0.9 + (c.tired ?? 0) * 0.9;
     if (c.ambient && (c.tired ?? 0) > 0.5 && !pressured && force > 1) w.erro = (w.erro ?? 0) + 0.3;
+    if (w.erro) w.erro *= c.cons ?? 1;
   }
   let tot = 0;
   const list: [ContactKind, number][] = [];

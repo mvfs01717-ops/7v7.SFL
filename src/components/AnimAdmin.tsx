@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { clearDecisions, readDecisions } from '@/lib/game/emergent';
+import { LV_TEXT } from '@/lib/game/roleLevels';
+import { ROLES } from '@/lib/playerRoles';
 import { forcedAnim, setForcedAnim, CATEGORY_LABEL, LIBRARY, clearUses, loadAnimSettings, loadUses, saveAnimSettings, type AnimCategory, type AnimDef, type AnimSettings } from '@/lib/game/animLibrary';
 import { gaitFx, type Gait } from '@/lib/game/locomotion';
 import { axisTransform, poseOf, type PoseKind } from '@/lib/game/discFx';
@@ -233,6 +235,20 @@ export default function AnimAdmin() {
         <button className="aa-btn" onClick={() => { clearUses(); setUses({}); }}>Zerar contagem</button>{' '}
         <button className="aa-btn" onClick={() => { setSettings({}); saveAnimSettings({}); }}>Restaurar padrão</button>
       </div>
+      <section>
+        <h3>Níveis de função: Normal, + e ++</h3>
+        <p className="aa-note">O nível é cadastrado por jogador e função (aba Jogadores). Não aumenta atributo: muda o comportamento em campo. Normal mantém o jogo atual; + e ++ somam camadas. Liga/desliga em "Níveis de função" acima.</p>
+        <div style={{ display: 'grid', gap: 6, maxHeight: 360, overflow: 'auto', fontSize: 12 }}>
+          {ROLES.map((r) => (
+            <div key={r.id} style={{ padding: '6px 8px', borderRadius: 6, background: 'rgba(255,255,255,.05)' }}>
+              <b>{r.icon} {r.name}</b>
+              {(['Normal', '+', '++'] as const).map((n, i) => (
+                <div key={n}><span style={{ opacity: 0.7 }}>{n}:</span> {LV_TEXT[r.id]?.[i] ?? ''}</div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </section>
       <section>
         <h3>Registro de decisões</h3>
         <p className="aa-note">As últimas decisões da IA nas partidas jogadas neste aparelho (segunda bola, bloqueios, contra-ataques, urgência por placar, adaptação).</p>

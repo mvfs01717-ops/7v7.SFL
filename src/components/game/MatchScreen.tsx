@@ -110,9 +110,11 @@ export function MatchScreen({
   onSendChat,
   shapes,
   styles,
+  levels,
 }: {
   shapes?: ComponentProps<typeof MatchPitch>['shapes'];
   styles?: ComponentProps<typeof MatchPitch>['styles'];
+  levels?: ComponentProps<typeof MatchPitch>['levels'];
   club: Team;
   opponent: Team;
   userTeam: Player[];
@@ -308,6 +310,7 @@ export function MatchScreen({
             botTeam={botTeam}
             shapes={shapes}
             styles={styles}
+            levels={levels}
             events={events}
             onGoal={onGoal}
             restartKey={restartKey}

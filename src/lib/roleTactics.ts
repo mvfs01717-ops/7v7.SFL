@@ -1,5 +1,6 @@
 import type { Player, Position } from '@/lib/game/types';
-import { FOCUS_LABEL, SECTOR_OF, defaultRole, focusOptions, loadRoles, roleById, roleFit, roleOf, ROLES, type Fit, type Focus, type Role } from '@/lib/playerRoles';
+import type { Lv } from '@/lib/game/roleLevels';
+import { FOCUS_LABEL, SECTOR_OF, defaultRole, masteryList, focusOptions, loadRoles, roleById, roleFit, roleOf, ROLES, type Fit, type Focus, type Role } from '@/lib/playerRoles';
 
 // Mapa de Atuação e Foco (7v7). Usa as 19 funções que já existem e as 7 vagas fixas. Nada aqui muda overall,
 // formação ou posições: o foco só complementa a função e o mapa mostra o comportamento que ela configura.
@@ -131,7 +132,7 @@ export type TeamFx = { own: number; conc: number; q: number; qa: number; shooter
 export const NEUTRAL_FX: TeamFx = { own: 0, conc: 0, q: 0, qa: 0, shooter: {} };
 const cap = (v: number, lim: number) => Math.max(-lim, Math.min(lim, v));
 
-export type RoleChoice = { slot: Position; role: string; focus: Focus; fit: Fit };
+export type RoleChoice = { slot: Position; role: string; focus: Focus; fit: Fit; lv?: Lv };
 export function teamFx(choices: RoleChoice[]): TeamFx {
   const out: TeamFx = { own: 0, conc: 0, q: 0, qa: 0, shooter: {} };
   choices.forEach((c) => {
@@ -146,7 +147,7 @@ export function teamFx(choices: RoleChoice[]): TeamFx {
 const FIT_CODE: Record<Fit, string> = { ideal: 'i', compativel: 'c', alternativa: 'a' };
 const FIT_FROM: Record<string, Fit> = { i: 'ideal', c: 'compativel', a: 'alternativa' };
 export function encodeRoles(choices: RoleChoice[]): string {
-  return choices.map((c) => `${c.slot}.${c.role}.${c.focus}.${FIT_CODE[c.fit]}`).join(',');
+  return choices.map((c) => `${c.slot}.${c.role}.${c.focus}.${FIT_CODE[c.fit]}${c.lv ? `.${c.lv}` : ''}`).join(',');
 }
 const SLOTS: Position[] = ['GK', 'LB', 'RB', 'CM', 'LF', 'RF', 'CF'];
 export function decodeRoles(raw: string | undefined | null): RoleChoice[] {
@@ -154,11 +155,11 @@ export function decodeRoles(raw: string | undefined | null): RoleChoice[] {
   const seen = new Set<string>();
   const out: RoleChoice[] = [];
   raw.split(',').forEach((part) => {
-    const [slot, role, focus, fit] = part.split('.');
+    const [slot, role, focus, fit, lvRaw] = part.split('.');
     const r = roleById(role);
     if (!SLOTS.includes(slot as Position) || !r || r.sector !== SECTOR_OF[slot as Position] || seen.has(slot)) return;
     seen.add(slot);
-    out.push({ slot: slot as Position, role, focus: validFocus(role, focus) ?? defaultFocus(role), fit: FIT_FROM[fit] ?? 'compativel' });
+    out.push({ slot: slot as Position, role, focus: validFocus(role, focus) ?? defaultFocus(role), fit: FIT_FROM[fit] ?? 'compativel', lv: lvRaw === '2' ? 2 : lvRaw === '1' ? 1 : 0 });
   });
   return out;
 }
@@ -170,6 +171,30 @@ export const choiceOf = (slot: Position, player: Player | undefined, saved = loa
 export const teamChoices = (squad: Partial<Record<Position, Player>>, saved = loadRoles()): RoleChoice[] =>
   choicesOf(squad, (slot, player) => choiceOf(slot, player, saved));
 
+// Nível da função cadastrado pelo administrador para este jogador (0 = Normal, 1 = +, 2 = ++); sem cadastro, Normal
+export const levelOf = (player: Player | undefined, roleId: string): Lv => {
+  const lv = (player as { role_mastery?: Record<string, { lv?: number }> | null } | undefined)?.role_mastery?.[roleId]?.lv;
+  return lv === 2 ? 2 : lv === 1 ? 1 : 0;
+};
+// Funções e níveis por vaga, no formato que a partida usa
+export const levelsOf = (choices: { slot: Position; role: string; lv?: Lv }[]): Partial<Record<Position, { role: string; lv: Lv }>> => {
+  const out: Partial<Record<Position, { role: string; lv: Lv }>> = {};
+  choices.forEach((c) => { out[c.slot] = { role: c.role, lv: c.lv ?? 0 }; });
+  return out;
+};
+// Adversário do modo solo: cada jogador joga na função em que o administrador cadastrou o maior nível (só vale dentro do setor da vaga)
+export function botLevels(squad: Partial<Record<Position, Player>>): Partial<Record<Position, { role: string; lv: Lv }>> {
+  const out: Partial<Record<Position, { role: string; lv: Lv }>> = {};
+  SLOTS.forEach((slot) => {
+    const player = squad[slot];
+    if (!player) return;
+    const top = masteryList(player).filter((m) => m.role.sector === SECTOR_OF[slot])[0];
+    const role = top?.role ?? defaultRole(slot);
+    out[slot] = { role: role.id, lv: levelOf(player, role.id) };
+  });
+  return out;
+}
+
 // Lê a função e o foco salvos de cada vaga (ver playerRoles.roleOf / focusOf) e monta as escolhas do time
 export function choicesOf(squad: Partial<Record<Position, Player>>, pick: (slot: Position, player: Player) => { role: Role; focus: Focus }): RoleChoice[] {
   const out: RoleChoice[] = [];
@@ -177,7 +202,7 @@ export function choicesOf(squad: Partial<Record<Position, Player>>, pick: (slot:
     const player = squad[slot];
     if (!player) return;
     const { role, focus } = pick(slot, player);
-    out.push({ slot, role: role.id, focus, fit: roleFit(player, slot, role) });
+    out.push({ slot, role: role.id, focus, fit: roleFit(player, slot, role), lv: levelOf(player, role.id) });
   });
   return out;
 }

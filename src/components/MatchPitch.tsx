@@ -10,7 +10,8 @@ import { animOn, animSpeed, countUse, forcedAnim } from '@/lib/game/animLibrary'
 import { chooseCorner, cornerRead, momAdd, momValue, newCornerMem, newMomentum, type CornerKind, type CornerMem, type Momentum, ballAt, blockChance, counterRead, deflect, heatAdd, heatShift, logDecision, newHeat, pickWinner, secondBallRuns, urgency, type LaneHeat } from '@/lib/game/emergent';
 import { chooseContact, chooseTackle, CONTACT_ID, laneCut, segPoint, type ContactPlan } from '@/lib/game/contact';
 import { chooseDribble, dribbleBody, dribbleGeometry, moveFit, recordDribble, DRIBBLE_CAPTION, type DribbleCtx, type DribbleMove } from '@/lib/game/dribbles';
-import { ambientChoice, choosePlay, createIntel, passBias, passTaste, recordPass, recordPlay, type Intel, type PlayKind, type Style } from '@/lib/game/playIntel';
+import { anticip, dribbleMod, errMul, gkHold, passAdj, roleMove, sweepChance, tackleMod, type Lv, type RC } from '@/lib/game/roleLevels';
+import { ambientChoice, choosePlay, createIntel, passBias, passTaste, personalityOf, recordPass, recordPlay, type Intel, type PlayKind, type Style } from '@/lib/game/playIntel';
 import { ReplayPlayer, type ClipData } from '@/components/game/ReplayPlayer';
 
 type Side = 'user' | 'bot';
@@ -38,6 +39,8 @@ type Props = {
   shapes?: { user?: Partial<Record<Pos, { dDepth: number; dLat: number; follow: number }>>; bot?: Partial<Record<Pos, { dDepth: number; dLat: number; follow: number }>> };
   // Função e foco de cada vaga (decide o estilo das jogadas: ver lib/game/playIntel)
   styles?: { user?: Partial<Record<Pos, { role: string; focus: string }>>; bot?: Partial<Record<Pos, { role: string; focus: string }>> };
+  // Nível da função de cada vaga: 0 Normal, 1 (+), 2 (++). Muda o comportamento (ver lib/game/roleLevels)
+  levels?: { user?: Partial<Record<Pos, { role: string; lv: Lv }>>; bot?: Partial<Record<Pos, { role: string; lv: Lv }>> };
   // 0 a 1: encharcamento do gramado na chuva (cresce com o tempo molhado): poças maiores e mais, marcas de escorregão mais fortes e duradouras
   wet?: number;
   // 0 a 1: quanto as listras do corte do gramado já se apagaram (cresce com o desgaste do jogo)
@@ -503,7 +506,7 @@ export type LiveSnap = {
   fx: { def: number; hold: number; stretch: number; hrot: number; hsc: number } | null;
 };
 
-export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = 'user', ambience, crowd, onClip, mapRef, club, opponent, userTeam, botTeam, events, onGoal, restartKey, workRef, endHalfRef, deadBallRef, hold = false, hideOverlays = false, onCaption, order = null, shapes, styles }: Props) {
+export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = 'user', ambience, crowd, onClip, mapRef, club, opponent, userTeam, botTeam, events, onGoal, restartKey, workRef, endHalfRef, deadBallRef, hold = false, hideOverlays = false, onCaption, order = null, shapes, styles, levels }: Props) {
   const holdRef = useRef(false);
   holdRef.current = hold;
   const orderRef = useRef<Props['order']>(null);
@@ -511,6 +514,11 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
   shapesRef.current = shapes;
   const stylesRef = useRef<Props['styles']>(undefined);
   stylesRef.current = styles;
+  const levelsRef = useRef<Props['levels']>(undefined);
+  levelsRef.current = levels;
+  const rolePers = useRef<Record<string, ReturnType<typeof personalityOf>>>({});
+  const roleSeed = useRef<Record<string, number>>({});
+  const roleLog = useRef<Record<string, number>>({});
   // Memória de jogadas e leitura do adversário: dura a partida inteira
   const intelRef = useRef<Intel>(createIntel());
   orderRef.current = order;
@@ -846,7 +854,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     const move = forcedMove ?? testMove ?? chooseDribble(intelRef.current, ctx, Math.random, (m) => animOn(`dri.${m}`));
     countUse(`dri.${move}`);
     const pace = animSpeed(`dri.${move}`);
-    const chance = clamp(0.58 + (h.ovr - opp.ovr) / 80 + moveFit(move, ctx) - fatigueOf(h.key) * 0.1 + fatigueOf(opp.key) * 0.06, 0.3, 0.88);
+    const chance = clamp(0.58 + (h.ovr - opp.ovr) / 80 + moveFit(move, ctx) - fatigueOf(h.key) * 0.1 + fatigueOf(opp.key) * 0.06 + (lvOf(h) && animOn('rol.niveis') ? dribbleMod(lvOf(h)!.role, lvOf(h)!.lv) : 0), 0.3, 0.88);
     const win = forceWin || Math.random() < chance;
     recordDribble(intelRef.current, h.side, move, win);
     const plan = dribbleGeometry(move, h, opp, sg, d);
@@ -901,6 +909,30 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     Object.assign(rg, { on: true, born: tnow(), x, y, r0: flash ? 10 : 13, r1, dur, color, flash });
   }
 
+  // Função e nível (Normal, + ou ++) de um disco
+  function lvOf(slot: { side: Side; pos: string }): { role: string; lv: Lv } | undefined {
+    return levelsRef.current?.[slot.side]?.[slot.pos as Pos];
+  }
+  // Registro leve do que o nível fez (contador por comportamento + decisão no registro, no máximo a cada 6 s por jogador)
+  function noteRole(s: Slot, role: string, lv: Lv, tag: string, now: number) {
+    const k = `${s.key}.${tag}`;
+    if (now - (roleLog.current[k] ?? -1e9) < 6000) return;
+    roleLog.current[k] = now;
+    countUse(`rol.${role}.${tag}`);
+    logDecision(`${s.name} (${lv === 2 ? '++' : '+'})`, `função ${role}: ${tag.replace(/-/g, ' ')}`, `nível ${lv === 2 ? '++' : '+'}`);
+  }
+  // Bônus de escolha de passe pela função e nível de quem passa (vertical, seguro, curto)
+  function rolePass(h: Slot, fwd: number, cand: Slot): number {
+    const rl = lvOf(h);
+    if (!rl || rl.lv === 0 || !animOn('rol.niveis')) return 0;
+    const a = passAdj(rl.role, rl.lv);
+    const vert = a.vert * clamp(fwd, 0, 1.5);
+    const safe = a.safe * clamp(-fwd + 0.3, 0, 1.2);
+    const short = a.short * (dist(h, cand) < 120 ? 1 : 0);
+    const v = vert + safe + short;
+    if (v > 0.12 && Math.random() < 0.15) noteRole(h, rl.role, rl.lv, vert > safe && vert > short ? 'passe-vertical' : short > safe ? 'passe-curto' : 'passe-seguro', tnow());
+    return v;
+  }
   // Fadiga (0 a 1) de um jogador: vem do fôlego calculado no App (slow vai de 0 a 0,2). Cansado erra mais, reage mais devagar e perde disputas.
   function fatigueOf(key: string): number {
     if (!animOn('ia.fadiga')) return 0;
@@ -996,6 +1028,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         canShoot: FORWARDS.includes(rc.pos) && toGoal < 240 && near.d > 26,
         mateAhead: mates.some((x) => (x.x - rc.x) * d > 40 && nearestOpp(all, rc.side, x).d > 55),
         tired: fatigueOf(rc.key),
+        cons: lvOf(rc) && animOn('rol.niveis') ? errMul(lvOf(rc)!.role, lvOf(rc)!.lv) : 1,
       },
       Math.random,
       (k) => animOn(CONTACT_ID[k]),
@@ -1098,7 +1131,8 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         const nearH = nearestOpp(all, holder.side, holder);
         const dd = dist(holder, lead);
         const f = fatigueOf(holder.key);
-        const pr = clamp(0.012 + clamp((70 - nearH.d) / 70, 0, 1) * 0.09 + (dd > 230 ? 0.04 : 0) + (step.dur < 420 ? 0.03 : 0) + (76 - holder.ovr) * 0.0025 + f * 0.08, 0.01, 0.28);
+        const hl = lvOf(holder);
+        const pr = clamp((0.012 + clamp((70 - nearH.d) / 70, 0, 1) * 0.09 + (dd > 230 ? 0.04 : 0) + (step.dur < 420 ? 0.03 : 0) + (76 - holder.ovr) * 0.0025 + f * 0.08) * (hl && animOn('rol.niveis') ? errMul(hl.role, hl.lv) : 1), 0.008, 0.28);
         if (Math.random() < pr) {
           const ang0 = Math.atan2(lead.y - holder.y, lead.x - holder.x);
           const off = Math.tan((Math.random() < 0.5 ? -1 : 1) * rand(0.12, 0.42)) * dd;
@@ -1123,13 +1157,42 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
       // Passes de rotina podem ser interceptados por quem fecha a linha de passe (perto do trajeto, não só do destino)
       if (dest && step.ambient && !step.scripted && holder) {
         let best: { slot: Slot; p: number; x: number; y: number; t: number } | null = null;
+        const rep = Math.min(2.2, -passBias(intelRef.current, holder.key, recv.key) / 0.45);
         for (const o of all) {
-          if (o.side === recv.side || o.pos === 'GK') continue;
+          if (o.side === recv.side) continue;
+          const ol = animOn('rol.niveis') ? lvOf(o) : undefined;
           const sg = segPoint(o.x, o.y, holder.x, holder.y, lead.x, lead.y);
-          const p = laneCut(sg.d, sg.t, step.dur, o.ovr);
+          let p: number;
+          if (o.pos === 'GK') {
+            // Goleiro líbero: sai da área para cortar bola nas costas da defesa
+            if (!ol || ol.role !== 'gk-libero' || ol.lv === 0) continue;
+            const gx = dirOf(o.side) > 0 ? FX0 : FX1;
+            if (Math.abs(lead.x - gx) > 175 || sg.d > 70) continue;
+            p = sweepChance(ol.lv) * (1 - sg.d / 80) * (1 - 0.35 * fatigueOf(o.key));
+          } else {
+            p = laneCut(sg.d, sg.t, step.dur, o.ovr);
+            if (p > 0 && ol && ol.lv > 0) {
+              const an = anticip(ol.role, ol.lv);
+              p = Math.min(0.6, p * an.cut + an.read * rep);
+            }
+          }
           if (p > 0 && (!best || p > best.p)) best = { slot: o, p, x: sg.x, y: sg.y, t: sg.t };
         }
-        if (best && Math.random() < best.p) {
+        const hit = !!best && Math.random() < best.p;
+        if (best && hit) {
+          const bl = lvOf(best.slot);
+          if (best.slot.pos === 'GK') noteRole(best.slot, 'gk-libero', bl?.lv ?? 1, 'sai-da-area-e-corta', now);
+          else if (bl && bl.lv > 0) noteRole(best.slot, bl.role, bl.lv, anticip(bl.role, bl.lv).read > 0 && rep > 0.6 ? 'le-o-padrao-de-passe' : 'antecipa-o-passe', now);
+        } else if (best && best.slot.pos !== 'GK') {
+          // Antecipou e não alcançou: o ++ já deixa a cobertura montada atrás do receptor
+          const fl = lvOf(best.slot);
+          if (fl && fl.lv > 0 && anticip(fl.role, fl.lv).cover) {
+            const dd2 = dirOf(best.slot.side);
+            st.overrides[best.slot.key] = { x: clamp(recv.x - dd2 * 46, FX0 + 12, FX1 - 12), y: recv.y, until: now + 900, speed: 1.45 };
+            noteRole(best.slot, fl.role, fl.lv, 'cobertura-apos-antecipar', now);
+          }
+        }
+        if (best && hit) {
           dest = best.slot.key;
           lead = { x: best.x, y: best.y };
           step = { ...step, dur: Math.max(200, step.dur * best.t), arc: 0 };
@@ -2184,6 +2247,8 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
               Math.random,
               (k) => animOn(`def.${k}`),
             );
+            const tl = lvOf(dfn);
+            if (tl && animOn('rol.niveis')) tk.winMod += tackleMod(tl.role, tl.lv);
             countUse(`def.${tk.kind}`);
             // Quem tem overall maior leva vantagem; carrinho bem encaixado e cobertura ajudam, proteção da posse atrapalha
             const base = clamp(0.5 + (dfn.ovr - h.ovr) / 90, 0.25, 0.75);
@@ -2426,7 +2491,9 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
             const O = otherSide(h.side);
             const gk = get(`${O}-GK`);
             // Livre: quase sempre manda no gol. Pressionado: erra a maioria. Overall alto ajuda um pouco.
-            const onTarget = clamp(lerp(0.9, 0.22, pressure) + (h.ovr - 75) * 0.004, 0.12, 0.96);
+            const gkl = gk ? lvOf(gk) : undefined;
+            const gkh = gkl && animOn('rol.niveis') ? gkHold(gkl.role, gkl.lv) : { rebound: 1, onTarget: 0 };
+            const onTarget = clamp(lerp(0.9, 0.22, pressure) + (h.ovr - 75) * 0.004 + gkh.onTarget, 0.12, 0.96);
             // Bloqueio: defensor perto da linha do chute (e não colado no chutador) pode travar a bola; ela sobra solta
             let blk: { o: Slot; x: number; y: number; t: number; p: number } | null = null;
             for (const o of all) {
@@ -2463,7 +2530,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
                 caption: `${h.name} chuta e ${gk.name} defende`,
                 // Defesa com rebote: chute forte contra goleiro de overall menor devolve a bola para a entrada da área
                 after: () => {
-                  if (Math.random() < clamp(0.22 + (h.ovr - gk.ovr) / 160, 0.08, 0.4)) {
+                  if (Math.random() < clamp(0.22 + (h.ovr - gk.ovr) / 160, 0.08, 0.4) * gkh.rebound) {
                     const a = Math.atan2(0, -d) + (Math.random() < 0.5 ? -1 : 1) * rand(0.35, 1.0);
                     const v = rand(210, 320);
                     launchSB(gk.x - d * 14, gk.y, Math.cos(a) * v, Math.sin(a) * v, h.side, `${gk.name} defende, mas a bola sobra`);
@@ -2544,7 +2611,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
               st.queue.push({ kind: 'pass', to: { slot: cf.key }, dur: 640, ambient: true, arc: 12, caption: `${h.name} cruza para ${cf.name}` });
             } else {
               const hStyle = stylesRef.current?.[h.side]?.[h.pos] as Style | undefined;
-              const r = choosePass(h, all, (cand, fwd) => passBias(intelRef.current, h.key, cand.key) + passTaste({ name: h.name, ovr: h.ovr, style: hStyle }, fwd) + uu * clamp(fwd, -1.5, 1.5) * 0.35);
+              const r = choosePass(h, all, (cand, fwd) => passBias(intelRef.current, h.key, cand.key) + passTaste({ name: h.name, ovr: h.ovr, style: hStyle }, fwd) + uu * clamp(fwd, -1.5, 1.5) * 0.35 + rolePass(h, fwd, cand));
               if (r) recordPass(intelRef.current, h.key, r.key);
               if (r) {
                 const dd = dist(h, r);
@@ -2631,6 +2698,54 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         logDecision(otherSide(possSide) === 'user' ? club.abbreviation : opponent.abbreviation, 'adaptação', `adversário insiste pelo ${adaptShift < 0 ? 'lado de cima' : adaptShift > 0 ? 'lado de baixo' : 'centro'}: marcação desloca (${adaptShift.toFixed(2)})`);
       }
       const urgSide: Record<Side, number> = { user: urgOf('user', now), bot: urgOf('bot', now) };
+      // Níveis de função (+ e ++): leitura de espaço, antecipação, cobertura... (lib/game/roleLevels). Normal não muda nada.
+      const roleHolder = holderSlot ?? null;
+      const roleFrame = {
+        pressure: roleHolder ? clamp((95 - nearestOpp(all, roleHolder.side, roleHolder).d) / 60, 0, 1) : 0,
+        controlling: !!(roleHolder && ctlRef.current[roleHolder.key] && tnow() - ctlRef.current[roleHolder.key].t0 < ctlRef.current[roleHolder.key].plan.settle),
+      };
+      const roleFor = (s: Slot): { mv: ReturnType<typeof roleMove>; role: string; lv: Lv } | null => {
+        const rl = lvOf(s);
+        if (!rl || rl.lv === 0 || !animOn('rol.niveis')) return null;
+        const d = dirOf(s.side);
+        const pers = (rolePers.current[s.name] = rolePers.current[s.name] ?? personalityOf(s.name, s.ovr));
+        if (roleSeed.current[s.key] === undefined) {
+          let hsh = 7;
+          for (let k = 0; k < s.key.length; k += 1) hsh = (hsh * 31 + s.key.charCodeAt(k)) % 9973;
+          roleSeed.current[s.key] = hsh / 9973;
+        }
+        const own = possSide === s.side;
+        const rc: RC = {
+          self: s,
+          d: d > 0 ? 1 : -1,
+          own,
+          ball: { x: st.ballX, y: st.ballY },
+          holder: roleHolder ?? undefined,
+          holderPressure: roleFrame.pressure,
+          holderControlling: roleFrame.controlling,
+          mates: all.filter((x) => x.side === s.side && x.key !== s.key && x.pos !== 'GK'),
+          opps: all.filter((x) => x.side !== s.side && x.pos !== 'GK'),
+          markOpp: get(`${otherSide(s.side)}-${MARK[s.pos]}`),
+          coverMate: !!roleHolder && all.some((x) => x.side === s.side && x.key !== s.key && x.pos !== 'GK' && dist(x, roleHolder) < 130),
+          prog: clamp(d > 0 ? (st.ballX - FX0) / (FX1 - FX0) : (FX1 - st.ballX) / (FX1 - FX0), 0, 1),
+          u: urgSide[s.side],
+          mom: animOn('ia.momento') ? momValue(momRef.current, s.side, now) : 0,
+          t: now / 1000,
+          seed: roleSeed.current[s.key],
+          ous: pers.ousadia,
+          cri: pers.criatividade,
+          col: pers.coletivo,
+          tired: fatigueOf(s.key),
+          midY: MID_Y,
+          ownGX: d > 0 ? FX0 : FX1,
+          oppGX: d > 0 ? FX1 : FX0,
+          y0: FY0,
+          y1: FY1,
+          x0: FX0,
+          x1: FX1,
+        };
+        return { mv: roleMove(rl.role, rl.lv, rc), role: rl.role, lv: rl.lv };
+      };
       // Decide para onde cada jogador quer ir e se move com velocidade e aceleração
       all.forEach((s, i) => {
         const d = dirOf(s.side);
@@ -2684,6 +2799,13 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           tx = goalLineX + d * off;
           ty = MID_Y + clamp((st.ballY - MID_Y) * 0.38, -46, 46);
           speedMul = 0.9;
+          const rr = roleFor(s);
+          if (rr?.mv) {
+            tx = lerp(tx, rr.mv.x, rr.mv.w);
+            ty = lerp(ty, rr.mv.y, rr.mv.w);
+            if (rr.mv.speed) speedMul = Math.max(speedMul, rr.mv.speed);
+            noteRole(s, rr.role, rr.lv, rr.mv.tag, now);
+          }
         } else if (st.holder === s.key) {
           tx = s.x + d * 14;
           speedMul = 0.5;
@@ -2754,6 +2876,13 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
               tx = lerp(tx, ownGX + d * 92, 0.4);
               ty = lerp(ty, MID_Y + (st.ballY - MID_Y) * 0.4, 0.4);
             }
+          }
+          const rr = roleFor(s);
+          if (rr?.mv) {
+            tx = lerp(tx, rr.mv.x, rr.mv.w);
+            ty = lerp(ty, rr.mv.y, rr.mv.w);
+            if (rr.mv.speed) speedMul = Math.max(speedMul, rr.mv.speed);
+            noteRole(s, rr.role, rr.lv, rr.mv.tag, now);
           }
         }
 
