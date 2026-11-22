@@ -1700,7 +1700,7 @@ function PlayerForm({
                     <div key={x.id} className={`ps-row ${entry ? '' : 'off'}`}>
                       <label className="rm-name">
                         <input type="checkbox" checked={!!entry} onChange={(event) => togglePs(x.id, event.target.checked)} />
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><PsIcon id={x.id} tier={tier} size={28} /> {x.name}</span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><PsIcon id={x.id} tier={tier} size={26} /> {x.name}</span>
                       </label>
                       <div className="ps-seg ps-lv" role="radiogroup" aria-label={`Nível de ${x.name}`}>
                         {[0, 1, 2].map((lv) => (

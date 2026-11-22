@@ -1,7 +1,8 @@
 // Apresentação dos PlayStyles na carta: ouro ao lado da carta (sempre visível) e prata no verso (vira ao tocar).
 import { useState } from 'react';
-import { PS_BY_ID, PS_LV_LABEL, cleanStyles, type PsDef, type PsTier } from '@/lib/game/playStyles';
+import { PS_BY_ID, cleanStyles, type PsDef, type PsTier } from '@/lib/game/playStyles';
 import type { Player } from '@/lib/game/types';
+import { PsEmblem } from '@/components/game/PlayStyleEmblem';
 
 export type CardStyle = { def: PsDef; lv: 0 | 1 | 2; tier: PsTier };
 export function stylesOfPlayer(p: Player): { gold: CardStyle[]; silver: CardStyle[] } {
@@ -15,12 +16,10 @@ export function stylesOfPlayer(p: Player): { gold: CardStyle[]; silver: CardStyl
   }
   return { gold, silver };
 }
-// Ícones oficiais do 7v7 (public/playstyles): um losango dourado e um prateado por estilo
-export const psIconUrl = (id: string, tier: PsTier): string => `${import.meta.env.BASE_URL}playstyles/${id}-${tier}.png`;
+// Emblema (mesmo padrão para todos os estilos): ouro ao lado da carta, prata no verso
 export function PsIcon({ id, tier, size = 24 }: { id: string; tier: PsTier; size?: number }) {
-  return <img className="ps-ico" src={psIconUrl(id, tier)} width={size} height={size} alt="" draggable={false} />;
+  return <PsEmblem id={id} tier={tier} size={size} />;
 }
-const lvTag = (lv: number) => (lv === 0 ? '' : PS_LV_LABEL[lv]);
 
 // Faixa dourada: coluna de medalhões ao lado da carta
 export function GoldRail({ list }: { list: CardStyle[] }) {
@@ -33,7 +32,7 @@ export function GoldRail({ list }: { list: CardStyle[] }) {
           key={s.def.id}
           type="button"
           className={`ps-gold lv${s.lv}`}
-          aria-label={`${s.def.name} ${lvTag(s.lv)}`}
+          aria-label={s.def.name}
           aria-expanded={open === s.def.id}
           onPointerEnter={(e) => e.pointerType === 'mouse' && setOpen(s.def.id)}
           onClick={(e) => {
@@ -41,13 +40,12 @@ export function GoldRail({ list }: { list: CardStyle[] }) {
             setOpen(open === s.def.id ? null : s.def.id);
           }}
         >
-          <PsIcon id={s.def.id} tier="gold" size={42} />
-          {s.lv > 0 && <b>{lvTag(s.lv)}</b>}
+          <PsIcon id={s.def.id} tier="gold" size={34} />
         </button>
       ))}
       {cur && (
         <div className="ps-pop" role="tooltip">
-          <strong>{cur.def.name} <em>{PS_LV_LABEL[cur.lv]}</em></strong>
+          <strong>{cur.def.name}</strong>
           <span>{cur.def.lv[cur.lv]}</span>
         </div>
       )}
@@ -73,9 +71,8 @@ export function SilverBack({ list, name, onFlip }: { list: CardStyle[]; name: st
                 setOpen(open === s.def.id ? null : s.def.id);
               }}
             >
-              <i aria-hidden="true"><PsIcon id={s.def.id} tier="silver" size={26} /></i>
+              <i aria-hidden="true"><PsIcon id={s.def.id} tier="silver" size={21} /></i>
               <span>{s.def.name}</span>
-              {s.lv > 0 && <b>{lvTag(s.lv)}</b>}
             </button>
             {open === s.def.id && <small>{s.def.lv[s.lv]}</small>}
           </li>
@@ -105,8 +102,9 @@ export const playStyleCss = `
 .ps-back-title { font-size: 11px; letter-spacing: .22em; font-weight: 800; text-align: center; opacity: .75; }
 .ps-back-name { text-align: center; font-weight: 800; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-bottom: 1px solid rgba(27,33,40,.25); padding-bottom: 3px; }
 .ps-back ul { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; overflow: auto; min-height: 0; }
-.ps-back li button { display: grid; grid-template-columns: 26px 1fr auto; align-items: center; gap: 4px; width: 100%; background: rgba(255,255,255,.45); border: 1px solid rgba(27,33,40,.18); border-radius: 7px; padding: 3px 4px; color: inherit; font: inherit; font-size: 10.5px; font-weight: 700; text-align: left; cursor: pointer; }
+.ps-back li button { display: grid; grid-template-columns: 26px 1fr; align-items: center; gap: 4px; width: 100%; background: rgba(255,255,255,.45); border: 1px solid rgba(27,33,40,.18); border-radius: 7px; padding: 3px 4px; color: inherit; font: inherit; font-size: 10.5px; font-weight: 700; text-align: left; cursor: pointer; }
 .ps-back li button i { font-style: normal; display: grid; place-items: center; height: 24px; }
+.ps-emb { display: block; overflow: visible; }
 .ps-ico { display: block; pointer-events: none; user-select: none; }
 .ps-back li button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ps-back li button b { font-size: 9px; background: #1b2128; color: #e6e9ee; border-radius: 6px; padding: 0 5px; }
@@ -114,12 +112,8 @@ export const playStyleCss = `
 .ps-back p { text-align: center; font-size: 11px; opacity: .7; margin: 8px 0; }
 .ps-back-hint { margin-top: auto; text-align: center; font-size: 9px; opacity: .55; letter-spacing: .08em; }
 /* Ouro: medalhões ao lado da carta */
-.ps-rail { position: absolute; top: 12%; left: calc(100% - 20px); z-index: 8; display: flex; flex-direction: column; gap: 4px; }
-.ps-gold { position: relative; width: 42px; height: 42px; display: grid; place-items: center; padding: 0; cursor: pointer; background: none; border: 0; filter: drop-shadow(0 0 7px rgba(255,200,60,.8)) drop-shadow(0 3px 4px rgba(0,0,0,.55)); animation: psGlow 2.8s ease-in-out infinite; }
-.ps-gold b { position: absolute; right: -4px; bottom: 0; font-size: 9px; background: #3a2800; color: #ffe38a; border-radius: 6px; padding: 0 4px; border: 1px solid #ffd84d; }
-.ps-gold.lv2 { filter: drop-shadow(0 0 11px rgba(255,214,80,1)) drop-shadow(0 3px 4px rgba(0,0,0,.55)); }
-@keyframes psGlow { 50% { filter: brightness(1.18); } }
+.ps-rail { position: absolute; top: 12%; left: calc(100% - 4px); z-index: 8; display: flex; flex-direction: column; gap: 5px; }
+.ps-gold { position: relative; width: 36px; height: 36px; display: grid; place-items: center; padding: 0; cursor: pointer; background: none; border: 0; }
 .ps-pop { position: absolute; right: calc(100% - 4px); top: 0; width: 170px; background: rgba(20,16,6,.96); color: #fff3c4; border: 1px solid #ffd84d; border-radius: 9px; padding: 7px 9px; font-size: 11px; line-height: 1.3; display: flex; flex-direction: column; gap: 3px; box-shadow: 0 6px 16px rgba(0,0,0,.5); z-index: 9; }
-.ps-pop em { font-style: normal; color: #ffd84d; }
-@media (prefers-reduced-motion: reduce) { .ps-flipper { transition: none; } .ps-gold { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .ps-flipper { transition: none; } }
 `;
