@@ -63,12 +63,12 @@ const PAL = {
 const GEM = 'M24 5 H76 L96 28 V50 L50 96 L4 50 V28 Z';
 const GEM_IN = 'M26.5 10.5 H73.5 L90.5 29.5 V48.5 L50 89.5 L9.5 48.5 V29.5 Z';
 
-export function PsEmblem({ id, tier, size = 34 }: { id: string; tier: PsTier; size?: number }) {
+export function PsEmblem({ id, tier, size = 34, fluid = false }: { id: string; tier: PsTier; size?: number; fluid?: boolean }) {
   const uid = useId().replace(/:/g, '');
   const p = PAL[tier];
   const g = GLYPH[id] ?? '';
   return (
-    <svg className={`ps-emb ${tier}`} width={size} height={size} viewBox="0 0 100 100" role="img" aria-hidden="true" focusable="false" style={{ filter: `drop-shadow(0 0 ${size * 0.12}px ${p.glow}) drop-shadow(0 ${size * 0.05}px ${size * 0.07}px rgba(0,0,0,.45))` }}>
+    <svg className={`ps-emb ${tier}`} width={fluid ? '100%' : size} height={fluid ? undefined : size} viewBox="0 0 100 100" role="img" aria-hidden="true" focusable="false" style={{ ...(fluid ? { width: '100%', height: 'auto' } : {}), filter: `drop-shadow(0 0 ${size * 0.12}px ${p.glow}) drop-shadow(0 ${size * 0.05}px ${size * 0.07}px rgba(0,0,0,.45))` }}>
       <defs>
         <linearGradient id={`f${uid}`} x1="0.15" y1="0" x2="0.85" y2="1">
           <stop offset="0" stopColor={p.a} />

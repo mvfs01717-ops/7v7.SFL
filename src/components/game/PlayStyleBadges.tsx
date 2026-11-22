@@ -17,8 +17,8 @@ export function stylesOfPlayer(p: Player): { gold: CardStyle[]; silver: CardStyl
   return { gold, silver };
 }
 // Emblema (mesmo padrão para todos os estilos): ouro ao lado da carta, prata no verso
-export function PsIcon({ id, tier, size = 24 }: { id: string; tier: PsTier; size?: number }) {
-  return <PsEmblem id={id} tier={tier} size={size} />;
+export function PsIcon({ id, tier, size = 24, fluid = false }: { id: string; tier: PsTier; size?: number; fluid?: boolean }) {
+  return <PsEmblem id={id} tier={tier} size={size} fluid={fluid} />;
 }
 
 // Faixa dourada: coluna de medalhões ao lado da carta
@@ -40,7 +40,7 @@ export function GoldRail({ list }: { list: CardStyle[] }) {
             setOpen(open === s.def.id ? null : s.def.id);
           }}
         >
-          <PsIcon id={s.def.id} tier="gold" size={34} />
+          <PsIcon id={s.def.id} tier="gold" size={26} fluid />
         </button>
       ))}
       {cur && (
@@ -112,8 +112,9 @@ export const playStyleCss = `
 .ps-back p { text-align: center; font-size: 11px; opacity: .7; margin: 8px 0; }
 .ps-back-hint { margin-top: auto; text-align: center; font-size: 9px; opacity: .55; letter-spacing: .08em; }
 /* Ouro: medalhões ao lado da carta */
-.ps-rail { position: absolute; top: 12%; left: calc(100% - 4px); z-index: 8; display: flex; flex-direction: column; gap: 5px; }
-.ps-gold { position: relative; width: 36px; height: 36px; display: grid; place-items: center; padding: 0; cursor: pointer; background: none; border: 0; }
-.ps-pop { position: absolute; right: calc(100% - 4px); top: 0; width: 170px; background: rgba(20,16,6,.96); color: #fff3c4; border: 1px solid #ffd84d; border-radius: 9px; padding: 7px 9px; font-size: 11px; line-height: 1.3; display: flex; flex-direction: column; gap: 3px; box-shadow: 0 6px 16px rgba(0,0,0,.5); z-index: 9; }
+.ps-rail { position: absolute; top: 50%; left: 0; width: 15%; transform: translate(-32%, -50%); z-index: 8; display: flex; flex-direction: column; align-items: stretch; }
+.ps-rail .ps-gold + .ps-gold { margin-top: 12%; }
+.ps-gold { position: relative; width: 100%; padding: 0; cursor: pointer; background: none; border: 0; display: block; line-height: 0; }
+.ps-pop { position: absolute; left: calc(100% + 4px); top: 0; width: 170px; background: rgba(20,16,6,.96); color: #fff3c4; border: 1px solid #ffd84d; border-radius: 9px; padding: 7px 9px; font-size: 11px; line-height: 1.3; display: flex; flex-direction: column; gap: 3px; box-shadow: 0 6px 16px rgba(0,0,0,.5); z-index: 9; }
 @media (prefers-reduced-motion: reduce) { .ps-flipper { transition: none; } }
 `;
