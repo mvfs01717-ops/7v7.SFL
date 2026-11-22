@@ -111,10 +111,12 @@ export function MatchScreen({
   shapes,
   styles,
   levels,
+  playstyles,
 }: {
   shapes?: ComponentProps<typeof MatchPitch>['shapes'];
   styles?: ComponentProps<typeof MatchPitch>['styles'];
   levels?: ComponentProps<typeof MatchPitch>['levels'];
+  playstyles?: ComponentProps<typeof MatchPitch>['playstyles'];
   club: Team;
   opponent: Team;
   userTeam: Player[];
@@ -311,6 +313,7 @@ export function MatchScreen({
             shapes={shapes}
             styles={styles}
             levels={levels}
+            playstyles={playstyles}
             events={events}
             onGoal={onGoal}
             restartKey={restartKey}

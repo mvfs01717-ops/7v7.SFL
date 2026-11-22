@@ -1,10 +1,11 @@
 // Biblioteca de animações do 7v7: registro com metadados, ligar/desligar, velocidade e contagem de uso.
 // Só entram aqui animações que JÁ estão conectadas à partida (campo: MatchPitch). Cada item diz onde e quando é executado.
 import { GAITS, type Gait } from '@/lib/game/locomotion';
+import { PLAYSTYLES, PS_GROUP_LABEL } from '@/lib/game/playStyles';
 import { DRIBBLE_MOVES, type DribbleMove } from '@/lib/game/dribbles';
 
-export type AnimCategory = 'locomocao' | 'drible' | 'passe' | 'finalizacao' | 'dominio' | 'defesa' | 'ia';
-export const CATEGORY_LABEL: Record<AnimCategory, string> = { locomocao: 'Movimentação (discos)', drible: 'Dribles', dominio: 'Domínio e primeiro toque', passe: 'Passes', finalizacao: 'Finalizações', defesa: 'Defesa e goleiro', ia: 'Jogabilidade emergente' };
+export type AnimCategory = 'locomocao' | 'drible' | 'passe' | 'finalizacao' | 'dominio' | 'defesa' | 'ia' | 'ps';
+export const CATEGORY_LABEL: Record<AnimCategory, string> = { locomocao: 'Movimentação (discos)', drible: 'Dribles', dominio: 'Domínio e primeiro toque', passe: 'Passes', finalizacao: 'Finalizações', defesa: 'Defesa e goleiro', ia: 'Jogabilidade emergente', ps: 'PlayStyles' };
 
 export type AnimDef = {
   id: string; // identificador único
@@ -96,6 +97,21 @@ export const LIBRARY: AnimDef[] = [
   ...FX_DEF,
   ...GAITS.map((g) => ({ id: `loc.${g}`, category: 'locomocao' as const, ...GAIT_DEF[g] })),
   ...DRIBBLE_MOVES.map((m) => ({ id: `dri.${m}`, category: 'drible' as const, ...DRIBBLE_DEF[m] })),
+  // PlayStyles: sem animação própria. Ligar/desligar aqui vale para o jogo inteiro (todos os jogadores)
+  ...PLAYSTYLES.map((p) => ({
+    id: `ps.${p.id}`,
+    category: 'ps' as const,
+    label: `${p.name} (${PS_GROUP_LABEL[p.group]})`,
+    type: 'inteligência',
+    when: p.text,
+    dur: 0,
+    body: 'Sem animação própria: muda decisões e execução do disco',
+    ball: p.effect,
+    next: [] as string[],
+    interrupt: 'Pressão, cansaço e atributos reduzem o efeito; nunca garante gol',
+    needs: 'PlayStyle cadastrado no jogador (ADM > jogador > PlayStyles)',
+    roles: p.group === 'goleiro' ? 'Goleiro' : 'Posições de campo',
+  })),
 ];
 export const defOf = (id: string): AnimDef | undefined => LIBRARY.find((a) => a.id === id);
 

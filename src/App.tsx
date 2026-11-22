@@ -3,6 +3,7 @@ import AdminScreen from '@/components/AdminScreen';
 import { type Shootout } from '@/components/PenaltyShootout';
 import StadiumBackdrop, { type BackdropCamera } from '@/components/game/StadiumBackdrop';
 import { globalCss } from '@/lib/game/globalCss';
+import { resolveStyles } from '@/lib/game/playStyles';
 import { botLevels, decodeRoles, encodeRoles, levelsOf, shapesOf, stylesOf, teamChoices, teamFx } from '@/lib/roleTactics';
 import { isFreeAgent, HALFTIME_MS, HT_BREAK_MS, HT_RETURN_MS, HT_RETURN_NO_SUBS_MS, LINEUP_REVEAL_MS, MINUTE_MS, PENALTY_PREP_MS, SHOOTOUT_CHANCE, average, forceDrawPlan, getPlayerPositions, pickByRoll, pickShooter, slotOf, type PlanEntry } from '@/lib/game/helpers';
 import { BENCH_SLOTS, emptyStats, positions, slotPositionsOf, type BenchSlot, type DraftSlot, type GoalRecord, type MatchEvent, type MatchStats, type Player, type Position, type Screen, type Team } from '@/lib/game/types';
@@ -2418,6 +2419,10 @@ function App() {
           levels={{
             user: levelsOf(teamChoices(Object.fromEntries(userTeam.map((player) => [slotOf(player), player])) as Partial<Record<Position, Player>>)),
             bot: decodeRoles(theirSquad?._r).length ? levelsOf(decodeRoles(theirSquad?._r)) : botLevels(Object.fromEntries(botTeam.map((player) => [slotOf(player), player])) as Partial<Record<Position, Player>>),
+          }}
+          playstyles={{
+            user: Object.fromEntries(userTeam.map((player) => [slotOf(player), resolveStyles(player.play_styles, slotOf(player) === 'GK')])),
+            bot: Object.fromEntries(botTeam.map((player) => [slotOf(player), resolveStyles(player.play_styles, slotOf(player) === 'GK')])),
           }}
           club={selectedClub}
           opponent={opponentTeam}

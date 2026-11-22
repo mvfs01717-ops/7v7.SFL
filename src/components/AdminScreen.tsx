@@ -1,3 +1,4 @@
+import { MAX_STYLES, PLAYSTYLES, PS_BY_ID, PS_GROUP_LABEL, PS_LV_LABEL, cleanStyles, conflictsOf, type PsGroup, type PsTier } from '@/lib/game/playStyles';
 import { DEFAULT_STYLE, FOCUS_LABEL, MASTERY, ROLE_STYLES, SECTOR_LABEL, cleanMastery, focusOptions, rolesForPositions, type Focus, type Mastery } from '@/lib/playerRoles';
 import { ColorField } from '@/components/game/ColorField';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -28,6 +29,7 @@ type Player = {
   image_url?: string | null;
   team?: Team;
   role_mastery?: Record<string, { lv: number; style?: string; focus?: string }> | null;
+  play_styles?: Record<string, { lv: number; tier?: string }> | null;
 };
 type Notice = { text: string; error: boolean };
 type AuditRow = {
@@ -1404,6 +1406,12 @@ function PlayerForm({
     const masteryBefore = cleanMastery(player.role_mastery, rolesForPositions(player.primary_position, player.alternate_positions));
     if (JSON.stringify(masteryNow) !== JSON.stringify(masteryBefore)) payload.role_mastery = masteryNow;
 
+    // PlayStyles: também só vai para o banco se mudou
+    const isGk = form.primary_position === 'GK';
+    const psNow = cleanStyles(form.play_styles, isGk);
+    const psBefore = cleanStyles(player.play_styles, player.primary_position === 'GK');
+    if (JSON.stringify(psNow) !== JSON.stringify(psBefore)) payload.play_styles = psNow;
+
     setSaving(true);
     const result = isNew
       ? await supabase.from('players').insert(payload)
@@ -1411,7 +1419,9 @@ function PlayerForm({
     setSaving(false);
     if (result.error) {
       setMessage(
-        result.error.message.includes('role_mastery')
+        result.error.message.includes('play_styles')
+          ? 'O banco ainda não tem a coluna dos PlayStyles. Rode a migração 20261122140000_add_player_play_styles.sql no Supabase e salve de novo.'
+          : result.error.message.includes('role_mastery')
           ? 'O banco ainda não tem a coluna das funções. Rode a migração 20261119100000_add_player_role_mastery.sql no Supabase e salve de novo.'
           : `Erro ao salvar: ${result.error.message}`,
       );
@@ -1425,6 +1435,21 @@ function PlayerForm({
     if (on) next[id] = { lv: 0, style: DEFAULT_STYLE[id] };
     else delete next[id];
     setForm({ ...form, role_mastery: next });
+  }
+  function togglePs(id: string, on: boolean) {
+    const next = { ...(form.play_styles ?? {}) };
+    if (on) {
+      if (Object.keys(cleanStyles(next, form.primary_position === 'GK')).length >= MAX_STYLES) {
+        setMessage(`No máximo ${MAX_STYLES} PlayStyles por jogador.`);
+        return;
+      }
+      next[id] = { lv: 0, tier: PS_BY_ID[id].defaultTier };
+    } else delete next[id];
+    setMessage('');
+    setForm({ ...form, play_styles: next });
+  }
+  function patchPs(id: string, patch: { lv?: number; tier?: PsTier }) {
+    setForm({ ...form, play_styles: { ...(form.play_styles ?? {}), [id]: { ...(form.play_styles?.[id] ?? { lv: 0 }), ...patch } } });
   }
   function patchRole(id: string, patch: { lv?: Mastery; style?: string; focus?: Focus }) {
     setForm({ ...form, role_mastery: { ...(form.role_mastery ?? {}), [id]: { ...(form.role_mastery?.[id] ?? { lv: 0 }), ...patch } } });
@@ -1643,6 +1668,56 @@ function PlayerForm({
               );
             });
           })()}
+        </fieldset>
+
+        <fieldset className="role-mastery ps-adm">
+          <legend>PlayStyles</legend>
+          <style>{`
+            .ps-adm .ps-row { display: grid; grid-template-columns: minmax(0,1.5fr) auto auto; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+            .ps-adm .ps-row.off .ps-lv, .ps-adm .ps-row.off .ps-tier { opacity: .3; pointer-events: none; }
+            .ps-adm .ps-seg { display: inline-flex; border: 1px solid rgba(255,255,255,.15); border-radius: 8px; overflow: hidden; }
+            .ps-adm .ps-seg button { background: transparent; color: inherit; border: 0; padding: 6px 10px; min-height: 36px; cursor: pointer; }
+            .ps-adm .ps-seg button.on { background: rgba(55,214,122,.22); color: #37d67a; }
+            .ps-adm .ps-seg button.on.gold { background: rgba(255,204,64,.25); color: #ffcc40; }
+            .ps-adm .ps-seg button.on.silver { background: rgba(200,210,225,.22); color: #dde4ee; }
+            .ps-adm .ps-eff { grid-column: 1 / -1; font-size: 12px; opacity: .7; }
+            .ps-adm .ps-warn { grid-column: 1 / -1; font-size: 12px; color: #ffb066; }
+            .ps-adm .ps-group { font-size: 11px; letter-spacing: .08em; opacity: .6; margin: 10px 0 2px; }
+            @media (max-width: 640px) { .ps-adm .ps-row { grid-template-columns: 1fr; } .ps-adm .ps-seg button { flex: 1; min-height: 44px; } }
+          `}</style>
+          <small className="rm-help">Habilidades especiais do jogador (até {MAX_STYLES}). Ouro aparece ao lado da carta; prata aparece no verso (toque na carta para virar). Os efeitos entram na partida. Estilos que conflitam são resolvidos na partida (vale o primeiro marcado).</small>
+          {(['ofensivo', 'defensivo', 'movimento', 'especial', 'goleiro'] as PsGroup[])
+            .filter((g) => (g === 'goleiro') === (form.primary_position === 'GK'))
+            .map((g) => (
+              <div key={g}>
+                <div className="ps-group">{PS_GROUP_LABEL[g].toUpperCase()}</div>
+                {PLAYSTYLES.filter((x) => x.group === g).map((x) => {
+                  const entry = form.play_styles?.[x.id];
+                  const clash = entry ? conflictsOf(x.id).filter((c) => form.play_styles?.[c]).map((c) => PS_BY_ID[c]?.name).filter(Boolean) : [];
+                  const tier = (entry?.tier as PsTier | undefined) ?? x.defaultTier;
+                  return (
+                    <div key={x.id} className={`ps-row ${entry ? '' : 'off'}`}>
+                      <label className="rm-name">
+                        <input type="checkbox" checked={!!entry} onChange={(event) => togglePs(x.id, event.target.checked)} />
+                        <span>{x.icon} {x.name}</span>
+                      </label>
+                      <div className="ps-seg ps-lv" role="radiogroup" aria-label={`Nível de ${x.name}`}>
+                        {[0, 1, 2].map((lv) => (
+                          <button key={lv} type="button" role="radio" aria-checked={entry?.lv === lv} className={entry?.lv === lv ? 'on' : ''} onClick={() => patchPs(x.id, { lv })}>{PS_LV_LABEL[lv]}</button>
+                        ))}
+                      </div>
+                      <div className="ps-seg ps-tier" role="radiogroup" aria-label={`Raridade de ${x.name}`}>
+                        {(['gold', 'silver'] as PsTier[]).map((t) => (
+                          <button key={t} type="button" role="radio" aria-checked={tier === t} className={tier === t ? `on ${t}` : ''} onClick={() => patchPs(x.id, { tier: t })}>{t === 'gold' ? 'Ouro' : 'Prata'}</button>
+                        ))}
+                      </div>
+                      {entry && <div className="ps-eff">{x.lv[entry.lv] ?? x.text} — {x.effect}</div>}
+                      {clash.length > 0 && <div className="ps-warn">Conflita com {clash.join(', ')}: só um deles age na partida.</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
         </fieldset>
 
         {message && <div className="form-message">{message}</div>}

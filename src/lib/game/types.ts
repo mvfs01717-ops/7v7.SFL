@@ -25,6 +25,8 @@ export type Player = {
   captain?: boolean;
   // Funções e domínio cadastrados pelo administrador: { [id da função]: { lv: 0 básico | 1 avançado | 2 especialista, style } }
   role_mastery?: Record<string, { lv: number; style?: string; focus?: string }> | null;
+  // PlayStyles cadastrados pelo administrador: { [id]: { lv: 0 normal | 1 + | 2 ++, tier: 'gold' | 'silver' } }
+  play_styles?: Record<string, { lv: number; tier?: string }> | null;
 };
 
 export type MatchEvent = {

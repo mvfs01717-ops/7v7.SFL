@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, type CSSProperties } from 'react';
+import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
+import { GoldRail, SilverBack, playStyleCss, stylesOfPlayer } from '@/components/game/PlayStyleBadges';
 import { colorForOverall, isFreeAgent } from '@/lib/game/helpers';
 import { positionNames, type Player, type Team } from '@/lib/game/types';
 
@@ -125,6 +126,39 @@ function startGyro() {
 }
 
 export function Card(props: {
+  player: Player;
+  selected?: boolean;
+  onClick?: () => void;
+  compact?: boolean;
+  fluid?: boolean;
+  tilt?: boolean;
+}) {
+  const ps = stylesOfPlayer(props.player);
+  const [flip, setFlip] = useState(false);
+  if (!ps.gold.length && !ps.silver.length) return <PlainCard {...props} />;
+  const hasSilver = ps.silver.length > 0;
+  const flipMode = hasSilver && !props.onClick;
+  return (
+    <div className="ps-host" data-flip={flip ? '1' : '0'}>
+      <div className="ps-flipper">
+        <div className={`ps-front ${props.onClick ? '' : 'noclick'} ${flipMode ? 'flipmode' : ''}`} onClick={flipMode ? () => setFlip(true) : undefined}>
+          <PlainCard {...props} />
+        </div>
+        {hasSilver && (
+          <div className="ps-backface" aria-hidden={!flip}>
+            <SilverBack list={ps.silver} name={props.player.name} onFlip={() => setFlip(false)} />
+          </div>
+        )}
+      </div>
+      {hasSilver && !flip && (
+        <button type="button" className="ps-chip has-silver" data-n={ps.silver.length} aria-label="Ver PlayStyles de prata (virar a carta)" title="Virar a carta" onClick={(e) => { e.stopPropagation(); setFlip(true); }}>↻</button>
+      )}
+      {ps.gold.length > 0 && !flip && <GoldRail list={ps.gold} />}
+    </div>
+  );
+}
+
+function PlainCard(props: {
   player: Player;
   selected?: boolean;
   onClick?: () => void;
@@ -298,7 +332,7 @@ function CardArt() {
   );
 }
 
-export const cardCss = `
+export const cardCss = playStyleCss + `
 .tilt-card { position: relative; width: 100%; perspective: 760px; --rx: 0deg; --ry: 0deg; --mx: 50%; --my: 50%; }
 .tilt-body { position: relative; transform-style: preserve-3d; transform: rotateX(var(--rx)) rotateY(var(--ry)); transition: transform .5s cubic-bezier(.2,.8,.2,1), filter .3s ease; will-change: transform; }
 .tilt-card[data-on='1'] .tilt-body { transition: transform .09s linear, filter .3s ease; filter: drop-shadow(0 14px 14px rgba(0,0,0,.45)); }

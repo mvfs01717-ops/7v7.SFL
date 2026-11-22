@@ -10,6 +10,7 @@ import { animOn, animSpeed, countUse, forcedAnim } from '@/lib/game/animLibrary'
 import { chooseCorner, cornerRead, momAdd, momValue, newCornerMem, newMomentum, type CornerKind, type CornerMem, type Momentum, ballAt, blockChance, counterRead, deflect, heatAdd, heatShift, logDecision, newHeat, pickWinner, secondBallRuns, urgency, type LaneHeat } from '@/lib/game/emergent';
 import { chooseContact, chooseTackle, CONTACT_ID, laneCut, segPoint, type ContactPlan } from '@/lib/game/contact';
 import { chooseDribble, dribbleBody, dribbleGeometry, moveFit, recordDribble, DRIBBLE_CAPTION, type DribbleCtx, type DribbleMove } from '@/lib/game/dribbles';
+import { aerialBonus, blockStyle, burstMul, contactMods, dribbleChanceMod, gkClaim, gkQuick, gkSweep, hasStyles, kOf, laneStyle, passBiasStyle, passErrMul, reactBonus, shotMods, shotRangeBonus, stumbleMul, styleMove, tackleStyleMod, TAG_ID, type PSet } from '@/lib/game/playStyles';
 import { anticip, dribbleMod, errMul, gkHold, passAdj, roleMove, sweepChance, tackleMod, type Lv, type RC } from '@/lib/game/roleLevels';
 import { ambientChoice, choosePlay, createIntel, passBias, passTaste, personalityOf, recordPass, recordPlay, type Intel, type PlayKind, type Style } from '@/lib/game/playIntel';
 import { ReplayPlayer, type ClipData } from '@/components/game/ReplayPlayer';
@@ -41,6 +42,8 @@ type Props = {
   styles?: { user?: Partial<Record<Pos, { role: string; focus: string }>>; bot?: Partial<Record<Pos, { role: string; focus: string }>> };
   // Nível da função de cada vaga: 0 Normal, 1 (+), 2 (++). Muda o comportamento (ver lib/game/roleLevels)
   levels?: { user?: Partial<Record<Pos, { role: string; lv: Lv }>>; bot?: Partial<Record<Pos, { role: string; lv: Lv }>> };
+  // PlayStyles de cada vaga já resolvidos (conflitos e limite aplicados): id -> 1 Normal, 2 +, 3 ++ (ver lib/game/playStyles)
+  playstyles?: { user?: Partial<Record<Pos, PSet>>; bot?: Partial<Record<Pos, PSet>> };
   // 0 a 1: encharcamento do gramado na chuva (cresce com o tempo molhado): poças maiores e mais, marcas de escorregão mais fortes e duradouras
   wet?: number;
   // 0 a 1: quanto as listras do corte do gramado já se apagaram (cresce com o desgaste do jogo)
@@ -506,7 +509,7 @@ export type LiveSnap = {
   fx: { def: number; hold: number; stretch: number; hrot: number; hsc: number } | null;
 };
 
-export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = 'user', ambience, crowd, onClip, mapRef, club, opponent, userTeam, botTeam, events, onGoal, restartKey, workRef, endHalfRef, deadBallRef, hold = false, hideOverlays = false, onCaption, order = null, shapes, styles, levels }: Props) {
+export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = 'user', ambience, crowd, onClip, mapRef, club, opponent, userTeam, botTeam, events, onGoal, restartKey, workRef, endHalfRef, deadBallRef, hold = false, hideOverlays = false, onCaption, order = null, shapes, styles, levels, playstyles }: Props) {
   const holdRef = useRef(false);
   holdRef.current = hold;
   const orderRef = useRef<Props['order']>(null);
@@ -516,6 +519,9 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
   stylesRef.current = styles;
   const levelsRef = useRef<Props['levels']>(undefined);
   levelsRef.current = levels;
+  const psRef = useRef<Props['playstyles']>(undefined);
+  psRef.current = playstyles;
+
   const rolePers = useRef<Record<string, ReturnType<typeof personalityOf>>>({});
   const roleSeed = useRef<Record<string, number>>({});
   const roleLog = useRef<Record<string, number>>({});
@@ -854,7 +860,8 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     const move = forcedMove ?? testMove ?? chooseDribble(intelRef.current, ctx, Math.random, (m) => animOn(`dri.${m}`));
     countUse(`dri.${move}`);
     const pace = animSpeed(`dri.${move}`);
-    const chance = clamp(0.58 + (h.ovr - opp.ovr) / 80 + moveFit(move, ctx) - fatigueOf(h.key) * 0.1 + fatigueOf(opp.key) * 0.06 + (lvOf(h) && animOn('rol.niveis') ? dribbleMod(lvOf(h)!.role, lvOf(h)!.lv) : 0), 0.3, 0.88);
+    const chance = clamp(0.58 + (h.ovr - opp.ovr) / 80 + moveFit(move, ctx) - fatigueOf(h.key) * 0.1 + fatigueOf(opp.key) * 0.06 + (lvOf(h) && animOn('rol.niveis') ? dribbleMod(lvOf(h)!.role, lvOf(h)!.lv) : 0) + dribbleChanceMod(psOf(h), 0.5), 0.3, 0.88);
+            if (psOf(h).driblador) noteStyle(h, 'driblador', tnow(), 'chance de drible ajustada');
     const win = forceWin || Math.random() < chance;
     recordDribble(intelRef.current, h.side, move, win);
     const plan = dribbleGeometry(move, h, opp, sg, d);
@@ -909,6 +916,45 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     Object.assign(rg, { on: true, born: tnow(), x, y, r0: flash ? 10 : 13, r1, dur, color, flash });
   }
 
+  // PlayStyles de um disco (os desligados no painel ADM não contam)
+  const NO_PS: PSet = {};
+  function psOf(slot: { side: Side; pos: string }): PSet {
+    const raw = psRef.current?.[slot.side]?.[slot.pos as Pos];
+    if (!raw) return NO_PS;
+    let out: PSet | null = null;
+    for (const id of Object.keys(raw)) {
+      if (!animOn(`ps.${id}`)) {
+        out = out ?? { ...raw };
+        delete out[id];
+      }
+    }
+    return out ?? raw;
+  }
+  // Fim de jogo equilibrado (decisivo): do minuto 70 em diante com no máximo 1 gol de diferença
+  function clutchNow(): boolean {
+    const sit = sitRef.current;
+    return sit.minute >= 70 && Math.abs(sit.user - sit.bot) <= 1;
+  }
+  // Registro leve do PlayStyle em ação (contador por estilo e decisão no registro, no máximo a cada 8 s por jogador e estilo)
+  function noteStyle(s: Slot, id: string, now: number, why: string) {
+    const k = `${s.key}.ps.${id}`;
+    if (now - (roleLog.current[k] ?? -1e9) < 8000) return;
+    roleLog.current[k] = now;
+    countUse(`ps.${id}`);
+    logDecision(`${s.name} (PlayStyle)`, id, why);
+  }
+  // Bônus de escolha do receptor pelos PlayStyles de quem passa (livre, vertical, linha limpa, movimento)
+  function psPass(h: Slot, cand: Slot, fwd: number): number {
+    const ps = psOf(h);
+    if (!hasStyles(ps)) return 0;
+    const all = slotsRef.current;
+    const free = nearestOpp(all, h.side, cand).d;
+    const laneOpen = !all.some((o) => o.side !== h.side && o.pos !== 'GK' && segPoint(o.x, o.y, h.x, h.y, cand.x, cand.y).d < 26);
+    const mv = (((cand.vx ?? 0) * dirOf(h.side)) / Math.max(1, cand.maxSpeed));
+    const b = passBiasStyle(ps, { free, fwd, laneOpen, mv, dist: dist(h, cand), pressured: nearestOpp(all, h.side, h).d < 70 }, clutchNow());
+    if (b > 0.1 && Math.random() < 0.12) noteStyle(h, ps.passeCirurgico ? 'passeCirurgico' : ps.visaoDeJogo ? 'visaoDeJogo' : ps.maestro ? 'maestro' : ps.gkDistribuicao ? 'gkDistribuicao' : ps.pivoTecnico ? 'pivoTecnico' : 'decisivo', tnow(), `escolheu o receptor melhor posicionado (bônus ${b.toFixed(2)})`);
+    return b;
+  }
   // Função e nível (Normal, + ou ++) de um disco
   function lvOf(slot: { side: Side; pos: string }): { role: string; lv: Lv } | undefined {
     return levelsRef.current?.[slot.side]?.[slot.pos as Pos];
@@ -979,7 +1025,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     st.ballY = clamp(y, FY0 + 8, FY1 - 8);
     const runs = secondBallRuns(
       { x: st.ballX, y: st.ballY, vx, vy },
-      all.map((s) => ({ key: s.key, x: s.x, y: s.y, maxSpeed: s.maxSpeed, ovr: s.ovr, side: s.side, gk: s.pos === 'GK' })),
+      all.map((s) => ({ key: s.key, x: s.x, y: s.y, maxSpeed: s.maxSpeed, ovr: s.ovr, side: s.side, gk: s.pos === 'GK', bonus: reactBonus(psOf(s)) })),
       { x0: FX0 + 10, x1: FX1 - 10, y0: FY0 + 10, y1: FY1 - 10 },
       (k) => workRefLocal.current?.current.slow[k] ?? 0,
     );
@@ -1028,7 +1074,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         canShoot: FORWARDS.includes(rc.pos) && toGoal < 240 && near.d > 26,
         mateAhead: mates.some((x) => (x.x - rc.x) * d > 40 && nearestOpp(all, rc.side, x).d > 55),
         tired: fatigueOf(rc.key),
-        cons: lvOf(rc) && animOn('rol.niveis') ? errMul(lvOf(rc)!.role, lvOf(rc)!.lv) : 1,
+        cons: (lvOf(rc) && animOn('rol.niveis') ? errMul(lvOf(rc)!.role, lvOf(rc)!.lv) : 1) * contactMods(psOf(rc)).cons,
       },
       Math.random,
       (k) => animOn(CONTACT_ID[k]),
@@ -1040,7 +1086,8 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     countUse(CONTACT_ID[plan.kind]);
     ctlRef.current[rc.key] = { t0: tnow(), plan, ang, side: spaceSide };
     // A decisão seguinte só vem depois do controle (primeira = quase na hora)
-    st.ambientAt = now + plan.hold;
+    st.ambientAt = now + plan.hold * contactMods(psOf(rc)).hold;
+    if (psOf(rc).primeiroToque) noteStyle(rc, 'primeiroToque', now, `domínio ${plan.kind}`);
     const sp = animSpeed(CONTACT_ID[plan.kind]);
     if (plan.kind === 'orientado') {
       // O toque leva a bola e o disco para o espaço livre
@@ -1132,7 +1179,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         const dd = dist(holder, lead);
         const f = fatigueOf(holder.key);
         const hl = lvOf(holder);
-        const pr = clamp((0.012 + clamp((70 - nearH.d) / 70, 0, 1) * 0.09 + (dd > 230 ? 0.04 : 0) + (step.dur < 420 ? 0.03 : 0) + (76 - holder.ovr) * 0.0025 + f * 0.08) * (hl && animOn('rol.niveis') ? errMul(hl.role, hl.lv) : 1), 0.008, 0.28);
+        const pr = clamp((0.012 + clamp((70 - nearH.d) / 70, 0, 1) * 0.09 + (dd > 230 ? 0.04 : 0) + (step.dur < 420 ? 0.03 : 0) + (76 - holder.ovr) * 0.0025 + f * 0.08) * (hl && animOn('rol.niveis') ? errMul(hl.role, hl.lv) : 1) * passErrMul(psOf(holder), clutchNow()), 0.008, 0.28);
         if (Math.random() < pr) {
           const ang0 = Math.atan2(lead.y - holder.y, lead.x - holder.x);
           const off = Math.tan((Math.random() < 0.5 ? -1 : 1) * rand(0.12, 0.42)) * dd;
@@ -1165,12 +1212,15 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           let p: number;
           if (o.pos === 'GK') {
             // Goleiro líbero: sai da área para cortar bola nas costas da defesa
-            if (!ol || ol.role !== 'gk-libero' || ol.lv === 0) continue;
+            const gsw = gkSweep(psOf(o));
+            if ((!ol || ol.role !== 'gk-libero' || ol.lv === 0) && gsw <= 0) continue;
             const gx = dirOf(o.side) > 0 ? FX0 : FX1;
             if (Math.abs(lead.x - gx) > 175 || sg.d > 70) continue;
-            p = sweepChance(ol.lv) * (1 - sg.d / 80) * (1 - 0.35 * fatigueOf(o.key));
+            p = ((ol && ol.role === 'gk-libero' && ol.lv > 0 ? sweepChance(ol.lv) : 0) + gsw) * (1 - sg.d / 80) * (1 - 0.35 * fatigueOf(o.key));
           } else {
             p = laneCut(sg.d, sg.t, step.dur, o.ovr);
+            const lsy = laneStyle(psOf(o));
+            if (p > 0 && lsy.cut > 1) p = Math.min(0.6, p * lsy.cut + lsy.read * rep);
             if (p > 0 && ol && ol.lv > 0) {
               const an = anticip(ol.role, ol.lv);
               p = Math.min(0.6, p * an.cut + an.read * rep);
@@ -1181,15 +1231,16 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         const hit = !!best && Math.random() < best.p;
         if (best && hit) {
           const bl = lvOf(best.slot);
-          if (best.slot.pos === 'GK') noteRole(best.slot, 'gk-libero', bl?.lv ?? 1, 'sai-da-area-e-corta', now);
+          { const bps = psOf(best.slot); const sid = best.slot.pos === 'GK' ? (bps.gkSaida ? 'gkSaida' : null) : bps.interceptador ? 'interceptador' : null; if (sid) noteStyle(best.slot, sid, now, 'cortou a linha de passe'); }
+          if (best.slot.pos === 'GK') { if (bl && bl.role === 'gk-libero') noteRole(best.slot, 'gk-libero', bl.lv, 'sai-da-area-e-corta', now); }
           else if (bl && bl.lv > 0) noteRole(best.slot, bl.role, bl.lv, anticip(bl.role, bl.lv).read > 0 && rep > 0.6 ? 'le-o-padrao-de-passe' : 'antecipa-o-passe', now);
         } else if (best && best.slot.pos !== 'GK') {
           // Antecipou e não alcançou: o ++ já deixa a cobertura montada atrás do receptor
           const fl = lvOf(best.slot);
-          if (fl && fl.lv > 0 && anticip(fl.role, fl.lv).cover) {
+          if ((fl && fl.lv > 0 && anticip(fl.role, fl.lv).cover) || laneStyle(psOf(best.slot)).cover) {
             const dd2 = dirOf(best.slot.side);
             st.overrides[best.slot.key] = { x: clamp(recv.x - dd2 * 46, FX0 + 12, FX1 - 12), y: recv.y, until: now + 900, speed: 1.45 };
-            noteRole(best.slot, fl.role, fl.lv, 'cobertura-apos-antecipar', now);
+            if (fl && fl.lv > 0) noteRole(best.slot, fl.role, fl.lv, 'cobertura-apos-antecipar', now); else noteStyle(best.slot, 'interceptador', now, 'cobertura montada após antecipar');
           }
         }
         if (best && hit) {
@@ -2189,6 +2240,15 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
               if (rc.pos === 'GK' && step.kind === 'shot') {
                 pose(dest, 'save', ang, 1);
                 ringAt(rc.x, rc.y, '#9be7ff', true, 34, 420, 'fx.save');
+                if (step.ambient && !step.scripted) {
+                  // Reposição rápida: o goleiro decide de novo mais cedo; no ++ já sai em contra-ataque
+                  const gq = gkQuick(psOf(rc));
+                  if (gq.delay < 1) {
+                    st.ambientAt = Math.min(st.ambientAt, now + 700 * gq.delay);
+                    if (gq.counter) counterRef.current = { side: rc.side, until: now + 3500 };
+                    noteStyle(rc, 'gkReposicao', now, 'repõe a bola mais rápido depois da defesa');
+                  }
+                }
               } else {
                 pose(dest, 'touch', ang, pow);
                 if (step.kind === 'shot') ringAt(rc.x, rc.y, 'rgba(255,255,255,.9)', false, 26, 320, 'fx.touch');
@@ -2249,6 +2309,9 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
             );
             const tl = lvOf(dfn);
             if (tl && animOn('rol.niveis')) tk.winMod += tackleMod(tl.role, tl.lv);
+            tk.winMod += tackleStyleMod(psOf(dfn), psOf(h));
+            if (psOf(dfn).desarmePreciso) noteStyle(dfn, 'desarmePreciso', now, 'bote com leitura do momento');
+            if (psOf(h).pivoTecnico) noteStyle(h, 'pivoTecnico', now, 'protegeu a bola do desarme');
             countUse(`def.${tk.kind}`);
             // Quem tem overall maior leva vantagem; carrinho bem encaixado e cobertura ajudam, proteção da posse atrapalha
             const base = clamp(0.5 + (dfn.ovr - h.ovr) / 90, 0.25, 0.75);
@@ -2325,7 +2388,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
                     );
                   } else {
                     // O jogador escapa e o marcador fica para trás
-                    st.overrides[dfn.key] = { x: dfn.x, y: dfn.y, until: t + (slide ? 1250 : 900), speed: 0.18 };
+                    st.overrides[dfn.key] = { x: dfn.x, y: dfn.y, until: t + (slide ? 1250 : 900) * stumbleMul(psOf(dfn)), speed: 0.18 };
                     st.overrides[h.key] = {
                       x: clamp(h.x + dirH * 70, FX0 + 20, FX1 - 20),
                       y: clamp(h.y + rand(-26, 26), FY0 + 20, FY1 - 20),
@@ -2389,7 +2452,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           }
           // Atacante perto do gol chuta em vez de passar, livre ou pressionado (o placar continua sendo decidido
           // pela simulação, então esses chutes de rotina terminam em defesa ou para fora, nunca em gol)
-          const canShoot = FORWARDS.includes(h.pos) && toGoal < 240 && near.d > 26;
+          const canShoot = FORWARDS.includes(h.pos) && toGoal < 240 + shotRangeBonus(psOf(h)) && near.d > 26;
           // Lateral: a bola sai pela linha lateral e o outro time repõe com as mãos. No fim do 1º tempo o App pede uma para o apito.
           const wantHalfEnd = !!endHalfRef?.current && !deadBallRef?.current;
           const throwInNow = h.pos !== 'GK' && ((toGoal > 90 && toGoal < FX1 - FX0 - 90 && Math.random() < 0.06) || wantHalfEnd);
@@ -2493,13 +2556,23 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
             // Livre: quase sempre manda no gol. Pressionado: erra a maioria. Overall alto ajuda um pouco.
             const gkl = gk ? lvOf(gk) : undefined;
             const gkh = gkl && animOn('rol.niveis') ? gkHold(gkl.role, gkl.lv) : { rebound: 1, onTarget: 0 };
-            const onTarget = clamp(lerp(0.9, 0.22, pressure) + (h.ovr - 75) * 0.004 + gkh.onTarget, 0.12, 0.96);
+            const sps = psOf(h);
+            const gps = gk ? psOf(gk) : NO_PS;
+            const alone = !all.some((x) => x.side === h.side && x.key !== h.key && x.pos !== 'GK' && dist(x, h) < 70);
+            const placed = !!sps.bolaColocada || Math.random() < 0.35;
+            const sm = shotMods(sps, gps, { pressure, toGoal, alone, placed });
+            const onTarget = clamp(lerp(0.9, 0.22, pressure) + (h.ovr - 75) * 0.004 + gkh.onTarget + sm.onTarget, 0.12, 0.96);
+            if (Math.abs(sm.onTarget) > 0.02) {
+              const sid = sps.finalizacaoPrecisa ? 'finalizacaoPrecisa' : sps.instintoGoleador ? 'instintoGoleador' : sps.bolaColocada && placed ? 'bolaColocada' : null;
+              if (sid) noteStyle(h, sid, now, `chute com precisão ajustada (${(sm.onTarget * 100).toFixed(1)}%)`);
+            }
+            if (sps.chutePotente) noteStyle(h, 'chutePotente', now, 'chute mais veloz e difícil de segurar');
             // Bloqueio: defensor perto da linha do chute (e não colado no chutador) pode travar a bola; ela sobra solta
             let blk: { o: Slot; x: number; y: number; t: number; p: number } | null = null;
             for (const o of all) {
               if (o.side === h.side || o.pos === 'GK') continue;
               const sg = segPoint(o.x, o.y, h.x, h.y, goalX, MID_Y);
-              const p = blockChance(sg.d, sg.t, o.ovr, pressure);
+              const p = Math.min(0.75, blockChance(sg.d, sg.t, o.ovr, pressure) * blockStyle(psOf(o)) * sm.block);
               if (p > 0 && (!blk || p > blk.p)) blk = { o, x: sg.x, y: sg.y, t: sg.t, p };
             }
             if (blk && animOn('ia.bloqueio') && Math.random() < blk.p) {
@@ -2515,6 +2588,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
                 after: () => {
                   const v = deflect(h, b.o, { x: goalX, y: MID_Y }, Math.random, sp);
                   countUse('ia.bloqueio');
+                  { const bp = psOf(b.o); if (bp.bloqueador || bp.muralha) noteStyle(b.o, bp.bloqueador ? 'bloqueador' : 'muralha', tnow(), `bloqueou o chute de ${h.name}`); }
                   logDecision(b.o.name, 'bloqueio', `bloqueou chute de ${h.name} (chance ${(b.p * 100).toFixed(0)}%)`);
                   pose(b.o.key, 'save', Math.atan2(v.vy, v.vx), 1);
                   ringAt(b.x, b.y, '#9be7ff', true, 30, 360, 'ia.bloqueio');
@@ -2525,12 +2599,12 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
               st.queue.push({
                 kind: 'shot',
                 to: { slot: gk.key },
-                dur: 420,
+                dur: Math.round(420 * sm.speed),
                 ambient: true,
-                caption: `${h.name} chuta e ${gk.name} defende`,
+                caption: `${h.name} chuta${sps.bolaColocada && placed ? ' colocado' : sps.chutePotente ? ' forte' : ''} e ${gk.name} defende`,
                 // Defesa com rebote: chute forte contra goleiro de overall menor devolve a bola para a entrada da área
                 after: () => {
-                  if (Math.random() < clamp(0.22 + (h.ovr - gk.ovr) / 160, 0.08, 0.4) * gkh.rebound) {
+                  if (Math.random() < clamp(0.22 + (h.ovr - gk.ovr) / 160, 0.08, 0.4) * gkh.rebound * sm.rebound) {
                     const a = Math.atan2(0, -d) + (Math.random() < 0.5 ? -1 : 1) * rand(0.35, 1.0);
                     const v = rand(210, 320);
                     launchSB(gk.x - d * 14, gk.y, Math.cos(a) * v, Math.sin(a) * v, h.side, `${gk.name} defende, mas a bola sobra`);
@@ -2611,7 +2685,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
               st.queue.push({ kind: 'pass', to: { slot: cf.key }, dur: 640, ambient: true, arc: 12, caption: `${h.name} cruza para ${cf.name}` });
             } else {
               const hStyle = stylesRef.current?.[h.side]?.[h.pos] as Style | undefined;
-              const r = choosePass(h, all, (cand, fwd) => passBias(intelRef.current, h.key, cand.key) + passTaste({ name: h.name, ovr: h.ovr, style: hStyle }, fwd) + uu * clamp(fwd, -1.5, 1.5) * 0.35 + rolePass(h, fwd, cand));
+              const r = choosePass(h, all, (cand, fwd) => passBias(intelRef.current, h.key, cand.key) + passTaste({ name: h.name, ovr: h.ovr, style: hStyle }, fwd) + uu * clamp(fwd, -1.5, 1.5) * 0.35 + rolePass(h, fwd, cand) + psPass(h, cand, fwd));
               if (r) recordPass(intelRef.current, h.key, r.key);
               if (r) {
                 const dd = dist(h, r);
@@ -2704,9 +2778,11 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         pressure: roleHolder ? clamp((95 - nearestOpp(all, roleHolder.side, roleHolder).d) / 60, 0, 1) : 0,
         controlling: !!(roleHolder && ctlRef.current[roleHolder.key] && tnow() - ctlRef.current[roleHolder.key].t0 < ctlRef.current[roleHolder.key].plan.settle),
       };
-      const roleFor = (s: Slot): { mv: ReturnType<typeof roleMove>; role: string; lv: Lv } | null => {
+      const roleFor = (s: Slot): { mv: ReturnType<typeof roleMove>; role: string; lv: Lv; style?: boolean } | null => {
         const rl = lvOf(s);
-        if (!rl || rl.lv === 0 || !animOn('rol.niveis')) return null;
+        const sps = psOf(s);
+        const useRole = !!rl && rl.lv > 0 && animOn('rol.niveis');
+        if (!useRole && !hasStyles(sps)) return null;
         const d = dirOf(s.side);
         const pers = (rolePers.current[s.name] = rolePers.current[s.name] ?? personalityOf(s.name, s.ovr));
         if (roleSeed.current[s.key] === undefined) {
@@ -2744,7 +2820,11 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           x0: FX0,
           x1: FX1,
         };
-        return { mv: roleMove(rl.role, rl.lv, rc), role: rl.role, lv: rl.lv };
+        const rmv = useRole ? roleMove(rl!.role, rl!.lv, rc) : null;
+        const cOn = !!counterRef.current && counterRef.current.side === s.side && now < counterRef.current.until;
+        const smv = hasStyles(sps) && s.pos !== 'GK' ? styleMove(sps, rc, cOn) : null;
+        if (smv && (!rmv || smv.w > rmv.w)) return { mv: smv, role: '', lv: 0 as Lv, style: true };
+        return rmv ? { mv: rmv, role: rl!.role, lv: rl!.lv } : null;
       };
       // Decide para onde cada jogador quer ir e se move com velocidade e aceleração
       all.forEach((s, i) => {
@@ -2804,7 +2884,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
             tx = lerp(tx, rr.mv.x, rr.mv.w);
             ty = lerp(ty, rr.mv.y, rr.mv.w);
             if (rr.mv.speed) speedMul = Math.max(speedMul, rr.mv.speed);
-            noteRole(s, rr.role, rr.lv, rr.mv.tag, now);
+            if (rr.style) { const sid = TAG_ID[rr.mv.tag ?? '']; if (sid) noteStyle(s, sid, now, rr.mv.tag ?? ''); } else noteRole(s, rr.role, rr.lv, rr.mv.tag, now);
           }
         } else if (st.holder === s.key) {
           tx = s.x + d * 14;
@@ -2882,13 +2962,22 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
             tx = lerp(tx, rr.mv.x, rr.mv.w);
             ty = lerp(ty, rr.mv.y, rr.mv.w);
             if (rr.mv.speed) speedMul = Math.max(speedMul, rr.mv.speed);
-            noteRole(s, rr.role, rr.lv, rr.mv.tag, now);
+            if (rr.style) { const sid = TAG_ID[rr.mv.tag ?? '']; if (sid) noteStyle(s, sid, now, rr.mv.tag ?? ''); } else noteRole(s, rr.role, rr.lv, rr.mv.tag, now);
           }
         }
 
         // Cansado corre menos (App calcula `slow` pelo fôlego)
         const tired = workRefLocal.current?.current.slow[s.key] ?? 0;
-        const maxV = s.maxSpeed * speedMul * (1 - tired);
+        let burst = 1;
+        if (possSide === s.side && st.holder !== s.key && speedMul >= 1) {
+          const sp = psOf(s);
+          if (sp.arranqueExplosivo) {
+            const ahead = all.some((o) => o.side !== s.side && o.pos !== 'GK' && (o.x - s.x) * d > 0 && (o.x - s.x) * d < 100 && Math.abs(o.y - s.y) < 60);
+            burst = burstMul(sp, !ahead);
+            if (burst > 1) noteStyle(s, 'arranqueExplosivo', now, 'espaço à frente: acelera');
+          }
+        }
+        const maxV = s.maxSpeed * speedMul * burst * (1 - tired);
         const dx = tx - s.x;
         const dy = ty - s.y;
         const dd = Math.hypot(dx, dy);

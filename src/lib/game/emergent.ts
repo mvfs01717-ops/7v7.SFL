@@ -17,7 +17,7 @@ export function urgency(minute: number, mine: number, theirs: number, cautious =
 }
 
 // ---------- Segunda bola ----------
-export type SBCand = { key: string; x: number; y: number; maxSpeed: number; ovr: number; side: Side; gk: boolean };
+export type SBCand = { key: string; x: number; y: number; maxSpeed: number; ovr: number; side: Side; gk: boolean; bonus?: number };
 export type SBRun = { key: string; side: Side; eta: number; ix: number; iy: number };
 const TAU_BALL = 0.42; // atrito: a velocidade cai com e^(-t/τ)
 
@@ -32,7 +32,7 @@ export function secondBallRuns(ball: Pt & { vx: number; vy: number }, cands: SBC
   const runs: SBRun[] = [];
   for (const c of cands) {
     if (c.gk) continue;
-    const react = 0.1 + (100 - Math.min(99, c.ovr)) * 0.004; // overall alto reage antes
+    const react = Math.max(0.04, 0.1 + (100 - Math.min(99, c.ovr)) * 0.004 - (c.bonus ?? 0)); // overall alto reage antes
     const v = c.maxSpeed * 1.25 * (1 - tired(c.key));
     let found = false;
     for (let t = 0.1; t <= 3.2; t += 0.1) {
