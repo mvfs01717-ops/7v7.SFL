@@ -1,3 +1,4 @@
+import { PsIcon } from '@/components/game/PlayStyleBadges';
 import { MAX_STYLES, PLAYSTYLES, PS_BY_ID, PS_GROUP_LABEL, PS_LV_LABEL, cleanStyles, conflictsOf, type PsGroup, type PsTier } from '@/lib/game/playStyles';
 import { DEFAULT_STYLE, FOCUS_LABEL, MASTERY, ROLE_STYLES, SECTOR_LABEL, cleanMastery, focusOptions, rolesForPositions, type Focus, type Mastery } from '@/lib/playerRoles';
 import { ColorField } from '@/components/game/ColorField';
@@ -1699,7 +1700,7 @@ function PlayerForm({
                     <div key={x.id} className={`ps-row ${entry ? '' : 'off'}`}>
                       <label className="rm-name">
                         <input type="checkbox" checked={!!entry} onChange={(event) => togglePs(x.id, event.target.checked)} />
-                        <span>{x.icon} {x.name}</span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><PsIcon id={x.id} tier={tier} size={28} /> {x.name}</span>
                       </label>
                       <div className="ps-seg ps-lv" role="radiogroup" aria-label={`Nível de ${x.name}`}>
                         {[0, 1, 2].map((lv) => (

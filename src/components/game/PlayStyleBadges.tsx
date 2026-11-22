@@ -15,6 +15,11 @@ export function stylesOfPlayer(p: Player): { gold: CardStyle[]; silver: CardStyl
   }
   return { gold, silver };
 }
+// Ícones oficiais do 7v7 (public/playstyles): um losango dourado e um prateado por estilo
+export const psIconUrl = (id: string, tier: PsTier): string => `${import.meta.env.BASE_URL}playstyles/${id}-${tier}.png`;
+export function PsIcon({ id, tier, size = 24 }: { id: string; tier: PsTier; size?: number }) {
+  return <img className="ps-ico" src={psIconUrl(id, tier)} width={size} height={size} alt="" draggable={false} />;
+}
 const lvTag = (lv: number) => (lv === 0 ? '' : PS_LV_LABEL[lv]);
 
 // Faixa dourada: coluna de medalhões ao lado da carta
@@ -36,13 +41,13 @@ export function GoldRail({ list }: { list: CardStyle[] }) {
             setOpen(open === s.def.id ? null : s.def.id);
           }}
         >
-          <span aria-hidden="true">{s.def.icon}</span>
+          <PsIcon id={s.def.id} tier="gold" size={42} />
           {s.lv > 0 && <b>{lvTag(s.lv)}</b>}
         </button>
       ))}
       {cur && (
         <div className="ps-pop" role="tooltip">
-          <strong>{cur.def.icon} {cur.def.name} <em>{PS_LV_LABEL[cur.lv]}</em></strong>
+          <strong>{cur.def.name} <em>{PS_LV_LABEL[cur.lv]}</em></strong>
           <span>{cur.def.lv[cur.lv]}</span>
         </div>
       )}
@@ -68,7 +73,7 @@ export function SilverBack({ list, name, onFlip }: { list: CardStyle[]; name: st
                 setOpen(open === s.def.id ? null : s.def.id);
               }}
             >
-              <i aria-hidden="true">{s.def.icon}</i>
+              <i aria-hidden="true"><PsIcon id={s.def.id} tier="silver" size={26} /></i>
               <span>{s.def.name}</span>
               {s.lv > 0 && <b>{lvTag(s.lv)}</b>}
             </button>
@@ -100,19 +105,19 @@ export const playStyleCss = `
 .ps-back-title { font-size: 11px; letter-spacing: .22em; font-weight: 800; text-align: center; opacity: .75; }
 .ps-back-name { text-align: center; font-weight: 800; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-bottom: 1px solid rgba(27,33,40,.25); padding-bottom: 3px; }
 .ps-back ul { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; overflow: auto; min-height: 0; }
-.ps-back li button { display: grid; grid-template-columns: 22px 1fr auto; align-items: center; gap: 4px; width: 100%; background: rgba(255,255,255,.45); border: 1px solid rgba(27,33,40,.18); border-radius: 7px; padding: 3px 4px; color: inherit; font: inherit; font-size: 10.5px; font-weight: 700; text-align: left; cursor: pointer; }
-.ps-back li button i { font-style: normal; font-size: 15px; text-align: center; }
+.ps-back li button { display: grid; grid-template-columns: 26px 1fr auto; align-items: center; gap: 4px; width: 100%; background: rgba(255,255,255,.45); border: 1px solid rgba(27,33,40,.18); border-radius: 7px; padding: 3px 4px; color: inherit; font: inherit; font-size: 10.5px; font-weight: 700; text-align: left; cursor: pointer; }
+.ps-back li button i { font-style: normal; display: grid; place-items: center; height: 24px; }
+.ps-ico { display: block; pointer-events: none; user-select: none; }
 .ps-back li button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ps-back li button b { font-size: 9px; background: #1b2128; color: #e6e9ee; border-radius: 6px; padding: 0 5px; }
 .ps-back li small { display: block; font-size: 10px; line-height: 1.25; padding: 2px 4px 0; opacity: .85; }
 .ps-back p { text-align: center; font-size: 11px; opacity: .7; margin: 8px 0; }
 .ps-back-hint { margin-top: auto; text-align: center; font-size: 9px; opacity: .55; letter-spacing: .08em; }
 /* Ouro: medalhões ao lado da carta */
-.ps-rail { position: absolute; top: 12%; left: calc(100% - 15px); z-index: 8; display: flex; flex-direction: column; gap: 6px; }
-.ps-gold { position: relative; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; padding: 0; cursor: pointer; font-size: 16px; line-height: 1; color: #3a2800;
-  border: 2px solid #fff3b0; background: radial-gradient(circle at 32% 28%, #fffbe0, #ffd84d 45%, #b8800a); box-shadow: 0 0 0 1px #7a5400, 0 0 10px 2px rgba(255,200,60,.65), 0 3px 6px rgba(0,0,0,.5); animation: psGlow 2.8s ease-in-out infinite; }
-.ps-gold b { position: absolute; right: -6px; bottom: -4px; font-size: 9px; background: #3a2800; color: #ffe38a; border-radius: 6px; padding: 0 4px; border: 1px solid #ffd84d; }
-.ps-gold.lv2 { box-shadow: 0 0 0 1px #7a5400, 0 0 14px 4px rgba(255,210,70,.9), 0 3px 6px rgba(0,0,0,.5); }
+.ps-rail { position: absolute; top: 12%; left: calc(100% - 20px); z-index: 8; display: flex; flex-direction: column; gap: 4px; }
+.ps-gold { position: relative; width: 42px; height: 42px; display: grid; place-items: center; padding: 0; cursor: pointer; background: none; border: 0; filter: drop-shadow(0 0 7px rgba(255,200,60,.8)) drop-shadow(0 3px 4px rgba(0,0,0,.55)); animation: psGlow 2.8s ease-in-out infinite; }
+.ps-gold b { position: absolute; right: -4px; bottom: 0; font-size: 9px; background: #3a2800; color: #ffe38a; border-radius: 6px; padding: 0 4px; border: 1px solid #ffd84d; }
+.ps-gold.lv2 { filter: drop-shadow(0 0 11px rgba(255,214,80,1)) drop-shadow(0 3px 4px rgba(0,0,0,.55)); }
 @keyframes psGlow { 50% { filter: brightness(1.18); } }
 .ps-pop { position: absolute; right: calc(100% - 4px); top: 0; width: 170px; background: rgba(20,16,6,.96); color: #fff3c4; border: 1px solid #ffd84d; border-radius: 9px; padding: 7px 9px; font-size: 11px; line-height: 1.3; display: flex; flex-direction: column; gap: 3px; box-shadow: 0 6px 16px rgba(0,0,0,.5); z-index: 9; }
 .ps-pop em { font-style: normal; color: #ffd84d; }
