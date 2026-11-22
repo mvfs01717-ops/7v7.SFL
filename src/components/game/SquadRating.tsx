@@ -282,7 +282,7 @@ export const squadRatingCss = `
 }
 @media (max-width: 999px) {
   .sq-layout { grid-template-columns: 104px minmax(0, 1fr); gap: 8px; }
-  .sq-rate { grid-column: 1; grid-row: 1; position: sticky; top: 70px; z-index: 2; }
+  .sq-rate { grid-column: 1; grid-row: 1; position: relative; align-self: start; z-index: 1; }
   .sq-center { grid-column: 2; grid-row: 1; }
   .sq-list { grid-column: 1 / -1; grid-row: 2; }
   .fc-head { flex-direction: column; align-items: flex-start; gap: 4px; }
