@@ -89,6 +89,7 @@ export function loadTactics(): TacticStore {
 export function saveTactics(store: TacticStore) {
   try {
     localStorage.setItem(KEY, JSON.stringify(store));
+    window.dispatchEvent(new Event('sfl-tactics-changed'));
   } catch {
     /* sem armazenamento: a tática vale só nesta sessão */
   }

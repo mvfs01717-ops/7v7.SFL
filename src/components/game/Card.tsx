@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
+import { chemBadgeCss } from '@/components/game/ChemBadge';
 import { GoldRail, SilverBack, playStyleCss, stylesOfPlayer } from '@/components/game/PlayStyleBadges';
 import { colorForOverall, isFreeAgent } from '@/lib/game/helpers';
 import { positionNames, type Player, type Team } from '@/lib/game/types';
@@ -332,7 +333,7 @@ function CardArt() {
   );
 }
 
-export const cardCss = playStyleCss + `
+export const cardCss = playStyleCss + chemBadgeCss + `
 .tilt-card { position: relative; width: 100%; perspective: 760px; --rx: 0deg; --ry: 0deg; --mx: 50%; --my: 50%; }
 .tilt-body { position: relative; transform-style: preserve-3d; transform: rotateX(var(--rx)) rotateY(var(--ry)); transition: transform .5s cubic-bezier(.2,.8,.2,1), filter .3s ease; will-change: transform; }
 .tilt-card[data-on='1'] .tilt-body { transition: transform .09s linear, filter .3s ease; filter: drop-shadow(0 14px 14px rgba(0,0,0,.45)); }

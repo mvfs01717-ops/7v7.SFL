@@ -4,7 +4,8 @@ import { BENCH_SLOTS, positionNames, type BenchSlot, type DraftSlot, type Player
 import { Card, cardCss } from '@/components/game/Card';
 import { stadiumCss } from '@/lib/game/stadiumCss';
 import { RoleTag } from '@/components/game/RoleTag';
-import { SquadLinksLayer, SquadListPanel, SquadRatingPanel, formationLabel, squadRatingCss, squadStats } from '@/components/game/SquadRating';
+import { ChemBadge, useChemTick } from '@/components/game/ChemBadge';
+import { SquadListPanel, SquadRatingPanel, formationLabel, squadRatingCss, squadStats } from '@/components/game/SquadRating';
 
 // ---------- Draft estilo campo: o campo aparece com as cartas escondidas e cada posição revela 3 cartas ----------
 export const FIELD_SPOTS: Record<Position, { x: number; y: number }> = {
@@ -324,6 +325,7 @@ export function DraftScreen({
       setSwapFrom(null);
     }
   }
+  useChemTick();
   const stats = squadStats(club, positionList, selected);
   const startersFilled = positionList.filter((position) => selected[position]).length;
 
@@ -387,7 +389,8 @@ export function DraftScreen({
             </span>
           </span>
         )}
-        <i className={`dr-label ${outOfPlace ? 'oop' : ''}`}>{outOfPlace ? `${label} · FORA −5` : label}</i>
+        {player && isStarter && <ChemBadge chem={stats.rows.find((r) => r.position === slot)?.chemInfo ?? { value: 0, score: 0, parts: [], empty: true }} />}
+        <i className={`dr-label ${outOfPlace ? 'oop' : ''} ${player && isStarter ? 'has-chem' : ''}`}>{outOfPlace ? `${label} · FORA −5` : label}</i>
       </div>
     );
   };
@@ -429,7 +432,6 @@ export function DraftScreen({
             <div className="sq-formation"><small>FORMAÇÃO</small><b>{formationLabel(positionList)}</b></div>
         <div className="dr-field">
           <DraftField />
-          <SquadLinksLayer links={stats.links} />
           {positionList.map((position, index) =>
             slotView(position, position, index, { left: `${FIELD_SPOTS[position].x}%`, top: `${FIELD_SPOTS[position].y}%` }),
           )}

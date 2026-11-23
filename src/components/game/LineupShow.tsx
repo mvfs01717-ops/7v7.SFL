@@ -5,6 +5,9 @@ import { DraftField, FIELD_SPOTS } from '@/components/game/DraftScreen';
 import { average, groupAverage, slotOf } from '@/lib/game/helpers';
 import { positionNames, type Player, type Position, type Team } from '@/lib/game/types';
 import { TACTIC_INFO, type Tactic } from '@/lib/multiplayer';
+import { ChemBadge } from '@/components/game/ChemBadge';
+import { chemOf } from '@/lib/game/chemistry';
+import { loadRoles } from '@/lib/playerRoles';
 
 // Apresentação da escalação (inspirada nas aberturas de partida do FIFA/FC):
 // os jogadores entram no centro do palco por linha (goleiro, laterais, meio, alas, centroavante)
@@ -182,6 +185,7 @@ export function LineupShow({
                 style={{ '--x': `${FIELD_SPOTS[position].x}%`, '--y': `${FIELD_SPOTS[position].y}%`, '--i': i } as React.CSSProperties}
               >
                 <Card player={player} fluid />
+                <ChemBadge chem={chemOf(position, bySlot, { club: team, tactic: tactic ?? 'equilibrada', saved: loadRoles() })} inside />
                 <i>{position}</i>
               </div>
             );

@@ -3,31 +3,30 @@ import { type BenchSlot, BENCH_SLOTS, type Player, type Position, type Team } fr
 import { Badge } from '@/components/game/Card';
 import { TacticalSettings } from '@/components/game/TacticalSettings';
 import { deriveTactic, loadTactics, presetName } from '@/lib/tacticsProfile';
-import { TACTIC_INFO } from '@/lib/multiplayer';
+import { TACTIC_INFO, type Tactic } from '@/lib/multiplayer';
+import { SQUAD_LINKS, chemOf, type Chem } from '@/lib/game/chemistry';
 import { ROLES_EVENT, loadRoles, roleOf, roleTag } from '@/lib/playerRoles';
 
 // Painel de avaliação do elenco (inspirado na tela de gestão do Ultimate Team).
 // Tudo vem dos jogadores já escolhidos no draft: nada é fixo ou inventado.
 // Entrosamento é só visual (não muda o resultado da partida): até 3 pontos por jogador.
 
-export const SQUAD_LINKS: [Position, Position][] = [
-  ['GK', 'LB'], ['GK', 'RB'], ['LB', 'CM'], ['RB', 'CM'], ['CM', 'LF'], ['CM', 'RF'], ['CM', 'CF'], ['LF', 'CF'], ['RF', 'CF'],
-];
-const SPOTS: Record<Position, { x: number; y: number }> = {
-  GK: { x: 50, y: 83 }, LB: { x: 20, y: 65 }, RB: { x: 80, y: 65 }, CM: { x: 50, y: 49 }, LF: { x: 20, y: 30 }, RF: { x: 80, y: 30 }, CF: { x: 50, y: 14 },
-};
+export { SQUAD_LINKS };
 const fits = (player: Player, position: Position) =>
   player.primary_position === position || (player.alternate_positions ?? []).includes(position);
 
-export function squadStats(club: Team, positionList: Position[], selected: Partial<Record<Position, Player>>) {
+export function squadStats(club: Team, positionList: Position[], selected: Partial<Record<Position, Player>>, tacticIn?: Tactic) {
+  const store = loadTactics();
+  const tactic = tacticIn ?? deriveTactic(store.presets[store.main] ?? store.presets[0]!);
+  const saved = loadRoles();
   const rows = positionList.map((position) => {
     const player = selected[position];
-    if (!player) return { position, player: undefined, rating: 0, natural: false, sameClub: false, linked: 0, chem: 0 };
+    if (!player) return { position, player: undefined, rating: 0, natural: false, sameClub: false, linked: 0, chem: 0, chemInfo: undefined as Chem | undefined };
     const natural = fits(player, position);
     const sameClub = player.team_id === club.id;
     const linked = SQUAD_LINKS.filter(([a, b]) => (a === position || b === position) && selected[a] && selected[b] && selected[a]!.team_id === selected[b]!.team_id).length;
-    const chem = (natural ? 1 : 0) + (sameClub ? 1 : 0) + (linked > 0 ? 1 : 0);
-    return { position, player, rating: player.overall - (natural ? 0 : 5), natural, sameClub, linked, chem };
+    const chemInfo = chemOf(position, selected, { club, tactic, saved });
+    return { position, player, rating: player.overall - (natural ? 0 : 5), natural, sameClub, linked, chem: chemInfo.value as number, chemInfo: chemInfo as Chem | undefined };
   });
   const filled = rows.filter((row) => row.player);
   const avg = filled.length ? filled.reduce((sum, row) => sum + row.rating, 0) / filled.length : 0;
@@ -91,16 +90,6 @@ const Flag = () => (
 export function formationLabel(positionList: Position[]) {
   const n = (list: Position[]) => positionList.filter((p) => list.includes(p)).length;
   return [n(['LB', 'RB']), n(['CM']), n(['LF', 'RF', 'CF'])].join('-').replace(/^/, `${n(['GK'])}-`);
-}
-
-export function SquadLinksLayer({ links }: { links: [Position, Position][] }) {
-  return (
-    <svg className="sq-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-      {links.map(([a, b]) => (
-        <line key={a + b} x1={SPOTS[a].x} y1={SPOTS[a].y} x2={SPOTS[b].x} y2={SPOTS[b].y} vectorEffect="non-scaling-stroke" />
-      ))}
-    </svg>
-  );
 }
 
 function useRoles() {
