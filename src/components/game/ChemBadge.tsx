@@ -37,13 +37,13 @@ export function useChemTick(): number {
 }
 
 export const chemBadgeCss = `
-.chem-b { position: absolute; left: -7%; bottom: -9px; z-index: 6; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; color: #4fd6ff; pointer-events: auto;
-  background: radial-gradient(circle at 35% 28%, #15305f, #050d22 72%); border: 1px solid rgba(79,214,255,.35); box-shadow: 0 0 8px rgba(60,160,255,.5), 0 2px 5px rgba(0,0,0,.65), inset 0 1px 1px rgba(255,255,255,.18); transition: box-shadow .35s; }
-.chem-b .chem-ico { width: 18px; height: 18px; }
+/* Tamanho sempre proporcional a largura da card (o selo ocupa ~23% dela) */
+.chem-b { position: absolute; left: -5%; bottom: -3%; z-index: 6; width: 23%; aspect-ratio: 1; border-radius: 50%; display: grid; place-items: center; color: #4fd6ff; pointer-events: auto; box-sizing: border-box;
+  background: radial-gradient(circle at 35% 28%, #15305f, #050d22 72%); border: 1px solid rgba(79,214,255,.35); box-shadow: 0 0 5px rgba(60,160,255,.5), 0 1px 3px rgba(0,0,0,.65), inset 0 1px 1px rgba(255,255,255,.18); transition: box-shadow .35s; }
+.chem-b .chem-ico { width: 72%; height: 72%; }
 .chem-b .chem-ico path { fill: rgba(120,150,190,.28); transition: fill .3s, filter .3s; }
-.chem-b .chem-ico path.on { fill: currentColor; filter: drop-shadow(0 0 2.5px currentColor); }
-.chem-b.in { left: 2px; bottom: 4px; }
-.chem-b.c0 { box-shadow: 0 2px 5px rgba(0,0,0,.65); border-color: rgba(125,135,148,.35); }
-.chem-b.c3 { box-shadow: 0 0 12px rgba(70,190,255,.85), 0 2px 5px rgba(0,0,0,.65), inset 0 1px 1px rgba(255,255,255,.25); }
-@media (max-width: 520px) { .chem-b { width: 22px; height: 22px; bottom: -8px; } .chem-b .chem-ico { width: 15px; height: 15px; } }
+.chem-b .chem-ico path.on { fill: currentColor; filter: drop-shadow(0 0 1.5px currentColor); }
+.chem-b.in { left: 3%; bottom: 3%; }
+.chem-b.c0 { box-shadow: 0 1px 3px rgba(0,0,0,.65); border-color: rgba(125,135,148,.35); }
+.chem-b.c3 { box-shadow: 0 0 7px rgba(70,190,255,.85), 0 1px 3px rgba(0,0,0,.65), inset 0 1px 1px rgba(255,255,255,.25); }
 `;

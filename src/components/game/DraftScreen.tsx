@@ -39,6 +39,7 @@ export const draftCss = `
   position: absolute;
   width: 19%;
   transform: translate(-50%, -50%);
+  container-type: inline-size;
   animation: dr-slot-in .55s cubic-bezier(.2,.8,.2,1) both;
   animation-delay: calc(.45s + var(--i) * .1s);
   outline: none;
@@ -72,11 +73,11 @@ export const draftCss = `
   z-index: 0;
   white-space: nowrap;
   font-style: normal;
-  font-size: 10px;
+  font-size: max(5.5px, 9cqw);
   line-height: 1;
   font-weight: 700;
   letter-spacing: .06em;
-  padding: 5px 13px 4px;
+  padding: .45em 1.15em .35em;
   border-radius: 999px;
   background: linear-gradient(180deg, rgba(10,24,34,.94), rgba(4,12,18,.94));
   color: #5fd2ff;
