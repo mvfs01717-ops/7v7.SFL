@@ -112,7 +112,9 @@ export function cleanStyles(raw: unknown, isGK?: boolean): PsRaw {
     const e = (raw as Record<string, any>)[def.id];
     if (!e || typeof e !== 'object') continue;
     if (isGK !== undefined && (def.group === 'goleiro') !== isGK) continue;
-    out[def.id] = { lv: e.lv === 2 ? 2 : e.lv === 1 ? 1 : 0, tier: e.tier === 'gold' ? 'gold' : e.tier === 'silver' ? 'silver' : def.defaultTier };
+    // Não há nível separado: a raridade é o nível. Prata = efeito básico; ouro = efeito pleno.
+    const tier: PsTier = e.tier === 'gold' ? 'gold' : e.tier === 'silver' ? 'silver' : def.defaultTier;
+    out[def.id] = { lv: tier === 'gold' ? 2 : 0, tier };
   }
   return out;
 }

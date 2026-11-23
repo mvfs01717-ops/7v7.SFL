@@ -1,5 +1,5 @@
 import { PsIcon } from '@/components/game/PlayStyleBadges';
-import { MAX_STYLES, PLAYSTYLES, PS_BY_ID, PS_GROUP_LABEL, PS_LV_LABEL, cleanStyles, conflictsOf, type PsGroup, type PsTier } from '@/lib/game/playStyles';
+import { MAX_STYLES, PLAYSTYLES, PS_BY_ID, PS_GROUP_LABEL, cleanStyles, conflictsOf, type PsGroup, type PsTier } from '@/lib/game/playStyles';
 import { DEFAULT_STYLE, FOCUS_LABEL, MASTERY, ROLE_STYLES, SECTOR_LABEL, cleanMastery, focusOptions, rolesForPositions, type Focus, type Mastery } from '@/lib/playerRoles';
 import { ColorField } from '@/components/game/ColorField';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -1444,13 +1444,13 @@ function PlayerForm({
         setMessage(`No máximo ${MAX_STYLES} PlayStyles por jogador.`);
         return;
       }
-      next[id] = { lv: 0, tier: PS_BY_ID[id].defaultTier };
+      next[id] = { lv: PS_BY_ID[id].defaultTier === 'gold' ? 2 : 0, tier: PS_BY_ID[id].defaultTier };
     } else delete next[id];
     setMessage('');
     setForm({ ...form, play_styles: next });
   }
-  function patchPs(id: string, patch: { lv?: number; tier?: PsTier }) {
-    setForm({ ...form, play_styles: { ...(form.play_styles ?? {}), [id]: { ...(form.play_styles?.[id] ?? { lv: 0 }), ...patch } } });
+  function patchPs(id: string, patch: { tier: PsTier }) {
+    setForm({ ...form, play_styles: { ...(form.play_styles ?? {}), [id]: { ...(form.play_styles?.[id] ?? {}), lv: patch.tier === 'gold' ? 2 : 0, tier: patch.tier } } });
   }
   function patchRole(id: string, patch: { lv?: Mastery; style?: string; focus?: Focus }) {
     setForm({ ...form, role_mastery: { ...(form.role_mastery ?? {}), [id]: { ...(form.role_mastery?.[id] ?? { lv: 0 }), ...patch } } });
@@ -1674,8 +1674,8 @@ function PlayerForm({
         <fieldset className="role-mastery ps-adm">
           <legend>PlayStyles</legend>
           <style>{`
-            .ps-adm .ps-row { display: grid; grid-template-columns: minmax(0,1.5fr) auto auto; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
-            .ps-adm .ps-row.off .ps-lv, .ps-adm .ps-row.off .ps-tier { opacity: .3; pointer-events: none; }
+            .ps-adm .ps-row { display: grid; grid-template-columns: minmax(0,1.5fr) auto; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+            .ps-adm .ps-row.off .ps-tier { opacity: .3; pointer-events: none; }
             .ps-adm .ps-seg { display: inline-flex; border: 1px solid rgba(255,255,255,.15); border-radius: 8px; overflow: hidden; }
             .ps-adm .ps-seg button { background: transparent; color: inherit; border: 0; padding: 6px 10px; min-height: 36px; cursor: pointer; }
             .ps-adm .ps-seg button.on { background: rgba(55,214,122,.22); color: #37d67a; }
@@ -1686,7 +1686,7 @@ function PlayerForm({
             .ps-adm .ps-group { font-size: 11px; letter-spacing: .08em; opacity: .6; margin: 10px 0 2px; }
             @media (max-width: 640px) { .ps-adm .ps-row { grid-template-columns: 1fr; } .ps-adm .ps-seg button { flex: 1; min-height: 44px; } }
           `}</style>
-          <small className="rm-help">Habilidades especiais do jogador (até {MAX_STYLES}). Ouro aparece ao lado da carta; prata aparece no verso (toque na carta para virar). Os efeitos entram na partida. Estilos que conflitam são resolvidos na partida (vale o primeiro marcado).</small>
+          <small className="rm-help">Habilidades especiais do jogador (até {MAX_STYLES}). A raridade é o nível: prata aparece no verso da carta (efeito básico) e ouro ao lado da carta (efeito pleno). Os efeitos entram na partida. Estilos que conflitam são resolvidos na partida (vale o primeiro marcado).</small>
           {(['ofensivo', 'defensivo', 'movimento', 'especial', 'goleiro'] as PsGroup[])
             .filter((g) => (g === 'goleiro') === (form.primary_position === 'GK'))
             .map((g) => (
@@ -1702,17 +1702,12 @@ function PlayerForm({
                         <input type="checkbox" checked={!!entry} onChange={(event) => togglePs(x.id, event.target.checked)} />
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><PsIcon id={x.id} tier={tier} size={26} /> {x.name}</span>
                       </label>
-                      <div className="ps-seg ps-lv" role="radiogroup" aria-label={`Nível de ${x.name}`}>
-                        {[0, 1, 2].map((lv) => (
-                          <button key={lv} type="button" role="radio" aria-checked={entry?.lv === lv} className={entry?.lv === lv ? 'on' : ''} onClick={() => patchPs(x.id, { lv })}>{PS_LV_LABEL[lv]}</button>
-                        ))}
-                      </div>
                       <div className="ps-seg ps-tier" role="radiogroup" aria-label={`Raridade de ${x.name}`}>
                         {(['gold', 'silver'] as PsTier[]).map((t) => (
                           <button key={t} type="button" role="radio" aria-checked={tier === t} className={tier === t ? `on ${t}` : ''} onClick={() => patchPs(x.id, { tier: t })}>{t === 'gold' ? 'Ouro' : 'Prata'}</button>
                         ))}
                       </div>
-                      {entry && <div className="ps-eff">{x.lv[entry.lv] ?? x.text} — {x.effect}</div>}
+                      {entry && <div className="ps-eff">{x.text} — {x.effect}</div>}
                       {clash.length > 0 && <div className="ps-warn">Conflita com {clash.join(', ')}: só um deles age na partida.</div>}
                     </div>
                   );

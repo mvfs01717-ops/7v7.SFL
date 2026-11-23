@@ -46,7 +46,7 @@ export function GoldRail({ list }: { list: CardStyle[] }) {
       {cur && (
         <div className="ps-pop" role="tooltip">
           <strong>{cur.def.name}</strong>
-          <span>{cur.def.lv[cur.lv]}</span>
+          <span>{cur.def.text}</span>
         </div>
       )}
     </div>
@@ -65,7 +65,7 @@ export function SilverBack({ list, name, onFlip }: { list: CardStyle[]; name: st
           <li key={s.def.id}>
             <button
               type="button"
-              title={`${s.def.name}: ${s.def.lv[s.lv]}`}
+              title={`${s.def.name}: ${s.def.text}`}
               onClick={(e) => {
                 e.stopPropagation();
                 setOpen(open === s.def.id ? null : s.def.id);
@@ -74,7 +74,7 @@ export function SilverBack({ list, name, onFlip }: { list: CardStyle[]; name: st
               <i aria-hidden="true"><PsIcon id={s.def.id} tier="silver" size={21} /></i>
               <span>{s.def.name}</span>
             </button>
-            {open === s.def.id && <small>{s.def.lv[s.lv]}</small>}
+            {open === s.def.id && <small>{s.def.text}</small>}
           </li>
         ))}
       </ul>
