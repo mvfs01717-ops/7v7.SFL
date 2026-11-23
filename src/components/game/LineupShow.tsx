@@ -6,7 +6,7 @@ import { average, groupAverage, slotOf } from '@/lib/game/helpers';
 import { positionNames, type Player, type Position, type Team } from '@/lib/game/types';
 import { TACTIC_INFO, type Tactic } from '@/lib/multiplayer';
 import { ChemBadge } from '@/components/game/ChemBadge';
-import { chemOf } from '@/lib/game/chemistry';
+import { chemOf, posPt } from '@/lib/game/chemistry';
 import { loadRoles } from '@/lib/playerRoles';
 
 // Apresentação da escalação (inspirada nas aberturas de partida do FIFA/FC):
@@ -186,7 +186,7 @@ export function LineupShow({
               >
                 <Card player={player} fluid />
                 <ChemBadge chem={chemOf(position, bySlot, { club: team, tactic: tactic ?? 'equilibrada', saved: loadRoles() })} inside />
-                <i>{position}</i>
+                <i>{posPt(position)}</i>
               </div>
             );
           })}

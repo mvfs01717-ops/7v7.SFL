@@ -5,6 +5,7 @@ import { Card, cardCss } from '@/components/game/Card';
 import { stadiumCss } from '@/lib/game/stadiumCss';
 import { RoleTag } from '@/components/game/RoleTag';
 import { ChemBadge, useChemTick } from '@/components/game/ChemBadge';
+import { posPt } from '@/lib/game/chemistry';
 import { SquadListPanel, SquadRatingPanel, formationLabel, squadRatingCss, squadStats } from '@/components/game/SquadRating';
 
 // ---------- Draft estilo campo: o campo aparece com as cartas escondidas e cada posição revela 3 cartas ----------
@@ -67,22 +68,23 @@ export const draftCss = `
   position: absolute;
   left: 50%;
   top: 100%;
-  transform: translate(-50%, -5px);
+  transform: translate(-50%, 3px);
   z-index: 0;
   white-space: nowrap;
   font-style: normal;
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1;
   font-weight: 700;
   letter-spacing: .06em;
-  padding: 11px 20px 6px;
-  border-radius: 50%;
-  background: radial-gradient(ellipse at 50% 30%, rgba(14,32,40,.96), rgba(4,12,16,.92));
-  color: #4fb0f0;
-  text-shadow: 0 0 6px rgba(79,176,240,.55);
-  box-shadow: 0 2px 6px rgba(0,0,0,.5), inset 0 0 0 1px rgba(79,176,240,.18);
+  padding: 5px 13px 4px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(10,24,34,.94), rgba(4,12,18,.94));
+  color: #5fd2ff;
+  text-shadow: 0 0 6px rgba(79,200,255,.6);
+  border: 1px solid rgba(79,200,255,.7);
+  box-shadow: 0 0 8px rgba(60,170,255,.4), 0 2px 6px rgba(0,0,0,.5), inset 0 0 6px rgba(60,170,255,.18);
 }
-.dr-slot.filled .dr-label { color: #4fb0f0; }
+.dr-slot.filled .dr-label { color: #5fd2ff; }
 .dr-slot.swappable { cursor: pointer; }
 .dr-slot.swappable:hover .dr-glow { transform: translateY(-3px); }
 .dr-slot.sel { z-index: 3; }
@@ -391,7 +393,7 @@ export function DraftScreen({
           </span>
         )}
         {player && isStarter && <ChemBadge chem={stats.rows.find((r) => r.position === slot)?.chemInfo ?? { value: 0, score: 0, parts: [], empty: true }} />}
-        <i className={`dr-label ${outOfPlace ? 'oop' : ''} `}>{outOfPlace ? `${label} · FORA −5` : label}</i>
+        <i className={`dr-label ${outOfPlace ? 'oop' : ''} `}>{outOfPlace ? `${posPt(label)} · FORA −5` : player && isStarter ? posPt(label) : label}</i>
       </div>
     );
   };

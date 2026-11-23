@@ -3,7 +3,7 @@ import { PENALTY_PREP_MS, slotOf } from '@/lib/game/helpers';
 import { positions, type Player, type Position, type Team } from '@/lib/game/types';
 import { Card, cardCss } from '@/components/game/Card';
 import { ChemBadge } from '@/components/game/ChemBadge';
-import { chemOf } from '@/lib/game/chemistry';
+import { chemOf, posPt } from '@/lib/game/chemistry';
 import { loadRoles } from '@/lib/playerRoles';
 import { FIELD_SPOTS, DraftField, draftCss } from '@/components/game/DraftScreen';
 import { setPieceOdds, SET_OPTIONS, SET_TITLE, type SetKind, type SetOption } from '@/lib/game/setpiece';
@@ -187,7 +187,7 @@ export function SubstitutionPanel({
           <Card player={shown} fluid onClick={() => toggleStarter(slot)} />
         </span>
         <ChemBadge chem={chem} inside />
-        <i className="dr-label">{reserve ? `${slot} · ENTRA` : locked ? `${slot} · ${slot === 'GK' ? 'GOLEIRO' : 'CAPITÃO ©'}` : slot}</i>
+        <i className="dr-label">{reserve ? `${posPt(slot)} · ENTRA` : locked ? `${posPt(slot)} · ${slot === 'GK' ? 'GOLEIRO' : 'CAPITÃO ©'}` : posPt(slot)}</i>
         <span className="ht-stam" title="Fôlego">
           <i style={{ width: `${reserve ? 100 : stamina}%`, background: reserve ? '#22c55e' : staminaColor(stamina) }} />
         </span>

@@ -6,14 +6,15 @@ import { chemTitle, type Chem } from '@/lib/game/chemistry';
 export function ChemBadge({ chem, inside = false }: { chem: Chem; inside?: boolean }) {
   if (chem.empty) return null;
   const v = chem.value;
+  // Três losangos (um por ponto de entrosamento): acesos em ciano conforme o nível
+  const D = 'M0 -4.3 L4.3 0 L0 4.3 L-4.3 0 Z';
   return (
     <span className={`chem-b c${v}${inside ? ' in' : ''}`} title={chemTitle(chem)} role="img" aria-label={`Entrosamento ${v} de 3`}>
-      <i className="chem-ring" aria-hidden="true" />
-      <svg className="chem-ico" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 2 L20.5 7 V17 L12 22 L3.5 17 V7 Z" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" />
-        <path d="M13.2 6.2 L8.4 13 h3.6 l-.9 4.8 L15.8 11 h-3.7 z" fill="currentColor" />
+      <svg className="chem-ico" viewBox="-12 -12 24 24" aria-hidden="true">
+        <path className={v >= 1 ? 'on' : ''} transform="translate(0 -6)" d={D} />
+        <path className={v >= 2 ? 'on' : ''} transform="translate(-6 3.5)" d={D} />
+        <path className={v >= 3 ? 'on' : ''} transform="translate(6 3.5)" d={D} />
       </svg>
-      <b>{v}</b>
     </span>
   );
 }
@@ -36,17 +37,13 @@ export function useChemTick(): number {
 }
 
 export const chemBadgeCss = `
-.chem-b { position: absolute; left: -4%; bottom: 4%; z-index: 6; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; color: #4da3ff; pointer-events: auto;
-  background: radial-gradient(circle at 35% 28%, #1d3a72, #07112a 70%); box-shadow: 0 0 9px rgba(60,140,255,.55), 0 2px 5px rgba(0,0,0,.6), inset 0 1px 1px rgba(255,255,255,.25); transition: color .35s, box-shadow .35s; }
-.chem-ring { position: absolute; inset: 0; border-radius: 50%; padding: 2px; box-sizing: border-box;
-  background: conic-gradient(from -60deg, var(--l1, rgba(255,255,255,.16)) 0 105deg, transparent 105deg 120deg, var(--l2, rgba(255,255,255,.16)) 120deg 225deg, transparent 225deg 240deg, var(--l3, rgba(255,255,255,.16)) 240deg 345deg, transparent 345deg 360deg);
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px)); mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px)); }
-.chem-b.c1 { --l1: currentColor; } .chem-b.c2 { --l1: currentColor; --l2: currentColor; } .chem-b.c3 { --l1: currentColor; --l2: currentColor; --l3: currentColor; }
-.chem-b .chem-ico { width: 13px; height: 13px; margin-top: -3px; filter: drop-shadow(0 0 3px currentColor); }
-.chem-b b { position: absolute; left: 0; right: 0; bottom: 2px; text-align: center; font: 800 8px/1 Inter, sans-serif; color: #fff; text-shadow: 0 0 3px #000; }
-.chem-b.in { left: 2px; bottom: 6px; }
-.chem-b.c0 { color: #7d8794; box-shadow: 0 2px 5px rgba(0,0,0,.6), inset 0 1px 1px rgba(255,255,255,.15); }
-.chem-b.c1 { color: #4a86d6; }
-.chem-b.c3 { color: #5cc4ff; box-shadow: 0 0 13px rgba(70,170,255,.85), 0 2px 5px rgba(0,0,0,.6), inset 0 1px 1px rgba(255,255,255,.3); }
-@media (max-width: 520px) { .chem-b { width: 22px; height: 22px; } .chem-b .chem-ico { width: 11px; height: 11px; } .chem-b b { font-size: 7px; bottom: 1px; } }
+.chem-b { position: absolute; left: -7%; bottom: -9px; z-index: 6; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; color: #4fd6ff; pointer-events: auto;
+  background: radial-gradient(circle at 35% 28%, #15305f, #050d22 72%); border: 1px solid rgba(79,214,255,.35); box-shadow: 0 0 8px rgba(60,160,255,.5), 0 2px 5px rgba(0,0,0,.65), inset 0 1px 1px rgba(255,255,255,.18); transition: box-shadow .35s; }
+.chem-b .chem-ico { width: 18px; height: 18px; }
+.chem-b .chem-ico path { fill: rgba(120,150,190,.28); transition: fill .3s, filter .3s; }
+.chem-b .chem-ico path.on { fill: currentColor; filter: drop-shadow(0 0 2.5px currentColor); }
+.chem-b.in { left: 2px; bottom: 4px; }
+.chem-b.c0 { box-shadow: 0 2px 5px rgba(0,0,0,.65); border-color: rgba(125,135,148,.35); }
+.chem-b.c3 { box-shadow: 0 0 12px rgba(70,190,255,.85), 0 2px 5px rgba(0,0,0,.65), inset 0 1px 1px rgba(255,255,255,.25); }
+@media (max-width: 520px) { .chem-b { width: 22px; height: 22px; bottom: -8px; } .chem-b .chem-ico { width: 15px; height: 15px; } }
 `;

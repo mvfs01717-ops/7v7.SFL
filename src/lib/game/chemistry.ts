@@ -9,6 +9,9 @@ import type { Player, Position, Team } from '@/lib/game/types';
 export const SQUAD_LINKS: [Position, Position][] = [
   ['GK', 'LB'], ['GK', 'RB'], ['LB', 'CM'], ['RB', 'CM'], ['CM', 'LF'], ['CM', 'RF'], ['CM', 'CF'], ['LF', 'CF'], ['RF', 'CF'],
 ];
+// Sigla da posição em português (GOL, ZAG, MC, PD, PE, ATA)
+export const POS_PT: Record<string, string> = { GK: 'GOL', LB: 'ZAG', RB: 'ZAG', CM: 'MC', RF: 'PD', LF: 'PE', CF: 'ATA' };
+export const posPt = (p: string): string => POS_PT[p] ?? p;
 export const neighborsOf = (position: Position): Position[] =>
   SQUAD_LINKS.flatMap(([a, b]) => (a === position ? [b] : b === position ? [a] : []));
 
