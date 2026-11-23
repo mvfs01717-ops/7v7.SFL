@@ -45,7 +45,7 @@ export const draftCss = `
 .dr-slot[role="button"] { cursor: pointer; }
 .dr-slot.filled { cursor: default; }
 .dr-slot:focus-visible .dr-glow { filter: drop-shadow(0 0 8px #fff); }
-.dr-glow { display: block; filter: drop-shadow(0 4px 6px rgba(0,0,0,.45)); }
+.dr-glow { display: block; position: relative; z-index: 1; filter: drop-shadow(0 4px 6px rgba(0,0,0,.45)); }
 .dr-slot.next .dr-glow { animation: dr-pulse 1.5s ease-in-out infinite; }
 .dr-slot:not(.filled):hover .dr-glow { filter: drop-shadow(0 0 12px rgba(245,184,0,.9)); transform: translateY(-3px); }
 .dr-glow { transition: transform .2s ease, filter .2s ease; }
@@ -67,14 +67,15 @@ export const draftCss = `
   position: absolute;
   left: 50%;
   top: 100%;
-  transform: translate(-50%, 1px);
+  transform: translate(-50%, -5px);
+  z-index: 0;
   white-space: nowrap;
   font-style: normal;
   font-size: 11px;
   line-height: 1;
   font-weight: 700;
   letter-spacing: .06em;
-  padding: 6px 18px 7px;
+  padding: 11px 20px 6px;
   border-radius: 50%;
   background: radial-gradient(ellipse at 50% 30%, rgba(14,32,40,.96), rgba(4,12,16,.92));
   color: #4fb0f0;
@@ -390,7 +391,7 @@ export function DraftScreen({
           </span>
         )}
         {player && isStarter && <ChemBadge chem={stats.rows.find((r) => r.position === slot)?.chemInfo ?? { value: 0, score: 0, parts: [], empty: true }} />}
-        <i className={`dr-label ${outOfPlace ? 'oop' : ''} ${player && isStarter ? 'has-chem' : ''}`}>{outOfPlace ? `${label} · FORA −5` : label}</i>
+        <i className={`dr-label ${outOfPlace ? 'oop' : ''} `}>{outOfPlace ? `${label} · FORA −5` : label}</i>
       </div>
     );
   };
