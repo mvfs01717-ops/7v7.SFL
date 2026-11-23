@@ -28,7 +28,10 @@ export type PlanItem = {
 // Disputa de pênaltis do multiplayer. Cada jogador grava SÓ na própria coluna (sem sobrescrever o outro):
 //  - shootout_host:  { choices, kicks }  (o anfitrião também resolve cada cobrança e grava o resultado em `kicks`)
 //  - shootout_guest: { choices }
-export type NetChoice = { x?: number; y?: number; pw?: number; dive?: number };
+// Cobrador: x,y (mira), pw (força, só pelo tempo de botão), m (posição do marcador de precisão no instante do comando), style.
+// Goleiro: dx,dy (ponto do mergulho), mode (antecipar | reagir), stay (fica no centro), shuf (deslocamento lateral na linha).
+// `dive` (coluna 0 a 2) é o formato antigo e ainda é aceito.
+export type NetChoice = { x?: number; y?: number; pw?: number; m?: number; style?: string; dive?: number; dx?: number; dy?: number; mode?: string; stay?: boolean; shuf?: number };
 export type NetKick = {
   shooter: 'host' | 'guest';
   playerId: string;
@@ -40,6 +43,14 @@ export type NetKick = {
   dur: number;
   arc: number;
   golaco: boolean;
+  // Sistema novo de pênaltis (opcionais: salas antigas continuam funcionando)
+  st?: string; // estilo (normal, colocado, cavadinha)
+  acc?: number; // precisão final 0 a 1
+  pw?: number; // força 0 a 1
+  sx?: number; // posição inicial do goleiro na linha (0 a 1)
+  cv?: number; // efeito lateral da bola
+  reb?: boolean; // defesa com rebote
+  rm?: number; // tempo de reação do goleiro (ms) antes de sair
 };
 export type NetShootout = { choices?: Record<string, NetChoice>; kicks?: NetKick[] };
 export type Room = {
