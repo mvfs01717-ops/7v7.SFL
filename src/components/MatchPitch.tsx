@@ -12,6 +12,7 @@ import { chooseContact, chooseTackle, CONTACT_ID, laneCut, segPoint, type Contac
 import { chooseDribble, dribbleBody, dribbleGeometry, moveFit, recordDribble, DRIBBLE_CAPTION, type DribbleCtx, type DribbleMove } from '@/lib/game/dribbles';
 import { aerialBonus, blockStyle, burstMul, contactMods, dribbleChanceMod, gkClaim, gkQuick, gkSweep, hasStyles, kOf, laneStyle, passBiasStyle, passErrMul, reactBonus, shotMods, shotRangeBonus, stumbleMul, styleMove, tackleStyleMod, TAG_ID, type PSet } from '@/lib/game/playStyles';
 import { anticip, dribbleMod, errMul, gkHold, passAdj, roleMove, sweepChance, tackleMod, type Lv, type RC } from '@/lib/game/roleLevels';
+import { TRAIT_LABEL, clashDy, decide, learnFail, learnMul, learnTry, memConf, memNote, memShare, mainTrait, newLearn, newMemory, perceiveErr, traitsOf, type Opt, type Traits } from '@/lib/game/intel2';
 import { ambientChoice, choosePlay, createIntel, passBias, passTaste, personalityOf, recordPass, recordPlay, type Intel, type PlayKind, type Style } from '@/lib/game/playIntel';
 import { ReplayPlayer, type ClipData } from '@/components/game/ReplayPlayer';
 
@@ -671,6 +672,14 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
   const ctlRef = useRef<Record<string, { t0: number; plan: ContactPlan; ang: number; side: number }>>({});
   const looseRef = useRef<{ key: string; vx: number; vy: number; until: number } | null>(null);
   const shieldRef = useRef<Record<string, number>>({});
+  // Football Intelligence 2.0: memória do adversário, aprendizado e personalidade (em memória, só durante a partida)
+  const memRef = useRef(newMemory());
+  const learnRef = useRef(newLearn());
+  const traitsRef = useRef<Record<string, Traits>>({});
+  const lastOptRef = useRef<Record<string, { opt: Opt; at: number }>>({});
+  const shieldStreakRef = useRef<Record<string, number>>({});
+  const clashRef = useRef<Record<string, { dy: number; until: number }>>({});
+  const decLogRef = useRef<Record<string, number>>({});
   const coverUse = useRef<Record<string, number>>({});
   // Jogabilidade emergente: segunda bola, contra-ataque, placar/tempo e leitura de região
   const sbRef = useRef<{ vx: number; vy: number; t0: number; until: number; from: Side | null; cap: string; runs: ReturnType<typeof secondBallRuns> } | null>(null);
@@ -893,6 +902,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
                   st.poss = opp.side;
                   st.overrides = {};
                   st.ambientAt = t + 450;
+                  learnFail(learnRef.current, h.key, 'dribble', t);
                   setCaption(`${opp.name} desarma ${h.name} no drible`);
                 }
               }
@@ -978,6 +988,44 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     const v = vert + safe + short;
     if (v > 0.12 && Math.random() < 0.15) noteRole(h, rl.role, rl.lv, vert > safe && vert > short ? 'passe-vertical' : short > safe ? 'passe-curto' : 'passe-seguro', tnow());
     return v;
+  }
+  // Personalidade (6 traços estáveis por atleta)
+  function traitsFor(s: { name: string; ovr: number; pos: string }): Traits {
+    return (traitsRef.current[s.name] ??= traitsOf(s.name, s.ovr, (rolePers.current[s.name] = rolePers.current[s.name] ?? personalityOf(s.name, s.ovr)), s.pos));
+  }
+  // Percepção limitada do portador: ele não enxerga os companheiros nem os marcadores com precisão perfeita (erro cresce com distância, pressão, cansaço e ângulo)
+  function perceiveOptions(h: Slot, all: Slot[], pressure: number, d: number): { passQ: number; vision: number; backOpen: boolean } {
+    const obs = { x: h.x, y: h.y, ovr: h.ovr, tired: fatigueOf(h.key), face: d };
+    let best = 0;
+    let vs = 0;
+    let n = 0;
+    let backOpen = false;
+    for (const m of all) {
+      if (m.side !== h.side || m.key === h.key || m.pos === 'GK') continue;
+      const dd = dist(m, h);
+      if (dd > 340 || dd < 25) continue;
+      const e = perceiveErr(obs, { x: m.x, y: m.y, vx: m.vx, vy: m.vy }, pressure);
+      const q = 1 / (1 + e / 22);
+      const g = (Math.random() + Math.random() + Math.random() - 1.5) * 0.8;
+      const free = clamp((nearestOpp(all, h.side, m).d + g * e) / 110, 0, 1);
+      const cut = all.some((o) => o.side !== h.side && o.pos !== 'GK' && segPoint(o.x, o.y, h.x, h.y, m.x, m.y).d < 24 + g * e * 0.4);
+      const v = free * (cut ? 0.35 : 1) * (dd > 260 ? 0.8 : 1);
+      if (v > best) best = v;
+      vs += q;
+      n += 1;
+      if ((m.x - h.x) * d < -20 && v > 0.5) backOpen = true;
+    }
+    return { passQ: best, vision: n ? vs / n : 0.5, backOpen };
+  }
+  // Termo da IA 2.0 na escolha do passe: leitura imperfeita do receptor, o que já falhou com ele e o jeito do jogador (criativo busca o vertical, conservador o seguro)
+  function iaPassTerm(h: Slot, cand: Slot, fwd: number, all: Slot[], pressure: number, now: number): number {
+    if (!animOn('ia.percepcao')) return 0;
+    const e = perceiveErr({ x: h.x, y: h.y, ovr: h.ovr, tired: fatigueOf(h.key), face: dirOf(h.side) }, { x: cand.x, y: cand.y, vx: cand.vx, vy: cand.vy }, pressure);
+    const g = (Math.random() + Math.random() + Math.random() - 1.5) * 0.8;
+    const tr = traitsFor(h);
+    const lm = animOn('ia.aprendizado') ? learnMul(learnRef.current, `${h.key}>${cand.key}`, 'pass', now) - 1 : 0;
+    const open = (nearestOpp(all, h.side, cand).d - 60) / 100;
+    return g * (e / 30) * 0.5 + lm * 1.4 + (tr.criativo - 0.5) * 0.35 * clamp(fwd, -1, 1.5) - (tr.conservador - 0.5) * 0.3 * clamp(fwd, 0, 1.5) + open * 0.15 * tr.inteligente;
   }
   // Fadiga (0 a 1) de um jogador: vem do fôlego calculado no App (slow vai de 0 a 0,2). Cansado erra mais, reage mais devagar e perde disputas.
   function fatigueOf(key: string): number {
@@ -1201,6 +1249,11 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           }
         }
       }
+      if (step.kind === 'pass' && step.ambient && !step.scripted && holder && recv && holder.side === recv.side) {
+        learnTry(learnRef.current, `${holder.key}>${recv.key}`, 'pass', now);
+        learnTry(learnRef.current, holder.key, 'pass', now);
+        lastOptRef.current[holder.key] = { opt: 'pass', at: now };
+      }
       // Passes de rotina podem ser interceptados por quem fecha a linha de passe (perto do trajeto, não só do destino)
       if (dest && step.ambient && !step.scripted && holder) {
         let best: { slot: Slot; p: number; x: number; y: number; t: number } | null = null;
@@ -1219,6 +1272,16 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
             p = ((ol && ol.role === 'gk-libero' && ol.lv > 0 ? sweepChance(ol.lv) : 0) + gsw) * (1 - sg.d / 80) * (1 - 0.35 * fatigueOf(o.key));
           } else {
             p = laneCut(sg.d, sg.t, step.dur, o.ovr);
+            if (p > 0 && animOn('ia.memoria')) {
+              // O defensor lê hábitos do adversário (corridas nas costas do recebedor, lado preferido dos passes), mas só com amostra e nunca perfeito; a leitura em si também é imperfeita
+              const mem = memRef.current;
+              const band = recv.y < MID_Y - 55 ? 'passL' : recv.y > MID_Y + 55 ? 'passR' : 'passC';
+              const sh = memShare(mem, holder.side, ['passL', 'passC', 'passR'], 'team', now);
+              const cm = Math.max(memConf(mem, holder.side, 'run', recv.key, now), sh.top === band ? Math.max(0, (sh.share - 0.5) * 0.9) : 0);
+              const q = 1 / (1 + perceiveErr({ x: o.x, y: o.y, ovr: o.ovr, tired: fatigueOf(o.key), face: dirOf(o.side) }, { x: lead.x, y: lead.y, vx: 0, vy: 0 }, 0) / 22);
+              p = Math.min(0.6, p * (1 + cm * 0.55) * (0.75 + 0.5 * q));
+              if (cm > 0.25) { countUse('ia.memoria'); if (now - (decLogRef.current[`${o.key}.mem`] ?? -1e9) > 8000) { decLogRef.current[`${o.key}.mem`] = now; logDecision(o.name, 'leitura do adversário', `já viu ${sh.top === band ? 'o time insistir nesse lado' : recv.name + ' receber nas costas'} (confiança ${(cm * 100).toFixed(0)}%)`); } }
+            }
             const lsy = laneStyle(psOf(o));
             if (p > 0 && lsy.cut > 1) p = Math.min(0.6, p * lsy.cut + lsy.read * rep);
             if (p > 0 && ol && ol.lv > 0) {
@@ -1255,6 +1318,9 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           const ck = cautiousRef.current[recv.side];
           ck.n = ck.n * Math.exp(-(now - ck.at) / 25000) + 1;
           ck.at = now;
+          learnFail(learnRef.current, `${holder.key}>${recv.key}`, 'pass', now);
+          learnFail(learnRef.current, holder.key, 'pass', now);
+          countUse('ia.aprendizado');
           logDecision(best.slot.name, 'interceptação', `fechou a linha de passe de ${holder.name} (chance ${(best.p * 100).toFixed(0)}%)`);
         }
       }
@@ -1267,6 +1333,14 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
       mapRefRef.current.current ??= createMatchMap();
       recordMapPass(mapRefRef.current.current, holder.key, recv.key);
     }
+    // Memória do adversário: o que o time faz com a bola (lado dos passes, curto ou longo, corridas nas costas, chute de quem recebe)
+    if (step.kind === 'pass' && recv && holder && holder.side === recv.side && holder.key !== recv.key && dest === recv.key && animOn('ia.memoria')) {
+      const dd0 = dist(holder, recv);
+      memNote(memRef.current, holder.side, recv.y < MID_Y - 55 ? 'passL' : recv.y > MID_Y + 55 ? 'passR' : 'passC', 'team', now);
+      memNote(memRef.current, holder.side, dd0 > 230 ? 'long' : 'short', 'team', now);
+      if ((recv.x - holder.x) * dirOf(holder.side) > 110 && nearestOpp(all, holder.side, recv).d < 90) memNote(memRef.current, holder.side, 'run', recv.key, now);
+    }
+    if (step.kind === 'shot' && holder) memNote(memRef.current, holder.side, 'shoot', holder.key, now);
     if (caption) setCaption(caption);
     // Contato com a bola: impulso do disco e clarão/anel conforme a força
     if (holder && (step.kind === 'pass' || step.kind === 'shot')) {
@@ -2310,6 +2384,11 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
             const tl = lvOf(dfn);
             if (tl && animOn('rol.niveis')) tk.winMod += tackleMod(tl.role, tl.lv);
             tk.winMod += tackleStyleMod(psOf(dfn), psOf(h));
+            if (animOn('ia.memoria')) {
+              memNote(memRef.current, dfn.side, 'press', 'team', now, 0.5);
+              // Quem já viu esse portador conduzir sempre para o mesmo lado fecha melhor (pouco: nunca perfeito)
+              tk.winMod += Math.max(memConf(memRef.current, h.side, 'carryU', h.key, now), memConf(memRef.current, h.side, 'carryD', h.key, now)) * 0.08;
+            }
             if (psOf(dfn).desarmePreciso) noteStyle(dfn, 'desarmePreciso', now, 'bote com leitura do momento');
             if (psOf(h).pivoTecnico) noteStyle(h, 'pivoTecnico', now, 'protegeu a bola do desarme');
             countUse(`def.${tk.kind}`);
@@ -2318,6 +2397,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
             const win = Math.random() < clamp(tk.kind === 'disputa' ? 0.5 + (base - 0.5) * 0.5 + tk.winMod : base + tk.winMod, 0.15, 0.85);
             const dirH = dirOf(h.side);
             const slide = tk.kind === 'carrinho';
+            if (win) { const lo = lastOptRef.current[h.key]; if (lo && now - lo.at < 3500 && lo.opt !== 'pass') learnFail(learnRef.current, h.key, lo.opt, now); }
             const dispute = tk.kind === 'disputa';
             st.tackleAt = now + 1000;
             {
@@ -2429,6 +2509,28 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           const pressure = clamp((95 - near.d) / 60, 0, 1);
           const uu = urgOf(h.side, now);
           heatAdd(heatRef.current[h.side], h.y, FY0, FY1, now);
+          // Football Intelligence 2.0: o portador avalia as opções (passar, driblar, conduzir, proteger, recuar) com percepção limitada, personalidade, função, memória e placar
+          let dec: ReturnType<typeof decide> | null = null;
+          if (h.pos !== 'GK' && animOn('ia.decisao')) {
+            const pc = perceiveOptions(h, all, pressure, d);
+            const rl0 = lvOf(h);
+            const ahOpp0 = all.filter((o) => o.side !== h.side && o.pos !== 'GK' && (o.x - h.x) * d > 20);
+            const room0 = ahOpp0.length ? Math.min(...ahOpp0.map((o) => (o.x - h.x) * d - Math.abs(o.y - h.y) * 0.4)) : 400;
+            const lm = (o: Opt) => (animOn('ia.aprendizado') ? learnMul(learnRef.current, h.key, o, now) : 1);
+            dec = decide({
+              pressure, nearD: near.d, toGoal, room: room0, canDribble: !!aheadOpp(all, h) && toGoal > 70, passQ: pc.passQ, backOpen: pc.backOpen,
+              urgency: uu, tired: fatigueOf(h.key), vision: pc.vision, role: rl0?.role, traits: traitsFor(h),
+              learn: { dribble: lm('dribble'), carry: lm('carry'), pass: lm('pass'), shield: lm('shield'), back: lm('back') },
+              oppPress: animOn('ia.memoria') ? memConf(memRef.current, otherSide(h.side), 'press', 'team', now) : 0,
+              shieldStreak: shieldStreakRef.current[h.key] ?? 0,
+            });
+            countUse('ia.decisao');
+            if (dec.opt !== 'shield') shieldStreakRef.current[h.key] = 0;
+            if ((dec.opt !== 'pass' || pressure > 0.5) && now - (decLogRef.current[h.key] ?? -1e9) > 5000) {
+              decLogRef.current[h.key] = now;
+              logDecision(`${h.name} (${TRAIT_LABEL[mainTrait(traitsFor(h))]}${rl0?.role ? ', ' + rl0.role : ''})`, `decisão: ${dec.opt}`, dec.why);
+            }
+          }
           // Contra-ataque: logo após recuperar a bola o jogador lê espaço nas costas, adversários perto, companheiro livre e passe vertical
           let ctr: { mode: 'vertical' | 'conducao'; r?: Slot } | null = null;
           const cs0 = counterRef.current;
@@ -2572,7 +2674,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
             for (const o of all) {
               if (o.side === h.side || o.pos === 'GK') continue;
               const sg = segPoint(o.x, o.y, h.x, h.y, goalX, MID_Y);
-              const p = Math.min(0.75, blockChance(sg.d, sg.t, o.ovr, pressure) * blockStyle(psOf(o)) * sm.block);
+              const p = Math.min(0.75, blockChance(sg.d, sg.t, o.ovr, pressure) * blockStyle(psOf(o)) * sm.block * (animOn('ia.memoria') ? 1 + memConf(memRef.current, h.side, 'shoot', h.key, now) * 0.4 : 1));
               if (p > 0 && (!blk || p > blk.p)) blk = { o, x: sg.x, y: sg.y, t: sg.t, p };
             }
             if (blk && animOn('ia.bloqueio') && Math.random() < blk.p) {
@@ -2658,15 +2760,31 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
                 st.queue.push({ kind: 'pass', to: { slot: over.key }, dur: 480, ambient: true });
               }
             }
+          } else if (dec && dec.opt === 'shield') {
+            // Sem opção boa e pressionado: protege a posse de costas para o marcador (reduz o desarme) e espera o apoio
+            shieldStreakRef.current[h.key] = (shieldStreakRef.current[h.key] ?? 0) + 1;
+            shieldRef.current[h.key] = now + 1100;
+            lastOptRef.current[h.key] = { opt: 'shield', at: now };
+            countUse('ia.protege');
+            const hold = all.filter((x) => x.side === h.side && x.key !== h.key && x.pos !== 'GK' && dist(x, h) < 240 && (x.x - h.x) * d > -90).sort((a, b) => dist(a, h) - dist(b, h))[0];
+            if (hold) st.overrides[hold.key] = { x: clamp(h.x - d * 34, FX0 + 20, FX1 - 20), y: clamp(hold.y + (hold.y < h.y ? -26 : 26), FY0 + 20, FY1 - 20), until: now + 1000, speed: 1.5 };
+            st.queue.push({ kind: 'wait', to: { x: h.x, y: h.y }, dur: 650, ambient: true, caption: `${h.name} protege a bola e espera apoio` });
+          } else if (dec && dec.opt === 'back' && (() => { const bk = all.filter((s2) => s2.side === h.side && s2.key !== h.key && s2.pos !== 'GK' && (s2.x - h.x) * d < -20 && dist(s2, h) < 320).sort((a, b) => nearestOpp(all, h.side, b).d - nearestOpp(all, h.side, a).d)[0]; if (!bk) return false; recordPass(intelRef.current, h.key, bk.key); learnTry(learnRef.current, h.key, 'back', now); lastOptRef.current[h.key] = { opt: 'back', at: now }; countUse('ia.recua'); st.queue.push({ kind: 'pass', to: { slot: bk.key }, dur: passDur(dist(h, bk)), ambient: true, caption: `${h.name} sem espaço: recua para ${bk.name}` }); return true; })()) {
+            // (recuo executado na condição)
           } else if (
             h.pos !== 'GK' &&
             toGoal > 70 &&
             aheadOpp(all, h) &&
-            Math.random() < 0.6
+            (dec ? dec.opt === 'dribble' : Math.random() < 0.6)
           ) {
             const opp = aheadOpp(all, h) as Slot;
+            learnTry(learnRef.current, h.key, 'dribble', now);
+            lastOptRef.current[h.key] = { opt: 'dribble', at: now };
             st.queue.push(...dribbleSteps(h, opp, true, false));
-          } else if (h.pos !== 'GK' && toGoal > 190 && near.d > 42 && Math.random() < 0.55) {
+          } else if (h.pos !== 'GK' && toGoal > 190 && near.d > 42 && (dec ? dec.opt === 'carry' : Math.random() < 0.55)) {
+            learnTry(learnRef.current, h.key, 'carry', now);
+            lastOptRef.current[h.key] = { opt: 'carry', at: now };
+            memNote(memRef.current, h.side, h.y < MID_Y ? 'carryU' : 'carryD', h.key, now);
             st.queue.push({
               kind: 'carry',
               to: {
@@ -2685,7 +2803,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
               st.queue.push({ kind: 'pass', to: { slot: cf.key }, dur: 640, ambient: true, arc: 12, caption: `${h.name} cruza para ${cf.name}` });
             } else {
               const hStyle = stylesRef.current?.[h.side]?.[h.pos] as Style | undefined;
-              const r = choosePass(h, all, (cand, fwd) => passBias(intelRef.current, h.key, cand.key) + passTaste({ name: h.name, ovr: h.ovr, style: hStyle }, fwd) + uu * clamp(fwd, -1.5, 1.5) * 0.35 + rolePass(h, fwd, cand) + psPass(h, cand, fwd));
+              const r = choosePass(h, all, (cand, fwd) => passBias(intelRef.current, h.key, cand.key) + passTaste({ name: h.name, ovr: h.ovr, style: hStyle }, fwd) + uu * clamp(fwd, -1.5, 1.5) * 0.35 + rolePass(h, fwd, cand) + psPass(h, cand, fwd) + iaPassTerm(h, cand, fwd, all, pressure, now));
               if (r) recordPass(intelRef.current, h.key, r.key);
               if (r) {
                 const dd = dist(h, r);
@@ -2963,6 +3081,30 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
             ty = lerp(ty, rr.mv.y, rr.mv.w);
             if (rr.mv.speed) speedMul = Math.max(speedMul, rr.mv.speed);
             if (rr.style) { const sid = TAG_ID[rr.mv.tag ?? '']; if (sid) noteStyle(s, sid, now, rr.mv.tag ?? ''); } else noteRole(s, rr.role, rr.lv, rr.mv.tag, now);
+          }
+          // Coordenação (IA 2.0): quem tem a posse não disputa o mesmo espaço do companheiro (o mais "atrás" na fila abre para o lado livre, com histerese)
+          if (inPoss && animOn('ia.coordenacao')) {
+            const cz = clashRef.current[s.key];
+            let dyc = 0;
+            if (cz && cz.until > now) dyc = cz.dy;
+            else {
+              const prio = (k: string) => k.charCodeAt(k.length - 1) + k.length * 3;
+              dyc = clashDy({ x: tx, y: ty, prio: prio(s.key) }, all.filter((m) => m.side === s.side && m.key !== s.key && m.pos !== 'GK' && st.holder !== m.key).map((m) => ({ x: m.x, y: m.y, prio: prio(m.key) })), FY0 + 24, FY1 - 24);
+              clashRef.current[s.key] = { dy: dyc, until: now + (dyc ? 1600 : 500) };
+              if (dyc) { if (now - (decLogRef.current[`${s.key}.cz`] ?? -1e9) > 9000) { decLogRef.current[`${s.key}.cz`] = now; countUse('ia.coordenacao'); logDecision(s.name, 'evita o espaço do companheiro', `abre ${Math.abs(dyc).toFixed(0)} px para o lado livre`); } }
+            }
+            if (dyc) ty = clamp(ty + dyc, FY0 + 20, FY1 - 20);
+          }
+          // Cobertura automática (IA 2.0): quando o companheiro da defesa sai para pressionar o portador, o outro recua em diagonal e protege o espaço deixado
+          if (!inPoss && (s.pos === 'LB' || s.pos === 'RB') && st.holder && animOn('ia.cobertura')) {
+            const hold2 = get(st.holder);
+            const mate2 = all.find((m) => m.side === s.side && m.key !== s.key && (m.pos === 'LB' || m.pos === 'RB'));
+            if (hold2 && hold2.side !== s.side && mate2 && dist(mate2, hold2) < 80 && dist(s, hold2) > dist(mate2, hold2) + 15 && (mate2.x - s.x) * d > 18) {
+              const w2 = 0.5 * (0.7 + 0.5 * traitsFor(s).inteligente);
+              tx = lerp(tx, mate2.x - d * 46, w2);
+              ty = lerp(ty, lerp(mate2.y, MID_Y, 0.5), w2);
+              if (now - (decLogRef.current[`${s.key}.cv`] ?? -1e9) > 8000) { decLogRef.current[`${s.key}.cv`] = now; countUse('ia.cobertura'); logDecision(s.name, 'cobertura', `${mate2.name} saiu para pressionar: protege o espaço atrás`); }
+            }
           }
         }
 
