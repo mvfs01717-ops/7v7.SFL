@@ -19,6 +19,8 @@ import type { Shout } from '@/lib/game/coach';
 import { HalftimeBreak, PenaltyPrep, SetPiecePrep, SubstitutionPanel, staminaColor, type SetPieceInfo } from '@/components/game/Halftime';
 import { SET_TITLE, type SetKind, type SetOption } from '@/lib/game/setpiece';
 import type { CExec } from '@/lib/game/corner';
+import RestartTaker from '@/components/game/RestartTaker';
+import type { RestartReq } from '@/lib/game/restart';
 import { ambienceLabel, pickAmbience, weatherAt, wetFromOf, type Ambience } from '@/lib/game/ambience';
 import { stadiumFor } from '@/lib/game/stadium';
 import { TvOverlay } from '@/components/game/TvOverlay';
@@ -196,6 +198,8 @@ export function MatchScreen({
   const liveRef = useRef<LiveSnap | null>(null);
   const narrow = useNarrow();
   const [feedCaption, setFeedCaption] = useState('Bola rolando');
+  // Lateral / tiro de meta do seu time: o campo congela e você escolhe receptor e jogada (só no jogo solo)
+  const [restartReq, setRestartReq] = useState<RestartReq | null>(null);
   const spInfo = useMemo<SetPieceInfo | null>(() => {
     if (!setPiece) return null;
     const taker = [...userTeam.filter((p) => ['CM', 'LF', 'RF'].includes(slotOf(p)))].sort((a, b) => b.overall - a.overall)[0];
@@ -326,7 +330,8 @@ export function MatchScreen({
             workRef={staminaOn ? workRef : undefined}
             endHalfRef={endHalfRef}
             deadBallRef={deadBallRef}
-            hold={pause === 'setpiece' || (!!setPiece?.floating && setPiece.kind === 'escanteio')}
+            hold={pause === 'setpiece' || (!!setPiece?.floating && setPiece.kind === 'escanteio') || !!restartReq}
+            onRestart={net ? undefined : setRestartReq}
             hideOverlays
             onCaption={setFeedCaption}
           />
@@ -373,6 +378,7 @@ export function MatchScreen({
             <SubstitutionPanel club={club} userTeam={userTeam} bench={bench} tactic={tactic} minute={minute} onConfirm={onSubs} limitSec={multiplayer ? SUBS_WINDOW_SEC : undefined} />
           )}
           {!narrow && coach && !pause && !penaltyPhase && !penaltyPrep && minute < 90 && <CoachPanel tactic={tactic} minute={minute} shoutsLeft={coach.shoutsLeft} activeUntil={coach.activeUntil} activeShout={coach.activeShout} onTactic={coach.onTactic} onShout={coach.onShout} delayNote={coach.delayNote} />}
+          {restartReq && <RestartTaker key={`${restartReq.kind}-${restartReq.taker}-${restartReq.ball.x | 0}`} req={restartReq} live={{ club, opponent, home: homeSide, ambience, score }} onDone={(c) => { const r = restartReq; setRestartReq(null); r.resolve(c); }} />}
           {(pause === 'setpiece' || setPiece?.floating) && setPiece && onSetPiece && <SetPiecePrep key={setPiece.minute} kind={setPiece.kind} minute={setPiece.minute} club={club} floating={!!setPiece.floating} onPick={onSetPiece} onCorner={onCorner} live={{ club, opponent, home: homeSide, ambience, score }} info={spInfo} />}
           {rivalNote && (
             <div role="status" style={{ position: 'absolute', left: 8, top: 70, zIndex: 7, padding: '6px 12px', borderRadius: 10, background: 'rgba(8,12,20,.92)', border: '1px solid #ff6a4f', color: '#fff', font: '800 11px Inter, sans-serif' }}>

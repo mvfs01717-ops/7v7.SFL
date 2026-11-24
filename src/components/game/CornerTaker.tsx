@@ -395,7 +395,7 @@ function invertH(h: number[]): number[] | null {
   return [(e * j - f * i) / det, (c * i - b * j) / det, (b * f - c * e) / det, (f * g - d * j) / det, (a * j - c * g) / det, (c * d - a * f) / det, (d * i - e * g) / det, (b * g - a * i) / det, (a * e - b * d) / det];
 }
 
-const CSS = `
+export const CSS = `
 .ct-wrap { color: #fff; font-family: Inter, system-ui, sans-serif; }
 .ct-wrap:not(.ct-float) { position: fixed; inset: 0; z-index: 520; display: grid; align-items: center; justify-items: center; background: rgba(2,5,10,.92); padding: 6px; overflow-y: auto; }
 .ct-float { position: absolute; left: 50%; bottom: 46px; transform: translateX(-50%); z-index: 8; width: min(96%, 640px); }

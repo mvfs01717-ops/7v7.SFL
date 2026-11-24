@@ -13,6 +13,7 @@ import { chooseDribble, dribbleBody, dribbleGeometry, moveFit, recordDribble, DR
 import { aerialBonus, blockStyle, burstMul, contactMods, dribbleChanceMod, gkClaim, gkQuick, gkSweep, hasStyles, kOf, laneStyle, passBiasStyle, passErrMul, reactBonus, shotMods, shotRangeBonus, stumbleMul, styleMove, tackleStyleMod, TAG_ID, type PSet } from '@/lib/game/playStyles';
 import { anticip, dribbleMod, errMul, gkHold, passAdj, roleMove, sweepChance, tackleMod, type Lv, type RC } from '@/lib/game/roleLevels';
 import { PLAY_RUNS, predictLand, PLAY_INFO, type CExec } from '@/lib/game/corner';
+import { loseChance, type RKind, type RestartChoice, type RestartReq } from '@/lib/game/restart';
 import { TRAIT_LABEL, clashDy, decide, learnFail, learnMul, learnTry, memConf, memNote, memShare, mainTrait, newLearn, newMemory, perceiveErr, traitsOf, type Opt, type Traits } from '@/lib/game/intel2';
 import { ambientChoice, choosePlay, createIntel, passBias, passTaste, personalityOf, recordPass, recordPlay, type Intel, type PlayKind, type Style } from '@/lib/game/playIntel';
 import { ReplayPlayer, type ClipData } from '@/components/game/ReplayPlayer';
@@ -78,6 +79,8 @@ type Props = {
   endHalfRef?: { current: boolean };
   // Jogada ensaiada em escolha: o campo inteiro congela (bola, jogadores e relógio das animações) até a decisão
   hold?: boolean;
+  // Lateral e tiro de meta do time do usuário: o campo pede a escolha (receptor e jogada) e continua quando `resolve` é chamado. Sem isto, cobra sozinho.
+  onRestart?: (req: RestartReq) => void;
   // Ordem ao vivo do técnico para o time do usuário: muda a linha e a largura do time (pressionar, recuar, pelas pontas)
   order?: 'pressionar' | 'recuar' | 'pontas' | null;
   // Legenda e balões da torcida saem de cima do campo: quem usa o campo mostra esses textos em outro lugar
@@ -514,9 +517,70 @@ export type LiveSnap = {
   fx: { def: number; hold: number; stretch: number; hrot: number; hsc: number } | null;
 };
 
-export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = 'user', ambience, crowd, onClip, mapRef, club, opponent, userTeam, botTeam, events, onGoal, restartKey, workRef, endHalfRef, deadBallRef, hold = false, hideOverlays = false, onCaption, order = null, shapes, styles, levels, playstyles }: Props) {
+export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = 'user', ambience, crowd, onClip, mapRef, club, opponent, userTeam, botTeam, events, onGoal, restartKey, workRef, endHalfRef, deadBallRef, hold = false, onRestart, hideOverlays = false, onCaption, order = null, shapes, styles, levels, playstyles }: Props) {
   const holdRef = useRef(false);
   holdRef.current = hold;
+  const onRestartRef = useRef(onRestart);
+  onRestartRef.current = onRestart;
+  // Pede ao jogador a escolha da reposição (o campo congela pelo `hold`); `apply` ajusta os passos já na fila
+  const askRestart = (kind: RKind, takerKey: string, ball: Point, cands: string[], apply: (c: RestartChoice) => void): boolean => {
+    const cb = onRestartRef.current;
+    if (!cb) return false;
+    cb({ kind, minute: 0, players: slotsRef.current.map((x) => ({ key: x.key, name: x.name, pos: x.pos, ovr: x.ovr, side: x.side, x: x.x, y: x.y })), taker: takerKey, ball, candidates: cands, resolve: apply });
+    return true;
+  };
+  // Chance de o adversário cortar e quem corta; devolve os ajustes do passo
+  const restartShape = (kind: RKind, c: RestartChoice, taker: Slot, O: Side) => {
+    const all2 = slotsRef.current;
+    const rc = all2.find((x) => x.key === c.target && x.side === O && x.pos !== 'GK');
+    const tk = all2.find((x) => x.key === taker.key) ?? taker;
+    if (!rc) return null;
+    const no = nearestOpp(all2, O, rc);
+    const p = loseChance(kind, c.play, dist(tk, rc), no.d, tk.ovr, rc.ovr);
+    const lost = !!no.slot && Math.random() < p;
+    const dur = c.play === 'longo' ? 860 : c.play === 'curto' ? 420 : c.play === 'rapido' ? 470 : c.play === 'medio' ? 650 : 560;
+    const arc = c.play === 'longo' ? 32 : c.play === 'curto' ? 5 : c.play === 'medio' ? 16 : 14;
+    return { rc, opp: no.slot, lost, dur, arc };
+  };
+  // Tiro de meta: o goleiro pega a bola e, quando é do usuário, ele escolhe o alvo e o tipo do passe
+  const goalKick = (O: Side, scripted: boolean) => {
+    const st0 = engine.current;
+    const gkKey = `${O}-GK`;
+    const moveStep: Step = { kind: 'move', to: { slot: gkKey }, dur: 800, caption: 'Tiro de meta', scripted };
+    const all2 = slotsRef.current;
+    const gk = all2.find((x) => x.key === gkKey);
+    const mates = all2.filter((x) => x.side === O && x.pos !== 'GK');
+    if (O !== 'user' || !onRestartRef.current || !gk || mates.length === 0) {
+      st0.queue.unshift(moveStep);
+      return;
+    }
+    const first = [...mates].sort((a, b) => dist(a, gk) - dist(b, gk))[0];
+    const passStep: Step = { kind: 'pass', to: { slot: first.key }, dur: 650, arc: 10, ambient: true, caption: `${gk.name} cobra o tiro de meta` };
+    const askStep: Step = {
+      kind: 'wait',
+      to: { x: gk.x, y: gk.y },
+      dur: 260,
+      ambient: true,
+      caption: 'Tiro de meta',
+      after: () => {
+        askRestart('tirometa', gkKey, { x: gk.x, y: gk.y }, mates.map((x) => x.key), (c) => {
+          const sh = restartShape('tirometa', c, gk as unknown as Slot, O);
+          if (!sh) return;
+          passStep.dur = sh.dur;
+          passStep.arc = sh.arc;
+          if (sh.lost && sh.opp) {
+            passStep.to = { slot: sh.opp.key };
+            passStep.caption = `${gk.name} chuta para ${sh.rc.name}, mas ${sh.opp.name} corta`;
+            passStep.after = () => { engine.current.poss = otherSide(O); };
+          } else {
+            passStep.to = { slot: sh.rc.key };
+            passStep.caption = `${gk.name} cobra o tiro de meta ${c.play === 'longo' ? 'longo' : c.play === 'medio' ? 'médio' : 'curto'} para ${sh.rc.name}`;
+          }
+        });
+      },
+    };
+    st0.queue.unshift(moveStep, askStep, passStep);
+  };
   const orderRef = useRef<Props['order']>(null);
   const shapesRef = useRef<Props['shapes']>(undefined);
   shapesRef.current = shapes;
@@ -1690,7 +1754,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     const header = play === 'ponta' || special === 'escanteio';
     const abbrOf = S === 'user' ? club.abbreviation : opponent.abbreviation;
     const tiroDeMeta = (): void => {
-      st.queue.unshift({ kind: 'move', to: { slot: gkKey }, dur: 800, caption: 'Tiro de meta', scripted: true });
+      goalKick(O, true);
     };
     const defenderKey = () => `${O}-${pick<Pos>(['LB', 'RB', 'CM'])}`;
 
@@ -2693,6 +2757,19 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
                   }, 2800);
                 }
               };
+              const waitStep: Step = { kind: 'wait', to: spot, dur: 1100, ambient: true, caption: `Lateral para ${abbr}`, setup };
+              const passStep: Step = {
+                kind: 'pass',
+                to: { slot: receiver.key },
+                dur: 560,
+                ambient: true,
+                arc: 14,
+                caption: `${taker.name} faz a reposição lateral`,
+                after: () => {
+                  if (deadBallRef) deadBallRef.current = false;
+                },
+              };
+              const askLateral = O === 'user' && !!onRestartRef.current;
               st.queue.push(
                 {
                   kind: 'shot',
@@ -2705,19 +2782,38 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
                     markDead();
                   },
                 },
-                { kind: 'shot', to: spot, dur: 340, ambient: true, caption: `Lateral para ${abbr}`, setup },
-                { kind: 'wait', to: spot, dur: 1100, ambient: true, caption: `Lateral para ${abbr}`, setup },
                 {
-                  kind: 'pass',
-                  to: { slot: receiver.key },
-                  dur: 560,
+                  kind: 'shot',
+                  to: spot,
+                  dur: 340,
                   ambient: true,
-                  arc: 14,
-                  caption: `${taker.name} faz a reposição lateral`,
-                  after: () => {
-                    if (deadBallRef) deadBallRef.current = false;
-                  },
+                  caption: `Lateral para ${abbr}`,
+                  setup,
+                  after: askLateral
+                    ? () => {
+                        askRestart('lateral', taker.key, spot, mates.filter((x) => x.key !== taker.key).map((x) => x.key), (c) => {
+                          const sh = restartShape('lateral', c, taker, O);
+                          if (!sh) return;
+                          passStep.dur = sh.dur;
+                          passStep.arc = sh.arc;
+                          if (c.play === 'rapido') waitStep.dur = 220;
+                          if (sh.lost && sh.opp) {
+                            passStep.to = { slot: sh.opp.key };
+                            passStep.caption = `${taker.name} lança para ${sh.rc.name}, mas ${sh.opp.name} intercepta`;
+                            passStep.after = () => {
+                              engine.current.poss = S;
+                              if (deadBallRef) deadBallRef.current = false;
+                            };
+                          } else {
+                            passStep.to = { slot: sh.rc.key };
+                            passStep.caption = `${taker.name} faz a reposição lateral para ${sh.rc.name}`;
+                          }
+                        });
+                      }
+                    : undefined,
                 },
+                waitStep,
+                passStep,
               );
             }
           } else if (canShoot && Math.random() < clamp((pressure > 0.4 ? 0.6 : 0.9) + uu * 0.08, 0.4, 0.97)) {
@@ -2793,7 +2889,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
                     ? `${h.name} chuta pressionado por ${near.slot.name} e manda para fora`
                     : `${h.name} chuta para fora`,
                 after: () => {
-                  st.queue.unshift({ kind: 'move', to: { slot: `${O}-GK` }, dur: 800, caption: 'Tiro de meta' });
+                  goalKick(O, false);
                 },
               });
             }
