@@ -57,6 +57,8 @@ export type CornerOut = {
 const REACH = (a: Pt) => Math.hypot(a.u * 0.9, a.v * 0.8 + 0.1);
 export const idealPower = (a: Pt, fx: CEffect) => clamp(0.28 + REACH(a) * 0.62 + (fx === 'rasteira' ? 0.06 : fx === 'alta' ? -0.04 : 0), 0.2, 0.95);
 
+const pwShift = (d: number) => (Math.abs(d) < 0.14 ? 0 : (d - Math.sign(d) * 0.14) * 0.5);
+
 export function landing(i: CornerIn, rnd: Rnd): { land: Pt; err: number } {
   const e = i.exec;
   const sk = clamp((i.takerOvr - 80) / 12, -1, 1);
@@ -65,14 +67,13 @@ export function landing(i: CornerIn, rnd: Rnd): { land: Pt; err: number } {
   const dPow = e.pw - idealPower(aim, e.fx);
   let u = aim.u;
   let v = aim.v;
-  v += dPow * 0.5; // profundidade (aproxima ou afasta da linha de fundo)
-  // efeito: muda a trajetória de verdade (curva puxa para o gol ou afasta; alta e rasteira mudam a queda)
-  if (e.fx === 'dentro') { v -= 0.07 + e.pw * 0.05; u += 0.03; }
-  else if (e.fx === 'fora') { v += 0.07 + e.pw * 0.05; u -= 0.02; }
-  else if (e.fx === 'alta') v += 0.03 + e.pw * 0.03;
-  else if (e.fx === 'rasteira') v -= 0.02;
+  v += pwShift(dPow); // só passa/fica curta se a força estiver bem errada
+  // efeito: a bola vai para onde foi mirada; o efeito muda a curva e só deixa um desvio mínimo na queda
+  if (e.fx === 'dentro') v -= 0.012;
+  else if (e.fx === 'fora') v += 0.012;
+  else if (e.fx === 'alta') v += 0.01;
   const fxHard = e.fx === 'direta' ? 0.9 : e.fx === 'rasteira' ? 0.95 : e.fx === 'alta' ? 1.05 : 1.2;
-  const err = (0.055 + Math.abs(dPow) * 0.12 + Math.max(0, e.pw - 0.85) * 0.2) * fxHard * (1 + i.pressure * 0.3) * (1 - sk * 0.28);
+  const err = (0.028 + Math.abs(dPow) * 0.12 + Math.max(0, e.pw - 0.85) * 0.2) * fxHard * (1 + i.pressure * 0.3) * (1 - sk * 0.28);
   const g = () => (rnd() + rnd() + rnd() - 1.5) * 0.8;
   return { land: { u: clamp(u + g() * err, 0, 1), v: clamp(v + g() * err, 0.02, 1.05) }, err };
 }
@@ -190,12 +191,11 @@ export function defaultExec(side: 0 | 1): CExec {
 export function predictLand(e: CExec): { u: number; v: number } {
   const aim = { u: clamp(e.ax, 0, 1), v: clamp(e.ay, 0, 1) };
   const dPow = e.pw - idealPower(aim, e.fx);
-  let v = aim.v + dPow * 0.5;
-  let u = aim.u;
-  if (e.fx === 'dentro') { v -= 0.07 + e.pw * 0.05; u += 0.03; }
-  else if (e.fx === 'fora') { v += 0.07 + e.pw * 0.05; u -= 0.02; }
-  else if (e.fx === 'alta') v += 0.03 + e.pw * 0.03;
-  else if (e.fx === 'rasteira') v -= 0.02;
+  let v = aim.v + pwShift(dPow);
+  const u = aim.u;
+  if (e.fx === 'dentro') v -= 0.012;
+  else if (e.fx === 'fora') v += 0.012;
+  else if (e.fx === 'alta') v += 0.01;
   return { u: clamp(u, 0, 1), v: clamp(v, 0.02, 1.05) };
 }
 

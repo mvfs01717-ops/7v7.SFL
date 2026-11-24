@@ -326,7 +326,7 @@ export function MatchScreen({
             workRef={staminaOn ? workRef : undefined}
             endHalfRef={endHalfRef}
             deadBallRef={deadBallRef}
-            hold={pause === 'setpiece'}
+            hold={pause === 'setpiece' || (!!setPiece?.floating && setPiece.kind === 'escanteio')}
             hideOverlays
             onCaption={setFeedCaption}
           />

@@ -1719,7 +1719,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           .filter((x) => x.key !== taker.key && x.key !== targetSlot.key && x.pos !== 'GK')
           .sort((a, b) => ['LF', 'RF', 'CM', 'LB', 'RB', 'CF'].indexOf(a.pos) - ['LF', 'RF', 'CM', 'LB', 'RB', 'CF'].indexOf(b.pos));
         const idxs = [0, 1, 2, 3, 4].filter((k) => k !== benefit);
-        const ends: Setup[] = [{ key: targetSlot.key, x: landPt.x, y: landPt.y, speed: 2.1 }];
+        const ends: Setup[] = [{ key: targetSlot.key, x: landPt.x, y: landPt.y, speed: 4.2 }];
         const starts: Setup[] = [{ key: targetSlot.key, ...toPt(runs[benefit][0].u, runs[benefit][0].v), speed: 1.8 }];
         rest.forEach((m, n) => {
           const k = idxs[n];
