@@ -507,8 +507,20 @@ export default function AdminScreen({
       return;
     }
     const count = players.filter((player) => player.team_id === item.id).length;
-    const warn = count ? ` Ele tem ${count} jogadores cadastrados.` : '';
+    const free = teams.find((t) => isFreeAgent(t));
+    if (count && !free) {
+      say(`O time ${item.name} tem ${count} jogadores e não existe o time Free Agent para recebê-los. Crie o Free Agent ou mova os jogadores antes de excluir.`, true);
+      return;
+    }
+    const warn = count ? ` Os ${count} jogadores dele vão para o Free Agent (não são apagados).` : '';
     if (!window.confirm(`Excluir o time ${item.name}?${warn}`)) return;
+    if (count && free) {
+      const moved = await supabase.from('players').update({ team_id: free.id }).eq('team_id', item.id);
+      if (moved.error) {
+        say(`Erro ao mover os jogadores para o Free Agent: ${moved.error.message}`, true);
+        return;
+      }
+    }
     const { error } = await supabase.from('teams').delete().eq('id', item.id);
     if (error) {
       say(`Erro ao excluir time: ${error.message}`, true);
