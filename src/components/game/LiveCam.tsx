@@ -14,7 +14,7 @@ import { playPost } from '@/lib/sfx';
 
 type Side = 'user' | 'bot';
 type Team = { name: string; abbreviation: string; primary_color: string; secondary_color: string };
-export type LiveMode = 'tatica' | 'auto' | 'tv' | 'ball' | 'goal';
+export type LiveMode = 'tatica' | 'auto' | 'tv' | 'ball' | 'goal' | 'corner';
 type Real = Exclude<LiveMode, 'auto' | 'tatica'>;
 
 export const LIVE_MODES: { key: LiveMode; label: string }[] = [
@@ -24,7 +24,7 @@ export const LIVE_MODES: { key: LiveMode; label: string }[] = [
   { key: 'goal', label: 'Gol' },
   { key: 'auto', label: 'Auto' },
 ];
-const NAMES: Record<Real, string> = { tv: 'CÂMERA DE TV', ball: 'CÂMERA NA JOGADA', goal: 'ATRÁS DO GOL' };
+const NAMES: Record<Real, string> = { tv: 'CÂMERA DE TV', ball: 'CÂMERA NA JOGADA', goal: 'ATRÁS DO GOL', corner: 'ESCANTEIO' };
 
 const W = 740;
 const H = 564; // mesma proporção do campo 2D com as arquibancadas (440 + 2 x 62)
@@ -43,7 +43,7 @@ function textOn(hex: string) {
   return (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255 > 0.62 ? '#111' : '#fff';
 }
 
-export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, score, grassFade = 0 }: { grassFade?: number; liveRef: { current: LiveSnap | null }; mode: Exclude<LiveMode, 'tatica'>; club: Team; opponent: Team; home: Side; ambience: Ambience; burst: { side: Side; key: number } | null; score: { user: number; bot: number } }) {
+export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, score, grassFade = 0, camOverride, onFrame }: { grassFade?: number; camOverride?: { current: Cam | null }; onFrame?: (proj: Proj, snap: LiveSnap, tilt: number) => void; liveRef: { current: LiveSnap | null }; mode: Exclude<LiveMode, 'tatica'>; club: Team; opponent: Team; home: Side; ambience: Ambience; burst: { side: Side; key: number } | null; score: { user: number; bot: number } }) {
   const modeRef = useRef(mode);
   modeRef.current = mode;
   const lite = useLite();
@@ -63,6 +63,8 @@ export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, 
   const liteRef = useRef(lite);
   liteRef.current = lite;
   const flagNodes = useRef<(SVGPathElement | null)[]>([]);
+  const cornerPole = useRef<(SVGPathElement | null)[]>([]);
+  const cornerFlag = useRef<(SVGPathElement | null)[]>([]);
   const poleNodes = useRef<(SVGPathElement | null)[]>([]);
   const telFrame = useRef<SVGPathElement | null>(null);
   const telText = useRef<SVGTextElement | null>(null);
@@ -126,6 +128,8 @@ export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, 
     const rnd = (n: number) => Math.sin(n * 91.7 + goalAt * 0.013) * 0.5 + 0.5;
 
     const target = (kind: Real): Cam => {
+      // Escanteio: câmera fixa perto da bandeirinha, atrás do cobrador (definida por quem pede)
+      if (kind === 'corner' && camOverride?.current) return camOverride.current;
       const goalX = dir > 0 ? FX1 : FX0;
       if (kind === 'tv') return { x: sbx * 0.8 + MID_X * 0.2, y: FY1 + 250, z: 165, tx: sbx * 0.85 + MID_X * 0.15, ty: MID_Y + 30, tz: 0, f: 590 };
       if (kind === 'ball') return { x: sbx - dir * 270, y: sby + (MID_Y - sby) * 0.3, z: 125, tx: sbx + dir * 120, ty: sby + (MID_Y - sby) * 0.25, tz: 4, f: 500 };
@@ -157,7 +161,10 @@ export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, 
       if (kind !== lastKind) {
         lastKind = kind;
         lastCut = now;
-        if (camLabel.current) camLabel.current.textContent = NAMES[kind];
+        if (camLabel.current) {
+          camLabel.current.textContent = NAMES[kind];
+          camLabel.current.style.display = kind === 'corner' ? 'none' : '';
+        }
         cam = null; // corte seco
       }
       const goalCam = target(kind);
@@ -175,6 +182,7 @@ export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, 
       const proj: Proj = makeProj(cc, H);
       const tilt = Math.max(0.28, Math.min(0.95, Math.abs(cc.tz - cc.z) / Math.hypot(cc.tx - cc.x, cc.ty - cc.y, cc.tz - cc.z)));
 
+      onFrame?.(proj, snap, tilt);
       const path = (pts: [number, number, number][], close = false) => {
         let d = '';
         let open = false;
@@ -330,11 +338,30 @@ export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, 
         }
       }
 
+      // ---- bandeirinhas de escanteio (só na câmera do escanteio) ----
+      [[FX0, FY0], [FX1, FY0], [FX0, FY1], [FX1, FY1]].forEach(([cx, cy], n) => {
+        if (kind !== 'corner') {
+          cornerPole.current[n]?.setAttribute('d', '');
+          cornerFlag.current[n]?.setAttribute('d', '');
+          return;
+        }
+        const wv = Math.sin(now / 300 + n) * 1.6;
+        const gx = cx === FX0 ? 1 : -1;
+        const gy = cy === FY0 ? 1 : -1;
+        cornerPole.current[n]?.setAttribute('d', path([[cx, cy, 0], [cx, cy, 30]]));
+        cornerFlag.current[n]?.setAttribute('d', path([[cx, cy, 30], [cx + gx * 11, cy + gy * (2 + wv), 26.5], [cx, cy, 23]], true));
+      });
+
       // ---- bandeirões ----
       for (let n = 0; n < 6; n += 1) {
         const fx = FX0 + 60 + n * 118;
         const fy = FY0 - 24;
         const w = Math.sin(now / 320 + n * 1.3) * 7;
+        if (kind === 'corner') {
+          poleNodes.current[n]?.setAttribute('d', '');
+          flagNodes.current[n]?.setAttribute('d', '');
+          continue;
+        }
         poleNodes.current[n]?.setAttribute('d', path([[fx, fy, 0], [fx, fy, 56]]));
         flagNodes.current[n]?.setAttribute('d', path([[fx, fy, 56], [fx + 34, fy + w, 54], [fx + 34, fy + w * 0.8, 34], [fx, fy, 36]], true));
       }
@@ -344,7 +371,7 @@ export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, 
         const g = proj(mx, FY0 - 6, 0);
         const node = mascotNodes.current[n];
         if (!node) return;
-        if (g.d < 30) {
+        if (g.d < 30 || kind === 'corner') {
           node.setAttribute('display', 'none');
           return;
         }
@@ -363,7 +390,7 @@ export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, 
         const tr = proj(x1, ty, 96);
         const bl = proj(x0, ty, 46);
         const br = proj(x1, ty, 46);
-        const ok = tl.d > 30 && tr.d > 30 && bl.d > 30 && br.d > 30;
+        const ok = tl.d > 30 && tr.d > 30 && bl.d > 30 && br.d > 30 && kind !== 'corner';
         telFrame.current?.setAttribute('display', ok ? 'inline' : 'none');
         telText.current?.setAttribute('display', ok ? 'inline' : 'none');
         telSub.current?.setAttribute('display', ok ? 'inline' : 'none');
@@ -541,6 +568,12 @@ export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, 
           <g key={`fl${i}`}>
             <path ref={(el: SVGPathElement | null) => { poleNodes.current[i] = el; }} fill="none" stroke="#d1d5db" strokeWidth={1.6} />
             <path ref={(el: SVGPathElement | null) => { flagNodes.current[i] = el; }} fill={i % 3 === 1 ? homeTeam.secondary_color : homeTeam.primary_color} stroke="rgba(255,255,255,.7)" strokeWidth={0.8} />
+          </g>
+        ))}
+        {[0, 1, 2, 3].map((i) => (
+          <g key={`cf${i}`}>
+            <path ref={(el: SVGPathElement | null) => { cornerPole.current[i] = el; }} fill="none" stroke="#f4f4f0" strokeWidth={2.2} strokeLinecap="round" />
+            <path ref={(el: SVGPathElement | null) => { cornerFlag.current[i] = el; }} fill="#e5283c" stroke="rgba(255,255,255,.6)" strokeWidth={0.6} />
           </g>
         ))}
         <path ref={telFrame} fill="#05080f" stroke="#3a4558" strokeWidth={2.2} />

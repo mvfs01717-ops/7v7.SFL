@@ -6,6 +6,9 @@ import { ChemBadge } from '@/components/game/ChemBadge';
 import { chemOf, posPt } from '@/lib/game/chemistry';
 import { loadRoles } from '@/lib/playerRoles';
 import { FIELD_SPOTS, DraftField, draftCss } from '@/components/game/DraftScreen';
+import type { ComponentProps } from 'react';
+import CornerTaker from '@/components/game/CornerTaker';
+import type { CExec } from '@/lib/game/corner';
 import { setPieceOdds, SET_OPTIONS, SET_TITLE, type SetKind, type SetOption } from '@/lib/game/setpiece';
 import { SUBS_MAX, fitsSlot, staminaAt, substitutionGain, type FieldLite, type Tactic } from '@/lib/multiplayer';
 
@@ -522,9 +525,18 @@ export function PenaltyPrep({ club, opponent, score }: { club: Team; opponent: T
 
 // Bola parada: o jogador escolhe a jogada ensaiada antes do escanteio ou da falta (só contra o bot)
 // Dados para ajudar na escolha: quem cobra e as chances reais de cada jogada (iguais às do sorteio do jogo)
-export type SetPieceInfo = { taker?: string; takerOvr: number; atk: number; def: number; odds: boolean };
+export type SetPieceInfo = { taker?: string; takerOvr: number; atk: number; def: number; odds: boolean; keeper?: string; keeperOvr?: number; oppColor?: string };
 
-export function SetPiecePrep({ kind, minute, club, onPick, floating = false, info }: { kind: SetKind; minute: number; club: { abbreviation: string; primary_color: string }; onPick: (option: SetOption) => void; floating?: boolean; info?: SetPieceInfo | null }) {
+type SPProps = { kind: SetKind; minute: number; club: { abbreviation: string; primary_color: string }; onPick: (option: SetOption) => void; onCorner?: (exec: CExec) => void; live?: ComponentProps<typeof CornerTaker>['live']; floating?: boolean; info?: SetPieceInfo | null };
+// Escanteio com controle manual (mira, força, efeito e jogada ensaiada); falta e demais bolas paradas seguem o menu de sempre
+export function SetPiecePrep(props: SPProps) {
+  const { kind, minute, club, onCorner, floating = false, info, live } = props;
+  if (kind === 'escanteio' && onCorner && live) {
+    return <CornerTaker minute={minute} club={club} opponentColor={info?.oppColor} taker={info?.taker} takerOvr={info?.takerOvr ?? 75} keeper={info?.keeper} keeperOvr={info?.keeperOvr} floating={floating} onDone={onCorner} live={live} />;
+  }
+  return <SetPieceMenu {...props} />;
+}
+function SetPieceMenu({ kind, minute, club, onPick, floating = false, info }: SPProps) {
   const total = floating ? 8 : 12;
   const [left, setLeft] = useState(total);
   useEffect(() => {

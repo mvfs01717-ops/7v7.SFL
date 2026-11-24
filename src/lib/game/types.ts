@@ -38,6 +38,10 @@ export type MatchEvent = {
   // Quem finalizou e quem deu o passe: a animação do campo usa isso para encenar a jogada certa
   actor?: string;
   assist?: string;
+  // Escanteio com execução manual: jogada, mira, força e efeito (cx), onde a bola caiu (cl, área normalizada) e quantas vezes a defesa já viu a jogada (crec)
+  cx?: import('@/lib/game/corner').CExec;
+  cl?: { u: number; v: number };
+  crec?: number;
 };
 
 export type MatchStats = {

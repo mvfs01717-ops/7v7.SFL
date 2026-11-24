@@ -74,6 +74,7 @@ export type PlanEntry = {
   // Bola parada com jogada ensaiada (multiplayer): o texto do lance usa isto
   spk?: 'escanteio' | 'falta';
   spo?: 'cruzamento' | 'curto' | 'direto';
+  spx?: string;
 };
 
 // Ajusta o plano da partida para terminar empatado: tira gols de quem ganharia

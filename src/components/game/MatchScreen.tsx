@@ -18,6 +18,7 @@ import { CoachPanel } from '@/components/game/CoachPanel';
 import type { Shout } from '@/lib/game/coach';
 import { HalftimeBreak, PenaltyPrep, SetPiecePrep, SubstitutionPanel, staminaColor, type SetPieceInfo } from '@/components/game/Halftime';
 import { SET_TITLE, type SetKind, type SetOption } from '@/lib/game/setpiece';
+import type { CExec } from '@/lib/game/corner';
 import { ambienceLabel, pickAmbience, weatherAt, wetFromOf, type Ambience } from '@/lib/game/ambience';
 import { stadiumFor } from '@/lib/game/stadium';
 import { TvOverlay } from '@/components/game/TvOverlay';
@@ -80,6 +81,7 @@ export function MatchScreen({
   setPiece,
   rivalNote,
   onSetPiece,
+  onCorner,
   coach,
   restartKey,
   penaltyPrep,
@@ -127,6 +129,7 @@ export function MatchScreen({
   setPiece?: { kind: SetKind; minute: number; floating?: boolean } | null;
   rivalNote?: string;
   onSetPiece?: (option: SetOption) => void;
+  onCorner?: (exec: CExec) => void;
   coach?: { delayNote?: number; shoutsLeft: number; activeUntil: number; activeShout: Shout | null; onTactic: (t: Tactic) => void; onShout: (s: Shout) => void };
   restartKey: number;
   penaltyPrep: boolean;
@@ -202,6 +205,9 @@ export function MatchScreen({
       atk: average(userTeam.filter((p) => ['LF', 'RF', 'CF'].includes(slotOf(p)))),
       def: average(botTeam.filter((p) => ['LB', 'RB', 'GK'].includes(slotOf(p)))),
       odds: !multiplayer,
+      keeper: botTeam.find((p) => slotOf(p) === 'GK')?.name,
+      keeperOvr: botTeam.find((p) => slotOf(p) === 'GK')?.overall,
+      oppColor: opponent.primary_color,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setPiece?.minute, setPiece?.kind, multiplayer]);
@@ -367,7 +373,7 @@ export function MatchScreen({
             <SubstitutionPanel club={club} userTeam={userTeam} bench={bench} tactic={tactic} minute={minute} onConfirm={onSubs} limitSec={multiplayer ? SUBS_WINDOW_SEC : undefined} />
           )}
           {!narrow && coach && !pause && !penaltyPhase && !penaltyPrep && minute < 90 && <CoachPanel tactic={tactic} minute={minute} shoutsLeft={coach.shoutsLeft} activeUntil={coach.activeUntil} activeShout={coach.activeShout} onTactic={coach.onTactic} onShout={coach.onShout} delayNote={coach.delayNote} />}
-          {(pause === 'setpiece' || setPiece?.floating) && setPiece && onSetPiece && <SetPiecePrep key={setPiece.minute} kind={setPiece.kind} minute={setPiece.minute} club={club} floating={!!setPiece.floating} onPick={onSetPiece} info={spInfo} />}
+          {(pause === 'setpiece' || setPiece?.floating) && setPiece && onSetPiece && <SetPiecePrep key={setPiece.minute} kind={setPiece.kind} minute={setPiece.minute} club={club} floating={!!setPiece.floating} onPick={onSetPiece} onCorner={onCorner} live={{ club, opponent, home: homeSide, ambience, score }} info={spInfo} />}
           {rivalNote && (
             <div role="status" style={{ position: 'absolute', left: 8, top: 70, zIndex: 7, padding: '6px 12px', borderRadius: 10, background: 'rgba(8,12,20,.92)', border: '1px solid #ff6a4f', color: '#fff', font: '800 11px Inter, sans-serif' }}>
               {rivalNote}

@@ -38,6 +38,7 @@ import { pickAmbience, wetFromOf, type Ambience } from '@/lib/game/ambience';
 import { MP_DELAY, MP_LEAD, MP_SP_OPEN, decodeReqs, encodeReqs, mpSetPieces, retuneItems, seeded, shoutItems, type Req } from '@/lib/game/mpdyn';
 import { SHOUTS_PER_MATCH, SHOUT_COOLDOWN, SHOUT_MINUTES, SHOUT_STAMINA, SWITCH_COST, applyShout, retuneForTactic, type Shout } from '@/lib/game/coach';
 import { SHOUT_INFO } from '@/lib/game/coach';
+import { botCorner, cornerText, decodeExec, defaultExec, encodeExec, newCornerHist, resolveCorner, cornerSide, type CExec, type CornerHist, type CornerOut } from '@/lib/game/corner';
 import { pickSetPieceMinutes, rollSetPiece, setPieceText, SET_OPTIONS, type SetKind, type SetOption } from '@/lib/game/setpiece';
 import { BenchPicker, PositionEditor, TacticPicker } from '@/components/game/TeamSetup';
 import { TournamentScreen } from '@/components/game/TournamentScreen';
@@ -81,6 +82,8 @@ function App() {
   const [pause, setPause] = useState<'halftime' | 'break' | 'subs' | 'return' | 'setpiece' | null>(null);
   // Bolas paradas com jogada ensaiada (só contra o bot): minutos sorteados no apito inicial
   const setPieces = useRef<{ user: number[]; bot: number[] } | null>(null);
+  // Escanteios: jogadas já usadas por cada time (a defesa adversária reconhece aos poucos o que já viu)
+  const cornerHist = useRef<{ user: CornerHist; bot: CornerHist }>({ user: newCornerHist(), bot: newCornerHist() });
   // Técnico (só contra o bot): gritos restantes e o grito em vigor
   const [coach, setCoach] = useState<{ shouts: number; until: number; shout: Shout | null }>({ shouts: SHOUTS_PER_MATCH, until: 0, shout: null });
   const [setPiece, setSetPiece] = useState<{ kind: SetKind; minute: number; floating?: boolean } | null>(null);
@@ -671,6 +674,7 @@ function App() {
       keeper: item.keeper,
       spk: item.spk,
       spo: item.spo,
+      spx: item.spx,
     }));
     const rivalTeam = teams.find((item) => item.id === (role === 'host' ? current.guest_team_id : current.host_team_id));
     const mySquad = role === 'host' ? current.host_squad : current.guest_squad;
@@ -1225,6 +1229,7 @@ function App() {
     planRef.current = forceShootout || Math.random() < SHOOTOUT_CHANCE ? forceDrawPlan(basePlan) : basePlan;
     setCoach({ shouts: SHOUTS_PER_MATCH, until: 0, shout: null });
     setPieces.current = pickSetPieceMinutes((planRef.current ?? []).map((item) => item.minute));
+    cornerHist.current = { user: newCornerHist(), bot: newCornerHist() };
     setSetPiece(null);
     beginMatch(chosen, botPlayers, { team: botClub, tactic: botTactic }, {
       userBench: userBenchPlayers,
@@ -1486,12 +1491,24 @@ function App() {
     setCoach({ shouts: coach.shouts - 1, until: minute + SHOUT_MINUTES, shout: kind });
   }
 
-  function resolveSetPiece(at: number, side: 'user' | 'bot', kind: SetKind, option: SetOption) {
+  function resolveSetPiece(at: number, side: 'user' | 'bot', kind: SetKind, option: SetOption, cornerExec?: CExec) {
     const atkSquad = side === 'user' ? userTeam : botTeam;
     const defSquad = side === 'user' ? botTeam : userTeam;
     const atk = average(atkSquad.filter((player) => ['LF', 'RF', 'CF'].includes(slotOf(player))));
     const def = average(defSquad.filter((player) => ['LB', 'RB', 'GK'].includes(slotOf(player))));
     const takerPlayer = [...atkSquad.filter((player) => ['CM', 'LF', 'RF'].includes(slotOf(player)))].sort((a, b) => b.overall - a.overall)[0];
+    if (kind === 'escanteio') {
+      // Escanteio: a execução (mira, força, efeito e jogada) decide onde a bola cai e quem ganha a disputa
+      const hist = cornerHist.current;
+      const exec = cornerExec ?? (side === 'bot' ? botCorner(takerPlayer?.overall ?? 75, hist.bot, hist.user, cornerSide(at)) : defaultExec(cornerSide(at)));
+      const gk = defSquad.find((player) => slotOf(player) === 'GK');
+      const res = resolveCorner({ exec, takerOvr: takerPlayer?.overall ?? 75, atkAvg: atk, defAvg: def, keeperOvr: gk?.overall ?? 75, pressure: at > 75 ? 0.45 : 0.25, seen: hist[side][exec.play] });
+      hist[side][exec.play] += 1;
+      createEvent(at, { minute: at, type: res.outcome, side, spx: encodeExec(exec) } as PlanEntry, { kind, option: 'cruzamento' }, { exec, res, seen: hist[side][exec.play] - 1 });
+      setSetPiece(null);
+      setPause((current) => (current === 'setpiece' ? null : current));
+      return;
+    }
     const outcome = rollSetPiece(kind, option, atk, def, takerPlayer?.overall ?? 75, Math.random());
     createEvent(at, { minute: at, type: outcome, side } as PlanEntry, { kind, option });
     setSetPiece(null);
@@ -1506,7 +1523,7 @@ function App() {
     if (side === 'user' && !spectating && !catchingUp.current) addProgress({ goals: 1 });
   }
 
-  function createEvent(currentMinute: number, forced?: PlanEntry, setPieceInfo?: { kind: SetKind; option: SetOption }) {
+  function createEvent(currentMinute: number, forced?: PlanEntry, setPieceInfo?: { kind: SetKind; option: SetOption }, corner?: { exec: CExec; res: CornerOut; seen: number }) {
     const userAttack = average(userTeam.filter((player) => ['LF', 'RF', 'CF'].includes(slotOf(player))));
     const botAttack = average(botTeam.filter((player) => ['LF', 'RF', 'CF'].includes(slotOf(player))));
     const userWins = userAttack + Math.random() * 20 >= botAttack + Math.random() * 20;
@@ -1634,7 +1651,10 @@ function App() {
             ? choose(saveTexts, 3)
             : choose(possessionTexts, 4);
     const spInfo = setPieceInfo ?? (forced?.spk && forced.spo ? { kind: forced.spk, option: forced.spo } : undefined);
-    const text = spInfo
+    const cxExec = corner?.exec ?? decodeExec(forced?.spx);
+    const text = spInfo && spInfo.kind === 'escanteio' && cxExec
+      ? cornerText(cxExec, type, { taker: middle?.name ?? mate?.name ?? shooterName, shooter: shooterName, keeper: keeperName, club: club ?? 'o time' }, corner?.res)
+      : spInfo
       ? setPieceText(spInfo.kind, spInfo.option, type, {
           shooter: shooterName,
           keeper: keeperName,
@@ -1645,13 +1665,13 @@ function App() {
     eventSeq.current += 1;
     const id = eventSeq.current;
     setEvents((current) =>
-      [{ id, minute: currentMinute, type, text, team: side, actor: attackPlayer?.name, assist: assist?.name }, ...current].slice(0, 18),
+      [{ id, minute: currentMinute, type, text, team: side, actor: attackPlayer?.name, assist: assist?.name, cx: cxExec ?? undefined, cl: corner?.res.land, crec: corner?.seen ?? (forced?.spx ? 0 : undefined) }, ...current].slice(0, 18),
     );
     if (type !== 'posse') {
       setHighlights((current) =>
         current.some((item) => item.id === id)
           ? current
-          : [...current, { id, minute: currentMinute, type, text, team: side, actor: attackPlayer?.name, assist: assist?.name }],
+          : [...current, { id, minute: currentMinute, type, text, team: side, actor: attackPlayer?.name, assist: assist?.name, cx: cxExec ?? undefined, cl: corner?.res.land, crec: corner?.seen }],
       );
     }
     // Toda finalização, defesa ou gol é um chute do time que ataca.
@@ -1734,6 +1754,7 @@ function App() {
         keeper: item.keeper,
         spk: item.spk,
         spo: item.spo,
+        spx: item.spx,
       }));
 
   // Confirma as trocas do intervalo. Contra o bot: o bot também troca (os mais cansados) e o 2º tempo do plano é refeito.
@@ -1937,17 +1958,26 @@ function App() {
         if (nowMin > sp.m - 3) continue; // tarde demais para os dois lados verem: a bola parada passa em branco
         const req = decodeReqs(who === 'host' ? cur.host_squad : cur.guest_squad).find((r) => r.k === 'sp' && r.m === sp.m);
         const option = (req?.v === 'curto' || req?.v === 'direto' ? req.v : 'cruzamento') as SetOption;
+        const mpExec = sp.kind === 'escanteio' ? decodeExec(req?.v) ?? defaultExec(cornerSide(sp.m)) : null;
         const atkTeam = who === 'host' ? userTeam : botTeam;
         const defTeam = who === 'host' ? botTeam : userTeam;
         const atk = average(atkTeam.filter((player) => ['LF', 'RF', 'CF'].includes(slotOf(player))));
         const def = average(defTeam.filter((player) => ['LB', 'RB', 'GK'].includes(slotOf(player))));
         const taker = [...atkTeam.filter((player) => ['CM', 'LF', 'RF'].includes(slotOf(player)))].sort((a, b) => b.overall - a.overall)[0];
-        const outcome = rollSetPiece(sp.kind, option, atk, def, taker?.overall ?? 75, seeded(`${cur.id}:${key}:r`)());
+        let mpRes: CornerOut | null = null;
+        let outcome;
+        if (mpExec) {
+          // Os dois lados calculam a mesma cobrança: a execução vem da sala (validada em decodeExec) e o sorteio é semeado pela sala e pelo minuto
+          const rr = seeded(`${cur.id}:${key}:r`);
+          const keeperP = defTeam.find((player) => slotOf(player) === 'GK');
+          mpRes = resolveCorner({ exec: mpExec, takerOvr: taker?.overall ?? 75, atkAvg: atk, defAvg: def, keeperOvr: keeperP?.overall ?? 75, pressure: sp.m > 75 ? 0.45 : 0.25, seen: 0 }, rr);
+          outcome = mpRes.outcome;
+        } else outcome = rollSetPiece(sp.kind, option, atk, def, taker?.overall ?? 75, seeded(`${cur.id}:${key}:r`)());
         let minuteAt = sp.m;
         while (items.some((item) => item.minute === minuteAt && item.minute > 0) && minuteAt < 89) minuteAt += 1;
         if (items.some((item) => item.minute === minuteAt && item.minute > 0)) continue;
         const names = mpNames(who, `${cur.id}:${key}:n`);
-        items = [...items, { minute: minuteAt, type: outcome, side: who, shooter: names.shooter, keeper: names.keeper, spk: sp.kind, spo: option }].sort((a, b) => a.minute - b.minute);
+        items = [...items, { minute: minuteAt, type: outcome, side: who, shooter: names.shooter, keeper: names.keeper, spk: sp.kind, spo: option, ...(mpExec ? { spx: encodeExec(mpExec) } : {}) }].sort((a, b) => a.minute - b.minute);
       }
     }
     if (!fresh.length) return;
@@ -2031,11 +2061,11 @@ function App() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [minute, room?.id, screen, pause]);
-  function mpPickSetPiece(option: SetOption) {
+  function mpPickSetPiece(option: SetOption, exec?: CExec) {
     const cur = roomRef.current;
     if (!cur || !setPiece) return;
     mpSpDone.current.add(`${cur.id}:${setPiece.minute}`);
-    mpSend({ k: 'sp', v: option, m: setPiece.minute, e: setPiece.minute });
+    mpSend({ k: 'sp', v: exec ? encodeExec(exec) : option, m: setPiece.minute, e: setPiece.minute });
     setSetPiece(null);
   }
   const myReqs = room && myRole ? decodeReqs(myRole === 'host' ? room.host_squad : room.guest_squad) : [];
@@ -2457,6 +2487,7 @@ function App() {
                 : { shoutsLeft: coach.shouts, activeUntil: coach.until, activeShout: coach.shout, onTactic: changeTactic, onShout: callShout }
           }
           onSetPiece={(option) => (room ? mpPickSetPiece(option) : setPiece && resolveSetPiece(setPiece.minute, 'user', setPiece.kind, option))}
+          onCorner={(exec) => (room ? mpPickSetPiece('cruzamento', exec) : setPiece && resolveSetPiece(setPiece.minute, 'user', 'escanteio', 'cruzamento', exec))}
           onGoal={handleGoal}
           onClip={handleClip}
           mapRef={matchMapRef}

@@ -21,6 +21,8 @@ export type PlanItem = {
   // Bola parada com jogada ensaiada (gravada pelo anfitrião): tipo e jogada escolhida, para o texto do lance ser igual nos dois lados
   spk?: 'escanteio' | 'falta';
   spo?: 'cruzamento' | 'curto' | 'direto';
+  // Escanteio com execução manual: jogada, lado, mira, força e efeito (codificado), para os dois lados verem a mesma cobrança
+  spx?: string;
   // Só no item "meta": versão das mudanças ao vivo (troca de estilo, grito, bola parada) e ids já aplicados pelo anfitrião
   dv?: number;
   ap?: string;

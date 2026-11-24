@@ -12,6 +12,7 @@ import { chooseContact, chooseTackle, CONTACT_ID, laneCut, segPoint, type Contac
 import { chooseDribble, dribbleBody, dribbleGeometry, moveFit, recordDribble, DRIBBLE_CAPTION, type DribbleCtx, type DribbleMove } from '@/lib/game/dribbles';
 import { aerialBonus, blockStyle, burstMul, contactMods, dribbleChanceMod, gkClaim, gkQuick, gkSweep, hasStyles, kOf, laneStyle, passBiasStyle, passErrMul, reactBonus, shotMods, shotRangeBonus, stumbleMul, styleMove, tackleStyleMod, TAG_ID, type PSet } from '@/lib/game/playStyles';
 import { anticip, dribbleMod, errMul, gkHold, passAdj, roleMove, sweepChance, tackleMod, type Lv, type RC } from '@/lib/game/roleLevels';
+import { PLAY_RUNS, predictLand, PLAY_INFO, type CExec } from '@/lib/game/corner';
 import { TRAIT_LABEL, clashDy, decide, learnFail, learnMul, learnTry, memConf, memNote, memShare, mainTrait, newLearn, newMemory, perceiveErr, traitsOf, type Opt, type Traits } from '@/lib/game/intel2';
 import { ambientChoice, choosePlay, createIntel, passBias, passTaste, personalityOf, recordPass, recordPlay, type Intel, type PlayKind, type Style } from '@/lib/game/playIntel';
 import { ReplayPlayer, type ClipData } from '@/components/game/ReplayPlayer';
@@ -28,6 +29,9 @@ type PitchEvent = {
   // Quem finalizou e quem deu o passe (nomes). Opcionais: sem eles, o nome é procurado no texto do lance.
   actor?: string;
   assist?: string;
+  cx?: CExec;
+  cl?: { u: number; v: number };
+  crec?: number;
 };
 type Crowd = {
   mood: { user: 'idle' | 'hype' | 'sad' | 'tense'; bot: 'idle' | 'hype' | 'sad' | 'tense' };
@@ -1701,6 +1705,70 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
       const defenders = all.filter((x) => x.side === O && x.pos !== 'GK').sort((a, b) => dist(a, corner) - dist(b, corner));
       const put = (key: string, p: Point) => setup.push({ key, x: p.x, y: p.y, speed: 1.9 });
       const abbr = S === 'user' ? club.abbreviation : opponent.abbreviation;
+      // Escanteio com execução manual (ou do BOT): a jogada escolhida posiciona os discos, a bola vai para o ponto mirado
+      // (com o efeito e a força) e quem finaliza chega nele. O desfecho continua sendo o do plano.
+      const cxs = ev.cx;
+      if (cxs) {
+        const sgn = cy < MID_Y ? -1 : 1;
+        const toPt = (u: number, v: number): Point => ({ x: goalX - dir * (28 + clamp(v, 0, 1.05) * 115), y: clamp(MID_Y + sgn * (1 - 2 * u) * 46, FY0 + 18, FY1 - 18) });
+        const land = ev.cl ?? predictLand(cxs);
+        const landPt = toPt(land.u, land.v);
+        const runs = PLAY_RUNS[cxs.play];
+        const benefit = cxs.play === 'distracao' ? 2 : 0;
+        const rest = mine
+          .filter((x) => x.key !== taker.key && x.key !== targetSlot.key && x.pos !== 'GK')
+          .sort((a, b) => ['LF', 'RF', 'CM', 'LB', 'RB', 'CF'].indexOf(a.pos) - ['LF', 'RF', 'CM', 'LB', 'RB', 'CF'].indexOf(b.pos));
+        const idxs = [0, 1, 2, 3, 4].filter((k) => k !== benefit);
+        const ends: Setup[] = [{ key: targetSlot.key, x: landPt.x, y: landPt.y, speed: 2.1 }];
+        const starts: Setup[] = [{ key: targetSlot.key, ...toPt(runs[benefit][0].u, runs[benefit][0].v), speed: 1.8 }];
+        rest.forEach((m, n) => {
+          const k = idxs[n];
+          if (k === undefined) return;
+          starts.push({ key: m.key, ...toPt(runs[k][0].u, runs[k][0].v), speed: 1.8 });
+          ends.push({ key: m.key, ...toPt(runs[k][1].u, runs[k][1].v), speed: 2 });
+        });
+        // Marcação: base em zona; jogadas que o adversário já viu (2 vezes ou mais) deslocam a marcação para o destino dos atacantes
+        const rec = clamp(((ev.crec ?? 0) - 1) * 0.3, 0, 0.7);
+        const DEFB = [[0.2, 0.18], [0.4, 0.22], [0.62, 0.22], [0.82, 0.2], [0.5, 0.46], [0.5, 0.6]];
+        const dEnds: Setup[] = [];
+        defenders.forEach((dfn, n) => {
+          const b = DEFB[n] ?? DEFB[5];
+          const tgt = runs[n]?.[1] ?? { u: b[0], v: b[1] };
+          const u = b[0] + (tgt.u - b[0]) * rec;
+          const v = b[1] + (tgt.v - b[1]) * rec;
+          const pt = toPt(u, v);
+          setup.push({ key: dfn.key, ...pt, speed: 1.6 });
+          // Distração: parte da marcação é atraída para a primeira trave; bloqueio: um marcador fica preso
+          if (cxs.play === 'distracao' && n < 2 && rec < 0.4) dEnds.push({ key: dfn.key, ...toPt(0.2, 0.26), speed: 1.7 });
+          else if (cxs.play === 'bloqueio' && n === 1) dEnds.push({ key: dfn.key, ...toPt(0.4, 0.42), speed: 1.2 });
+          else dEnds.push({ key: dfn.key, ...toPt(u + (landPt.y > MID_Y ? 0 : 0), v), speed: 1.6 });
+        });
+        starts.forEach((x) => setup.push(x));
+        const how = cxs.fx === 'dentro' ? 'com curva para dentro' : cxs.fx === 'fora' ? 'com curva para fora' : cxs.fx === 'alta' ? 'alto' : cxs.fx === 'rasteira' ? 'rasteiro' : 'direto';
+        const dur = Math.round(clamp(1000 - cxs.pw * 520, 460, 1000));
+        const arc = cxs.fx === 'alta' ? 30 : cxs.fx === 'rasteira' ? 4 : cxs.fx === 'direta' ? 12 : 20;
+        const warn = rec > 0.25 && defenders[0] ? `, mas ${defenders[0].name} já esperava essa jogada` : '';
+        const label = PLAY_INFO[cxs.play].label.toLowerCase();
+        countUse(`ia.escanteio.${cxs.play === 'curto' ? 'curto' : cxs.play === 'primeiro' ? 'primeira' : 'area'}`);
+        logDecision(S === 'user' ? club.abbreviation : opponent.abbreviation, `escanteio: ${label}`, `${taker.name} cobra ${how}${rec > 0.25 ? ' (adversário já viu essa jogada)' : ''}`);
+        let csteps: Step[];
+        if (cxs.play === 'curto') {
+          const mate = rest[0] ?? mine.find((x) => x.key !== taker.key && x.key !== targetSlot.key && x.pos !== 'GK');
+          if (mate) {
+            const sp: Point = { x: corner.x - dir * 50, y: cy < MID_Y ? cy + 46 : cy - 46 };
+            setup.push({ key: mate.key, x: sp.x, y: sp.y, speed: 1.9 });
+            if (rec > 0.25 && defenders[0]) setup.push({ key: defenders[0].key, x: sp.x + dir * 22, y: sp.y + (cy < MID_Y ? -10 : 10), speed: 1.9 });
+            csteps = [
+              wrap({ kind: 'pass', to: { slot: mate.key }, dur: 400, caption: `Escanteio curto: ${taker.name} toca para ${mate.name}${warn}` }),
+              wrap({ kind: 'wait', to: { x: sp.x, y: sp.y }, dur: 260, setup: [...ends, ...dEnds] }),
+              wrap({ kind: 'pass', to: { slot: targetSlot.key }, dur, arc, caption: `${mate.name} levanta ${how} na área` }),
+            ];
+          } else csteps = [wrap({ kind: 'pass', to: { slot: targetSlot.key }, dur, arc, caption: `${taker.name} cobra o escanteio ${how}`, setup: [...ends, ...dEnds] })];
+        } else {
+          csteps = [wrap({ kind: 'pass', to: { slot: targetSlot.key }, dur, arc, caption: `${taker.name} cobra ${how} (${label})${warn}`, setup: [...ends, ...dEnds] })];
+        }
+        return { steps: csteps, kind: (cxs.play === 'curto' ? 'curto' : cxs.play === 'primeiro' ? 'primeira' : 'area') as CornerKind };
+      }
       let steps: Step[];
       if (kind === 'curto') {
         const mate = mine.find((x) => x.key !== taker.key && x.key !== targetSlot.key && x.pos !== 'GK');
@@ -1731,7 +1799,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
 
     // Escanteio: o goleiro espalma para fora, o time cobra e a bola entra na área
     const cornerSteps = (quick = false): Step[] => {
-      const cy = Math.random() < 0.5 ? FY0 + 6 : FY1 - 6;
+      const cy = ev.cx ? (ev.cx.side === 0 ? FY0 + 6 : FY1 - 6) : Math.random() < 0.5 ? FY0 + 6 : FY1 - 6;
       const corner: Point = { x: goalX - dir * 5, y: cy };
       const taker = mine.find((s) => s.key !== actorKey && (s.pos === 'LF' || s.pos === 'RF')) ?? mine.find((s) => s.key !== actorKey) ?? actorSlot;
       const target = mine.find((s) => s.pos === 'CF' && s.key !== taker.key) ?? actorSlot;
@@ -1761,7 +1829,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     const boxSpot = (d: number, dy: number): Point => ({ x: goalX - dir * d, y: MID_Y + dy });
     let cornerY = MID_Y; // de que canto sai o escanteio (usado na curva do gol olímpico)
     if (special === 'escanteio' || special === 'olimpico') {
-      const cy = Math.random() < 0.5 ? FY0 + 6 : FY1 - 6;
+      const cy = ev.cx ? (ev.cx.side === 0 ? FY0 + 6 : FY1 - 6) : Math.random() < 0.5 ? FY0 + 6 : FY1 - 6;
       cornerY = cy;
       const corner: Point = { x: goalX - dir * 5, y: cy };
       const direct = special === 'olimpico';
