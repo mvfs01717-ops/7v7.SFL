@@ -517,6 +517,14 @@ export type LiveSnap = {
   fx: { def: number; hold: number; stretch: number; hrot: number; hsc: number } | null;
 };
 
+// Sorteio determinístico por lance: o mesmo id dá o mesmo resultado em qualquer cliente (multiplayer) e a cada repetição
+const evHash = (id: number | undefined, salt: number): number => {
+  let h = (Math.abs(Math.trunc(id ?? 0)) * 2654435761 + salt * 40503) >>> 0;
+  h ^= h >>> 15;
+  h = Math.imul(h, 2246822519) >>> 0;
+  return (h ^ (h >>> 13)) >>> 0;
+};
+
 export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = 'user', ambience, crowd, onClip, mapRef, club, opponent, userTeam, botTeam, events, onGoal, restartKey, workRef, endHalfRef, deadBallRef, hold = false, onRestart, hideOverlays = false, onCaption, order = null, shapes, styles, levels, playstyles }: Props) {
   const holdRef = useRef(false);
   holdRef.current = hold;
@@ -1863,7 +1871,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
 
     // Escanteio: o goleiro espalma para fora, o time cobra e a bola entra na área
     const cornerSteps = (quick = false): Step[] => {
-      const cy = ev.cx ? (ev.cx.side === 0 ? FY0 + 6 : FY1 - 6) : Math.random() < 0.5 ? FY0 + 6 : FY1 - 6;
+      const cy = ev.cx ? (ev.cx.side === 0 ? FY0 + 6 : FY1 - 6) : evHash(ev.id, 1) % 2 === 0 ? FY0 + 6 : FY1 - 6;
       const corner: Point = { x: goalX - dir * 5, y: cy };
       const taker = mine.find((s) => s.key !== actorKey && (s.pos === 'LF' || s.pos === 'RF')) ?? mine.find((s) => s.key !== actorKey) ?? actorSlot;
       const target = mine.find((s) => s.pos === 'CF' && s.key !== taker.key) ?? actorSlot;
@@ -1893,7 +1901,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     const boxSpot = (d: number, dy: number): Point => ({ x: goalX - dir * d, y: MID_Y + dy });
     let cornerY = MID_Y; // de que canto sai o escanteio (usado na curva do gol olímpico)
     if (special === 'escanteio' || special === 'olimpico') {
-      const cy = ev.cx ? (ev.cx.side === 0 ? FY0 + 6 : FY1 - 6) : Math.random() < 0.5 ? FY0 + 6 : FY1 - 6;
+      const cy = ev.cx ? (ev.cx.side === 0 ? FY0 + 6 : FY1 - 6) : evHash(ev.id, 1) % 2 === 0 ? FY0 + 6 : FY1 - 6;
       cornerY = cy;
       const corner: Point = { x: goalX - dir * 5, y: cy };
       const direct = special === 'olimpico';
@@ -2042,7 +2050,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         ? 'corner'
         : text.includes('domina') || text.includes('segura')
           ? 'hold'
-          : pick<'corner' | 'hold' | 'rebound'>(['hold', 'hold', 'rebound', 'corner']);
+          : (['hold', 'hold', 'rebound'] as const)[evHash(ev.id, 2) % 3]; // sem 'escanteio' na narração nunca vira escanteio; sorteio fixo pelo id do lance (igual nos dois clientes)
       // A narração diz escanteio: ele sempre acontece (mais rápido quando a fila de lances está cheia)
       const useCorner = outcome === 'corner';
       q.push(
