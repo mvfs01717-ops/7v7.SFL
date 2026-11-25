@@ -1797,7 +1797,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           const k = idxs[n];
           if (k === undefined) return;
           starts.push({ key: m.key, ...toPt(runs[k][0].u, runs[k][0].v), speed: 1.8 });
-          ends.push({ key: m.key, ...toPt(runs[k][1].u, runs[k][1].v), speed: 2 });
+          ends.push({ key: m.key, ...(cxs.cp && cxs.cp.k === k ? toPt(cxs.cp.u, cxs.cp.v) : toPt(runs[k][1].u, runs[k][1].v)), speed: 2 });
         });
         // Marcação: base em zona; jogadas que o adversário já viu (2 vezes ou mais) deslocam a marcação para o destino dos atacantes
         const rec = clamp(((ev.crec ?? 0) - 1) * 0.3, 0, 0.7);

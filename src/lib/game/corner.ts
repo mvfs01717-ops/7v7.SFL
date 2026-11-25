@@ -6,7 +6,8 @@ export type CPlay = 'primeiro' | 'segundo' | 'central' | 'curto' | 'recuo' | 'di
 export type CEffect = 'dentro' | 'fora' | 'direta' | 'alta' | 'rasteira';
 export type COutcome = 'gol' | 'defesa' | 'finalização' | 'posse';
 // ci = intensidade do efeito (0,2 a 1): quanto mais curva, mais a bola desvia no ar e mais difícil é a execução
-export type CExec = { play: CPlay; side: 0 | 1; ax: number; ay: number; pw: number; fx: CEffect; ci?: number };
+// cp = atacante controlado à mão na etapa de organização (só no jogo solo): k = qual corrida, (u,v) = onde ele estava na hora da cobrança, free = 0 (marcado) a 1 (livre)
+export type CExec = { play: CPlay; side: 0 | 1; ax: number; ay: number; pw: number; fx: CEffect; ci?: number; cp?: { k: number; u: number; v: number; free: number } };
 export const CURVE_PX = 38; // desvio lateral máximo (unidades do campo) da curva com intensidade 1
 // Curva da bola: positivo = para o lado do gol (curva para dentro), negativo = para longe do gol (curva para fora)
 export const curveMag = (e: Pick<CExec, 'fx' | 'ci'>): number => (e.fx === 'dentro' ? 1 : e.fx === 'fora' ? -1 : 0) * CURVE_PX * Math.max(0.2, Math.min(1, e.ci ?? 1));
@@ -100,7 +101,9 @@ export function cornerProbs(i: CornerIn, land: Pt, keeperOut: boolean, keeperWon
   let att = 0;
   runs.forEach(([, end], k) => {
     const bonus = k === 0 ? 1.15 : 1;
-    att += dens(end, land) * w(i.atkAvg) * bonus;
+    // atacante controlado pelo usuário: vale onde ele realmente chegou e o quanto se livrou da marcação
+    const mine = e.cp && e.cp.k === k;
+    att += dens(mine ? { u: e.cp!.u, v: e.cp!.v } : end, land) * w(i.atkAvg) * bonus * (mine ? 0.7 + 0.6 * e.cp!.free : 1);
   });
   // defensores: marcação da base; jogadas conhecidas deslocam a marcação para o destino dos atacantes
   let def = 0;
