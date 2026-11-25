@@ -213,7 +213,8 @@ export default function CornerTaker({ minute, club, opponentColor = '#c8102e', t
   const cornerY = side === 0 ? FY0 : FY1;
   const runs = PLAY_RUNS[play];
   const camRef = useRef<Cam | null>(null);
-  if (!camRef.current) camRef.current = { x: FX1 + 66, y: cornerY + sgn * 92, z: 74, tx: 664, ty: MID_Y + sgn * 4, tz: 0, f: 540 };
+  // câmera mais alta e mais inclinada para o gramado: a linha de fundo sobe na tela (arquibancada menor) e a bandeirinha, o cobrador e a área continuam visíveis
+  if (!camRef.current) camRef.current = { x: FX1 + 140, y: cornerY + sgn * 70, z: 150, tx: 660, ty: MID_Y + sgn * 20, tz: 0, f: 540 };
   // discos do escanteio no campo (gravados direto na estrutura que a câmera lê)
   const snapRef = useRef<LiveSnap | null>(null);
   if (!snapRef.current) {

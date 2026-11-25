@@ -529,7 +529,7 @@ export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, 
         shadows.current[ballKey]?.setAttribute('rx', (8 * bg.s * Math.max(0.4, 1 - bz / 90)).toFixed(1));
         shadows.current[ballKey]?.setAttribute('ry', (8 * bg.s * Math.max(0.4, 1 - bz / 90) * tilt * 0.55).toFixed(1));
         shadows.current[ballKey]?.setAttribute('fill-opacity', mode === 'corner' ? '0.3' : '0.45');
-        tokens.current[ballKey]?.setAttribute('transform', `translate(${bp.sx.toFixed(1)} ${bp.sy.toFixed(1)}) scale(${Math.min(bp.s, 2.4).toFixed(3)})`);
+        tokens.current[ballKey]?.setAttribute('transform', `translate(${bp.sx.toFixed(1)} ${bp.sy.toFixed(1)}) scale(${(mode === 'corner' ? Math.max(0.55, Math.min(Math.sqrt(bp.s), 1.3)) : Math.min(bp.s, 2.4)).toFixed(3)})`);
         depths.push({ key: ballKey, d: bg.d });
       }
       hist.push([bx, by, zb]);
@@ -601,6 +601,11 @@ export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, 
           <pattern id="lc-grain-tile" width="140" height="90" patternUnits="userSpaceOnUse">
             <rect width="140" height="90" filter="url(#lc-grain)" opacity={0.28} />
           </pattern>
+          {/* rede do gol: malha fina (um quadriculado SVG, sem custo de cálculo por quadro) */}
+          <pattern id="lc-mesh" width="7" height="7" patternUnits="userSpaceOnUse">
+            <rect width="7" height="7" fill="rgba(255,255,255,.06)" />
+            <path d="M0 0 H7 M0 0 V7" fill="none" stroke="rgba(255,255,255,.28)" strokeWidth={0.6} />
+          </pattern>
           <radialGradient id="lc-stadium" cx="50%" cy="28%" r="62%">
             <stop offset="0%" stopColor="#fff7d6" stopOpacity={0.22} />
             <stop offset="55%" stopColor="#fff7d6" stopOpacity={0.05} />
@@ -630,7 +635,7 @@ export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, 
           ))}
         </g>
         {[0, 1].map((n) => (
-          <path key={`n${n}`} ref={(el: SVGPathElement | null) => { netNodes.current[n] = el; }} fill="rgba(255,255,255,.08)" stroke="rgba(255,255,255,.35)" strokeWidth={0.8} />
+          <path key={`n${n}`} ref={(el: SVGPathElement | null) => { netNodes.current[n] = el; }} fill="url(#lc-mesh)" stroke="rgba(255,255,255,.4)" strokeWidth={0.8} />
         ))}
         {[0, 1].map((n) => (
           <path key={`g${n}`} ref={(el: SVGPathElement | null) => { goalNodes.current[n] = el; }} fill="none" stroke="#f4f4f4" strokeWidth={3.2} strokeLinecap="round" strokeLinejoin="round" />
