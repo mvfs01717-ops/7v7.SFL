@@ -26,6 +26,18 @@ export function playFor(kind: RKind, power: number, height: number): RPlay {
   if (height >= 70) return 'longo';
   return 'medio';
 }
+// Sorteio determinístico (0 a 1) a partir da própria cobrança: dois clientes com a mesma escolha chegam ao mesmo resultado
+export function restartRoll(key: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < key.length; i += 1) {
+    h ^= key.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  h ^= h >>> 15;
+  h = Math.imul(h, 2246822519);
+  h ^= h >>> 13;
+  return (h >>> 0) / 4294967296;
+}
 // chance de a bola ser perdida: a tabela de loseChance + bola solta quando ninguém alcança o ponto de chegada
 export function restartLose(kind: RKind, play: RPlay, live: LiveRestart, takerOvr: number, recvOvr: number): number {
   const p = loseChance(kind, play, live.d, live.lane, takerOvr, recvOvr);
