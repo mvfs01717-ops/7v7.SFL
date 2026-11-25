@@ -161,8 +161,9 @@ function App() {
   const halftimeDone = useRef(false);
   // Tempo de espera fixo antes do intervalo quando saiu gol no fim do 1º tempo (para a jogada terminar na animação)
   const halftimeWait = useRef(0);
-  // Fim do 1º tempo: o apito só toca com a bola fora de jogo (lateral). endHalf pede a bola fora; deadBall diz que ela está fora.
+  // Fim do 1º tempo: endHalf pede o apito; playIdle diz que a jogada atual terminou; deadBall diz que a bola está fora de jogo.
   const endHalfRef = useRef(false);
+  const playIdleRef = useRef(false);
   const deadBallRef = useRef(false);
   const eventsRef = useRef<MatchEvent[]>([]);
   // Muda quando o 2º tempo começa: o campo recomeça com a saída de bola
@@ -1261,6 +1262,7 @@ function App() {
     halftimeWait.current = 0;
     endHalfRef.current = false;
     deadBallRef.current = false;
+    playIdleRef.current = false;
     setScore({ user: 0, bot: 0 });
     setEvents([]);
     setStats(emptyStats);
@@ -1401,15 +1403,16 @@ function App() {
         halftimeWait.current += 1;
         return;
       }
-      // O apito só toca quando a bola sai (lateral): pede ao campo e espera até ~9 s. Quem assiste ao vivo não espera (segue o relógio do anfitrião).
+      // O apito toca quando a jogada atual termina (playIdleRef) ou após ~9 s, o que vier antes. Quem assiste ao vivo não espera (segue o relógio do anfitrião).
       if (!spectating && !skipped) {
         endHalfRef.current = true;
-        if (!deadBallRef.current && halftimeWait.current < holdTicksFor() + 10) {
+        if (!playIdleRef.current && halftimeWait.current < holdTicksFor() + 10) {
           halftimeWait.current += 1;
           return;
         }
       }
       endHalfRef.current = false;
+      playIdleRef.current = false;
       // Se a bola ainda não entrou, o gol é confirmado agora (o intervalo cobre o campo)
       eventsRef.current.forEach((event) => {
         if (event.type === 'gol' && !shownRef.current.has(event.id)) handleGoal(event.id, event.team);
@@ -2500,6 +2503,7 @@ function App() {
           workRef={workRef}
           endHalfRef={endHalfRef}
           deadBallRef={deadBallRef}
+          playIdleRef={playIdleRef}
           tactic={matchTactics.user}
           staminaOn={!spectating}
           subsLog={subsLog}

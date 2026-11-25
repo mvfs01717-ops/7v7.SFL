@@ -77,6 +77,8 @@ type Props = {
   restartKey?: number;
   // Fim do 1º tempo: o App liga `endHalfRef` e o campo manda a bola para fora (lateral); `deadBallRef` fica true enquanto a bola está parada fora de jogo
   endHalfRef?: { current: boolean };
+  // Fim do 1º tempo: o campo marca aqui quando a jogada atual terminou, e o App então toca o apito
+  playIdleRef?: { current: boolean };
   // Jogada ensaiada em escolha: o campo inteiro congela (bola, jogadores e relógio das animações) até a decisão
   hold?: boolean;
   // Lateral e tiro de meta do time do usuário: o campo pede a escolha (receptor e jogada) e continua quando `resolve` é chamado. Sem isto, cobra sozinho.
@@ -525,7 +527,7 @@ const evHash = (id: number | undefined, salt: number): number => {
   return (h ^ (h >>> 13)) >>> 0;
 };
 
-export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = 'user', ambience, crowd, onClip, mapRef, club, opponent, userTeam, botTeam, events, onGoal, restartKey, workRef, endHalfRef, deadBallRef, hold = false, onRestart, hideOverlays = false, onCaption, order = null, shapes, styles, levels, playstyles }: Props) {
+export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = 'user', ambience, crowd, onClip, mapRef, club, opponent, userTeam, botTeam, events, onGoal, restartKey, workRef, endHalfRef, playIdleRef, deadBallRef, hold = false, onRestart, hideOverlays = false, onCaption, order = null, shapes, styles, levels, playstyles }: Props) {
   const holdRef = useRef(false);
   holdRef.current = hold;
   const onRestartRef = useRef(onRestart);
@@ -2644,8 +2646,12 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         }
       }
 
+      // Fim do 1º tempo pedido: quando a jogada atual acaba, o campo avisa e não começa outra
+      if (endHalfRef?.current && !st.active && !st.queue.length && st.holder && !celebrating && !hold && !(deadBallRef && deadBallRef.current)) {
+        if (playIdleRef) playIdleRef.current = true;
+      }
       // Decisão do jogador com a bola: conduzir ou passar
-      if (!st.active && !st.queue.length && st.holder && !celebrating && now >= st.ambientAt) {
+      if (!st.active && !st.queue.length && st.holder && !celebrating && now >= st.ambientAt && !endHalfRef?.current) {
         const h = get(st.holder);
         if (h) {
           const d = dirOf(h.side);
@@ -2703,8 +2709,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           // pela simulação, então esses chutes de rotina terminam em defesa ou para fora, nunca em gol)
           const canShoot = FORWARDS.includes(h.pos) && toGoal < 240 + shotRangeBonus(psOf(h)) && near.d > 26;
           // Lateral: a bola sai pela linha lateral e o outro time repõe com as mãos. No fim do 1º tempo o App pede uma para o apito.
-          const wantHalfEnd = !!endHalfRef?.current && !deadBallRef?.current;
-          const throwInNow = h.pos !== 'GK' && ((toGoal > 90 && toGoal < FX1 - FX0 - 90 && Math.random() < 0.06) || wantHalfEnd);
+          const throwInNow = h.pos !== 'GK' && toGoal > 90 && toGoal < FX1 - FX0 - 90 && Math.random() < 0.06;
           let amb: ReturnType<typeof ambientChoice> = null;
           const decideAmbient = () => {
             if (canShoot && toGoal < 170) return null;
@@ -2791,7 +2796,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
                   to: { x: lineX, y: lineY - inward * 9 },
                   dur: 520,
                   ambient: true,
-                  caption: wantHalfEnd ? 'A bola sai pela lateral' : `${h.name} perde a bola e ela sai pela lateral`,
+                  caption: `${h.name} perde a bola e ela sai pela lateral`,
                   after: () => {
                     st.poss = O;
                     markDead();
@@ -3494,7 +3499,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
 
       // Marcas de chuteira e poeira: curvas fechadas e carrinhos arranham o gramado; onde ele já está gasto, sobe poeira
       if (!liteRef.current) {
-        const live = !(endHalfRef && endHalfRef.current) && !(deadBallRef && deadBallRef.current);
+        const live = !(deadBallRef && deadBallRef.current);
         const worn = (px: number, py: number) => {
           const cx = Math.floor((px - FX0) / WEAR_CELL);
           const cy = Math.floor((py - FY0) / WEAR_CELL);
@@ -3631,7 +3636,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
       pts.push({ x: st.ballX, y: st.ballY - lift });
       if (pts.length > 14) pts.shift();
       // Mapa da partida: amostra a posição de todos os jogadores a cada 0,2 s (fora do intervalo)
-      if (mapRefRef.current && now - lastMapAt.current >= 200 && !(endHalfRef && endHalfRef.current)) {
+      if (mapRefRef.current && now - lastMapAt.current >= 200) {
         lastMapAt.current = now;
         mapRefRef.current.current ??= createMatchMap();
         recordMapSample(
@@ -3641,7 +3646,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         );
       }
       // Desgaste do gramado: soma o tempo que cada jogador passa em cada quadradinho e atualiza o desenho ~2x por segundo
-      if (!(endHalfRef && endHalfRef.current) && !(deadBallRef && deadBallRef.current)) {
+      if (!(deadBallRef && deadBallRef.current)) {
         const w = wear.current;
         const secs = dt / 1000;
         for (const x of all) {
@@ -3696,7 +3701,7 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
           snap.pts[n * 2 + 1] = all[n].y;
         }
         snap.holder = st.holder ? snap.keys.indexOf(st.holder) : -1;
-        snap.frozen = !!(endHalfRef && endHalfRef.current);
+        snap.frozen = false;
         const tk = tkSnap.current;
         snap.fx = tk ? { def: snap.keys.indexOf(tk.def), hold: snap.keys.indexOf(tk.hold), stretch: tk.stretch, hrot: tk.hrot, hsc: tk.hsc } : null;
         if (snap.fx && (snap.fx.def < 0 || snap.fx.hold < 0)) snap.fx = null;

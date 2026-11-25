@@ -101,6 +101,7 @@ export function MatchScreen({
   bench,
   workRef,
   endHalfRef,
+  playIdleRef,
   deadBallRef,
   tactic,
   staminaOn,
@@ -149,6 +150,7 @@ export function MatchScreen({
   bench: Player[];
   workRef: { current: { effort: Record<string, number>; slow: Record<string, number>; stamina?: Record<string, number> } };
   endHalfRef: { current: boolean };
+  playIdleRef: { current: boolean };
   deadBallRef: { current: boolean };
   tactic: Tactic;
   staminaOn: boolean;
@@ -329,6 +331,7 @@ export function MatchScreen({
             restartKey={restartKey}
             workRef={staminaOn ? workRef : undefined}
             endHalfRef={endHalfRef}
+            playIdleRef={playIdleRef}
             deadBallRef={deadBallRef}
             hold={pause === 'setpiece' || (!!setPiece?.floating && setPiece.kind === 'escanteio') || !!restartReq}
             onRestart={net ? undefined : setRestartReq}
