@@ -166,14 +166,16 @@ export default function RestartTaker({ req, live, seconds = 20, onDone }: Props)
       if (!kk) return;
       const sn = snapRef.current!;
       const ti = order.findIndex((p) => p.key === req.taker);
-      const tp = req.players.find((p) => p.key === kk.target);
-      if (!tp) return;
+      const tpi = order.findIndex((p) => p.key === kk.target);
+      if (tpi < 0) return;
+      const tpx = sn.pts[tpi * 2];
+      const tpy = sn.pts[tpi * 2 + 1];
       const e = now - kk.t0;
       const wind = kickWind.current;
       const tx0 = req.ball.x;
       const ty0 = lateral ? req.ball.y - sg * 3 : req.ball.y;
-      const dx = tp.x - tx0;
-      const dy = tp.y - ty0;
+      const dx = tpx - tx0;
+      const dy = tpy - ty0;
       const l = Math.hypot(dx, dy) || 1;
       const ux = dx / l;
       const uy = dy / l;
@@ -193,8 +195,8 @@ export default function RestartTaker({ req, live, seconds = 20, onDone }: Props)
       } else {
         const t = Math.min(1, (e - wind) / kk.dur);
         const te = 1 - Math.pow(1 - t, 1.3);
-        sn.ball[0] = bx0 + (tp.x - bx0) * te;
-        sn.ball[1] = by0 + (tp.y - by0) * te;
+        sn.ball[0] = bx0 + (tpx - bx0) * te;
+        sn.ball[1] = by0 + (tpy - by0) * te;
         sn.ball[2] = (lateral ? 18 : 3) * (1 - te) + (6 + PEAK[kk.play]) * Math.sin(Math.PI * te);
         cm.tx += (sn.ball[0] - cm.tx) * 0.04;
         cm.ty += (sn.ball[1] - cm.ty) * 0.04;
@@ -203,8 +205,8 @@ export default function RestartTaker({ req, live, seconds = 20, onDone }: Props)
         if (oi >= 0) {
           const ox = sn.pts[oi * 2];
           const oy = sn.pts[oi * 2 + 1];
-          sn.pts[oi * 2] = ox + (tp.x - ox) * 0.03;
-          sn.pts[oi * 2 + 1] = oy + (tp.y - oy) * 0.03;
+          sn.pts[oi * 2] = ox + (tpx - ox) * 0.03;
+          sn.pts[oi * 2 + 1] = oy + (tpy - oy) * 0.03;
         }
       }
     };
@@ -213,6 +215,83 @@ export default function RestartTaker({ req, live, seconds = 20, onDone }: Props)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const nearestOpp = useRef('');
+  // ---------- movimento durante a escolha ----------
+  // Companheiros se abrem para oferecer linhas de passe; defensores marcam o cobrador e se fecham nas linhas. Só altera a posição mostrada:
+  // o alvo, a força e a jogada escolhidas não dependem disso. O efeito dessa pressão nas chances fica para a etapa 4.
+  const baseRef = useRef<number[]>(order.flatMap((p) => [p.x, p.y]));
+  useEffect(() => {
+    let raf = 0;
+    const t0 = performance.now();
+    const clampX = (v: number) => Math.max(FX0 + 10, Math.min(FX1 - 10, v));
+    const clampY = (v: number) => Math.max(FY0 + 10, Math.min(FY1 - 10, v));
+    const loop = (now: number) => {
+      raf = requestAnimationFrame(loop);
+      if (kick.current) return;
+      const sn = snapRef.current!;
+      const base = baseRef.current;
+      const ti = order.findIndex((p) => p.key === req.taker);
+      const tx = base[ti * 2];
+      const ty = base[ti * 2 + 1];
+      const t = (now - t0) / 1000;
+      const ramp = easeIO(Math.min(1, (now - t0) / 1600));
+      // defensor mais próximo do cobrador (marcação direta)
+      let markN = -1;
+      let markD = Infinity;
+      order.forEach((p, n) => {
+        if (n === ti || p.side === taker.side || p.pos === 'GK') return;
+        const d = Math.hypot(base[n * 2] - tx, base[n * 2 + 1] - ty);
+        if (d < markD) { markD = d; markN = n; }
+      });
+      nearestOpp.current = markN >= 0 ? order[markN].key : '';
+      // companheiros: afastam-se dos defensores para abrir espaço
+      const awayX = (bx: number, by: number) => {
+        let ax = 0;
+        let ay = 0;
+        order.forEach((q, m) => {
+          if (q.side === taker.side || q.pos === 'GK') return;
+          const dx = bx - base[m * 2];
+          const dy = by - base[m * 2 + 1];
+          const d = Math.hypot(dx, dy) || 1;
+          const w = Math.max(0, 1 - d / 120);
+          ax += (dx / d) * w;
+          ay += (dy / d) * w;
+        });
+        return [ax, ay] as const;
+      };
+      order.forEach((p, n) => {
+        if (n === ti) return;
+        const bx = base[n * 2];
+        const by = base[n * 2 + 1];
+        const wob = p.side === taker.side ? 4 : 2.5; // respiração de posicionamento: nunca fica totalmente parado
+        let x = bx + wob * Math.sin(t * 0.9 + n * 1.7);
+        let y = by + wob * Math.cos(t * 0.7 + n * 2.3);
+        if (p.pos === 'GK') {
+          sn.pts[n * 2] = clampX(x);
+          sn.pts[n * 2 + 1] = clampY(y);
+          return;
+        }
+        if (p.side === taker.side) {
+          const [ax, ay] = awayX(bx, by);
+          const l = Math.hypot(ax, ay) || 1;
+          x += (ax / l) * 12 * ramp;
+          y += (ay / l) * 12 * ramp;
+        } else {
+          const dx = tx - bx;
+          const dy = ty - by;
+          const d = Math.hypot(dx, dy) || 1;
+          // marcação direta até ~34 unidades do cobrador; os outros defensores se aproximam pouco e fecham as linhas
+          const want = n === markN ? Math.max(0, d - 34) : Math.max(0, d - 70) * 0.35;
+          x += (dx / d) * want * ramp;
+          y += (dy / d) * want * ramp;
+        }
+        sn.pts[n * 2] = clampX(x);
+        sn.pts[n * 2 + 1] = clampY(y);
+      });
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const olLine = useRef<SVGPathElement>(null);
   const olRing = useRef<SVGEllipseElement>(null);
   const olTaker = useRef<SVGGElement>(null);
