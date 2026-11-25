@@ -35,6 +35,7 @@ const clampN = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 // (u, v) da área -> campo (mesma conversão que o campo usa para posicionar os discos do escanteio)
 const toField = (side: 0 | 1, u: number, v: number) => ({ x: FX1 - (28 + clampN(v, 0, 1.05) * 115), y: clampN(MID_Y + (side === 0 ? -1 : 1) * (1 - 2 * u) * 46, FY0 + 18, FY1 - 18) });
 const fromField = (side: 0 | 1, x: number, y: number) => ({ u: clampN((1 - (y - MID_Y) / ((side === 0 ? -1 : 1) * 46)) / 2, 0, 1), v: clampN((FX1 - x - 28) / 115, 0.02, 1) });
+const KICK_CONTACT = 760; // ms entre confirmar e o contato com a bola (recuo + aproximação)
 const DEF_BASE = [{ u: 0.16, v: 0.12 }, { u: 0.36, v: 0.3 }, { u: 0.6, v: 0.16 }, { u: 0.84, v: 0.34 }, { u: 0.5, v: 0.62 }];
 
 export default function CornerTaker({ minute, club, opponentColor = '#c8102e', taker, takerOvr, keeper, keeperOvr, floating = false, seconds, onDone, live }: Props) {
@@ -44,6 +45,8 @@ export default function CornerTaker({ minute, club, opponentColor = '#c8102e', t
   const [play, setPlay] = useState<CPlay>('central');
   const [fx, setFx] = useState<CEffect>('direta');
   const [ci, setCi] = useState(0.7); // intensidade do efeito (curva)
+  const [kicking, setKicking] = useState(false);
+  const kick = useRef<{ t0: number; dst: { x: number; y: number }; exec: CExec; dur: number } | null>(null);
   const [aim, setAim] = useState(() => ({ ...PLAY_INFO.central.zone }));
   const [pw, setPw] = useState(0);
   const [charging, setCharging] = useState(false);
@@ -56,7 +59,15 @@ export default function CornerTaker({ minute, club, opponentColor = '#c8102e', t
     if (done.current) return;
     done.current = true;
     const c = cur.current;
-    onDone({ play: c.play, side, ax: c.aim.u, ay: c.aim.v, pw: Math.min(1, Math.max(0.05, power)), fx: c.fx, ci: c.fx === 'dentro' || c.fx === 'fora' ? c.ci : undefined });
+    const exec: CExec = { play: c.play, side, ax: c.aim.u, ay: c.aim.v, pw: Math.min(1, Math.max(0.05, power)), fx: c.fx, ci: c.fx === 'dentro' || c.fx === 'fora' ? c.ci : undefined };
+    if (floating) { onDone(exec); return; } // multiplayer: o relógio da sala não espera a animação
+    // Batida: o disco recua, ganha embalo, toca na bola e a bola sai na curva escolhida; a câmera acompanha. Só então a cobrança segue para a partida.
+    const pr = predictLand(exec);
+    const dst = toField(side, pr.u, pr.v);
+    const dur = clampN(1000 - exec.pw * 520, 460, 1000) * 1.25;
+    kick.current = { t0: performance.now(), dst, exec, dur };
+    setKicking(true);
+    window.setTimeout(() => onDone(exec), KICK_CONTACT + dur + 350);
   };
   // Tempo esgotado: executa o que está montado, com força um pouco abaixo da ideal (quem não decide perde qualidade)
   useEffect(() => {
@@ -181,12 +192,46 @@ export default function CornerTaker({ minute, club, opponentColor = '#c8102e', t
       const bx0 = FX1 - 3;
       const by0 = cy - sg * 4;
       const cl = Math.hypot(cm.x - bx0, cm.y - by0) || 1;
-      put(0, bx0 + ((cm.x - bx0) / cl) * 22, by0 + ((cm.y - by0) / cl) * 22);
-      sn.ball[0] = FX1 - 3;
-      sn.ball[1] = cy - sg * 4;
+      const ux = (cm.x - bx0) / cl;
+      const uy = (cm.y - by0) / cl;
+      const kk = kick.current;
+      let takerD = 22;
+      let bxp = FX1 - 3;
+      let byp = cy - sg * 4;
+      let bzp = 0;
+      let runK = -1; // progresso das corridas dos atacantes durante a batida (0 a 1)
+      if (kk) {
+        const e = now - kk.t0;
+        if (e < 520) takerD = 22 + 20 * easeIO(e / 520); // recua para pegar embalo
+        else if (e < KICK_CONTACT) { const q = (e - 520) / (KICK_CONTACT - 520); takerD = 42 - 36 * q * q; } // acelera até a bola
+        else takerD = 6 - 4 * Math.min(1, (e - KICK_CONTACT) / 400); // passa pela bola e segue o movimento
+        if (e >= KICK_CONTACT) {
+          const t = Math.min(1, (e - KICK_CONTACT) / kk.dur);
+          const te = 1 - Math.pow(1 - t, 1.35);
+          const cOff = curveOffset({ fx: kk.exec.fx, ci: kk.exec.ci }, bxp, byp, kk.dst.x, kk.dst.y, 1);
+          const dl = Math.hypot(kk.dst.x - bxp, kk.dst.y - byp) || 1;
+          const sn2 = Math.sin(Math.PI * te);
+          const arc = kk.exec.fx === 'alta' ? 36 : kk.exec.fx === 'rasteira' ? 3 : kk.exec.fx === 'direta' ? 14 : 24;
+          bxp += (kk.dst.x - bxp) * te - ((kk.dst.y - by0) / dl) * cOff * sn2;
+          byp += (kk.dst.y - byp) * te + ((kk.dst.x - bx0) / dl) * cOff * sn2;
+          bzp = arc * sn2;
+          // a câmera acompanha a bola com suavidade
+          cm.tx += (bxp - cm.tx) * 0.035;
+          cm.ty += (byp - cm.ty) * 0.035;
+          cm.x += (FX1 + 40 - cm.x) * 0.012;
+        } else if (e < 520) {
+          // pequeno ajuste de enquadramento na preparação: aproxima um pouco da bola
+          cm.f += (560 - cm.f) * 0.03;
+        }
+        runK = Math.min(1, e / (KICK_CONTACT + kk.dur * 0.6));
+      }
+      put(0, bx0 + ux * takerD, by0 + uy * takerD);
+      sn.ball[0] = bxp;
+      sn.ball[1] = byp;
+      sn.ball[2] = bzp;
       // prévia: ao escolher a jogada os atacantes correm até o destino e voltam (a cada ~5 s)
       const t = ((now - previewAt.current) % 5200) / 1000;
-      const k = t < 1.5 ? easeIO(t / 1.5) : t < 2.7 ? 1 : t < 3.9 ? 1 - easeIO((t - 2.7) / 1.2) : 0;
+      const k = runK >= 0 ? easeIO(runK) : t < 1.5 ? easeIO(t / 1.5) : t < 2.7 ? 1 : t < 3.9 ? 1 - easeIO((t - 2.7) / 1.2) : 0;
       rs.forEach(([a, b], n) => {
         const pa = toField(c.side, a.u, a.v);
         const pb = toField(c.side, b.u, b.v);
@@ -363,6 +408,7 @@ export default function CornerTaker({ minute, club, opponentColor = '#c8102e', t
     else { setFx(c > 0 ? 'dentro' : 'fora'); setCi(Math.min(1, Math.max(0.2, +Math.abs(c).toFixed(2)))); }
   };
   const onDown = (e: React.PointerEvent) => {
+    if (done.current) return;
     (e.currentTarget as SVGSVGElement).setPointerCapture?.(e.pointerId);
     const q = svgPt(e);
     const d = dial.current;
@@ -392,7 +438,7 @@ export default function CornerTaker({ minute, club, opponentColor = '#c8102e', t
   return (
     <div className={`ct-wrap${floating ? ' ct-float' : ''}`} role="dialog" aria-label="Cobrança de escanteio">
       <style>{CSS}</style>
-      <div className="ct-box">
+      <div className={`ct-box${kicking ? ' ct-kicking' : ''}`}>
         <div className="ct-main">
           <div className="ct-stage">
             <LiveCam liveRef={snapRef} mode="corner" camOverride={camRef} onFrame={onFrame} club={live.club} opponent={live.opponent} home={live.home} ambience={live.ambience} burst={null} score={live.score} />
@@ -529,6 +575,8 @@ export const CSS = `
 .ct-box { width: min(100%, calc((100vh - 56px) * 1.31), 1120px); }
 .ct-main { position: relative; border-radius: 10px; overflow: hidden; background: #060b14; }
 .ct-stage { position: relative; width: 100%; aspect-ratio: 740 / 564; overflow: hidden; touch-action: none; user-select: none; }
+.ct-ov, .ct-left, .ct-tac, .ct-legend, .ct-power, .ct-desc { transition: opacity .35s; }
+.ct-kicking .ct-ov, .ct-kicking .ct-left, .ct-kicking .ct-tac, .ct-kicking .ct-legend, .ct-kicking .ct-power, .ct-kicking .ct-desc { opacity: 0; pointer-events: none; }
 .ct-ov { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 6; cursor: crosshair; touch-action: none; }
 .ct-ui { position: absolute; inset: 0; pointer-events: none; z-index: 8; }
 .ct-ui > * { pointer-events: auto; }
