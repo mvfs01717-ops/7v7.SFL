@@ -13,7 +13,7 @@ import { chooseDribble, dribbleBody, dribbleGeometry, moveFit, recordDribble, DR
 import { aerialBonus, blockStyle, burstMul, contactMods, dribbleChanceMod, gkClaim, gkQuick, gkSweep, hasStyles, kOf, laneStyle, passBiasStyle, passErrMul, reactBonus, shotMods, shotRangeBonus, stumbleMul, styleMove, tackleStyleMod, TAG_ID, type PSet } from '@/lib/game/playStyles';
 import { anticip, dribbleMod, errMul, gkHold, passAdj, roleMove, sweepChance, tackleMod, type Lv, type RC } from '@/lib/game/roleLevels';
 import { PLAY_RUNS, curveOffset, predictLand, PLAY_INFO, type CExec } from '@/lib/game/corner';
-import { loseChance, type RKind, type RestartChoice, type RestartReq } from '@/lib/game/restart';
+import { loseChance, restartLose, type RKind, type RestartChoice, type RestartReq } from '@/lib/game/restart';
 import { TRAIT_LABEL, clashDy, decide, learnFail, learnMul, learnTry, memConf, memNote, memShare, mainTrait, newLearn, newMemory, perceiveErr, traitsOf, type Opt, type Traits } from '@/lib/game/intel2';
 import { ambientChoice, choosePlay, createIntel, passBias, passTaste, personalityOf, recordPass, recordPlay, type Intel, type PlayKind, type Style } from '@/lib/game/playIntel';
 import { ReplayPlayer, type ClipData } from '@/components/game/ReplayPlayer';
@@ -547,7 +547,8 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     const cutSlot = c.live?.cut ? all2.find((x) => x.key === c.live!.cut && x.side !== O && x.pos !== 'GK') : undefined;
     const no = cutSlot && c.live ? { slot: cutSlot, d: c.live.lane } : nearestOpp(all2, O, rc);
     // distâncias ao vivo (mesmas do risco mostrado na tela); sem elas, usa as posições do início
-    const p = loseChance(kind, c.play, c.live?.d ?? dist(tk, rc), c.live?.lane ?? no.d, tk.ovr, rc.ovr);
+    // mesma conta do risco mostrado na tela (mira, força, altura e medidas ao vivo); sem medidas, a tabela pelas posições do início
+    const p = c.live ? restartLose(kind, c.play, c.live, tk.ovr, rc.ovr) : loseChance(kind, c.play, dist(tk, rc), no.d, tk.ovr, rc.ovr);
     const lost = !!no.slot && Math.random() < p;
     const dur = c.play === 'longo' ? 860 : c.play === 'curto' ? 420 : c.play === 'rapido' ? 470 : c.play === 'medio' ? 650 : 560;
     const arc = c.play === 'longo' ? 32 : c.play === 'curto' ? 5 : c.play === 'medio' ? 16 : 14;

@@ -5,7 +5,32 @@ export type RPlay = 'tradicional' | 'rapido' | 'curto' | 'longo' | 'medio';
 export type RPlayer = { key: string; name: string; pos: string; ovr: number; side: 'user' | 'bot'; x: number; y: number };
 // live: distâncias medidas na cena no momento da confirmação (receptor ao cobrador/bola e ao defensor mais próximo), usadas no risco
 // live: medidas na cena no momento da confirmação. lane = distância do defensor mais próximo à trajetória da bola (quem pode interceptar); cut = esse defensor
-export type RestartChoice = { target: string; play: RPlay; live?: { d: number; lane: number; cut?: string } };
+// Medidas da cena no momento da confirmação (mira livre): d = alcance do lançamento; lane = distância do defensor mais próximo da trajetória (só se puder cortar);
+// cut = esse defensor; recvKey/recvD = companheiro mais perto do ponto de chegada e sua distância até ele
+export type LiveRestart = { d: number; lane: number; cut?: string; recvKey?: string; recvD: number };
+export type RestartChoice = { target: string; play: RPlay; live?: LiveRestart & { land: { x: number; y: number } } };
+
+// Mira livre: força e altura controlam o lançamento
+export const RECV_R = 22; // companheiro a até essa distância do ponto de chegada domina a bola
+export const landDist = (power: number) => 40 + power * 2.4; // alcance (unidades de campo) para força de 0 a 100
+export const cutRadius = (height: number) => 36 - 0.2 * height; // passes rasteiros são mais cortáveis que os altos
+// jogada (para a tabela de chances e a trajetória) derivada da força e da altura escolhidas
+export function playFor(kind: RKind, power: number, height: number): RPlay {
+  if (kind === 'lateral') {
+    if (power < 35) return 'curto';
+    if (height >= 70) return 'longo';
+    if (height < 20 && power >= 50) return 'rapido';
+    return 'tradicional';
+  }
+  if (power < 40) return 'curto';
+  if (height >= 70) return 'longo';
+  return 'medio';
+}
+// chance de a bola ser perdida: a tabela de loseChance + bola solta quando ninguém alcança o ponto de chegada
+export function restartLose(kind: RKind, play: RPlay, live: LiveRestart, takerOvr: number, recvOvr: number): number {
+  const p = loseChance(kind, play, live.d, live.lane, takerOvr, recvOvr);
+  return live.recvD > RECV_R ? Math.min(0.9, p + 0.3) : p;
+}
 export type RestartReq = {
   kind: RKind;
   minute: number;
