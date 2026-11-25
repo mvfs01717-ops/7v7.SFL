@@ -12,7 +12,7 @@ import { chooseContact, chooseTackle, CONTACT_ID, laneCut, segPoint, type Contac
 import { chooseDribble, dribbleBody, dribbleGeometry, moveFit, recordDribble, DRIBBLE_CAPTION, type DribbleCtx, type DribbleMove } from '@/lib/game/dribbles';
 import { aerialBonus, blockStyle, burstMul, contactMods, dribbleChanceMod, gkClaim, gkQuick, gkSweep, hasStyles, kOf, laneStyle, passBiasStyle, passErrMul, reactBonus, shotMods, shotRangeBonus, stumbleMul, styleMove, tackleStyleMod, TAG_ID, type PSet } from '@/lib/game/playStyles';
 import { anticip, dribbleMod, errMul, gkHold, passAdj, roleMove, sweepChance, tackleMod, type Lv, type RC } from '@/lib/game/roleLevels';
-import { PLAY_RUNS, predictLand, PLAY_INFO, type CExec } from '@/lib/game/corner';
+import { PLAY_RUNS, curveOffset, predictLand, PLAY_INFO, type CExec } from '@/lib/game/corner';
 import { loseChance, type RKind, type RestartChoice, type RestartReq } from '@/lib/game/restart';
 import { TRAIT_LABEL, clashDy, decide, learnFail, learnMul, learnTry, memConf, memNote, memShare, mainTrait, newLearn, newMemory, perceiveErr, traitsOf, type Opt, type Traits } from '@/lib/game/intel2';
 import { ambientChoice, choosePlay, createIntel, passBias, passTaste, personalityOf, recordPass, recordPlay, type Intel, type PlayKind, type Style } from '@/lib/game/playIntel';
@@ -1819,6 +1819,8 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
         const how = cxs.fx === 'dentro' ? 'com curva para dentro' : cxs.fx === 'fora' ? 'com curva para fora' : cxs.fx === 'alta' ? 'alto' : cxs.fx === 'rasteira' ? 'rasteiro' : 'direto';
         const dur = Math.round(clamp(1000 - cxs.pw * 520, 460, 1000));
         const arc = cxs.fx === 'alta' ? 30 : cxs.fx === 'rasteira' ? 4 : cxs.fx === 'direta' ? 12 : 20;
+        // Efeito de verdade: a bola faz a curva no ar (para dentro ou para fora, na intensidade escolhida) e termina no ponto mirado
+        const curve = curveOffset(cxs, corner.x, corner.y, landPt.x, landPt.y, dir) || undefined;
         const warn = rec > 0.25 && defenders[0] ? `, mas ${defenders[0].name} já esperava essa jogada` : '';
         const label = PLAY_INFO[cxs.play].label.toLowerCase();
         countUse(`ia.escanteio.${cxs.play === 'curto' ? 'curto' : cxs.play === 'primeiro' ? 'primeira' : 'area'}`);
@@ -1833,11 +1835,11 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
             csteps = [
               wrap({ kind: 'pass', to: { slot: mate.key }, dur: 400, caption: `Escanteio curto: ${taker.name} toca para ${mate.name}${warn}` }),
               wrap({ kind: 'wait', to: { x: sp.x, y: sp.y }, dur: 260, setup: [...ends, ...dEnds] }),
-              wrap({ kind: 'pass', to: { slot: targetSlot.key }, dur, arc, caption: `${mate.name} levanta ${how} na área` }),
+              wrap({ kind: 'pass', to: { slot: targetSlot.key }, dur, arc, curve, caption: `${mate.name} levanta ${how} na área` }),
             ];
-          } else csteps = [wrap({ kind: 'pass', to: { slot: targetSlot.key }, dur, arc, caption: `${taker.name} cobra o escanteio ${how}`, setup: [...ends, ...dEnds] })];
+          } else csteps = [wrap({ kind: 'pass', to: { slot: targetSlot.key }, dur, arc, curve, caption: `${taker.name} cobra o escanteio ${how}`, setup: [...ends, ...dEnds] })];
         } else {
-          csteps = [wrap({ kind: 'pass', to: { slot: targetSlot.key }, dur, arc, caption: `${taker.name} cobra ${how} (${label})${warn}`, setup: [...ends, ...dEnds] })];
+          csteps = [wrap({ kind: 'pass', to: { slot: targetSlot.key }, dur, arc, curve, caption: `${taker.name} cobra ${how} (${label})${warn}`, setup: [...ends, ...dEnds] })];
         }
         return { steps: csteps, kind: (cxs.play === 'curto' ? 'curto' : cxs.play === 'primeiro' ? 'primeira' : 'area') as CornerKind };
       }

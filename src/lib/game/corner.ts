@@ -5,7 +5,17 @@
 export type CPlay = 'primeiro' | 'segundo' | 'central' | 'curto' | 'recuo' | 'distracao' | 'bloqueio';
 export type CEffect = 'dentro' | 'fora' | 'direta' | 'alta' | 'rasteira';
 export type COutcome = 'gol' | 'defesa' | 'finalização' | 'posse';
-export type CExec = { play: CPlay; side: 0 | 1; ax: number; ay: number; pw: number; fx: CEffect };
+// ci = intensidade do efeito (0,2 a 1): quanto mais curva, mais a bola desvia no ar e mais difícil é a execução
+export type CExec = { play: CPlay; side: 0 | 1; ax: number; ay: number; pw: number; fx: CEffect; ci?: number };
+export const CURVE_PX = 38; // desvio lateral máximo (unidades do campo) da curva com intensidade 1
+// Curva da bola: positivo = para o lado do gol (curva para dentro), negativo = para longe do gol (curva para fora)
+export const curveMag = (e: Pick<CExec, 'fx' | 'ci'>): number => (e.fx === 'dentro' ? 1 : e.fx === 'fora' ? -1 : 0) * CURVE_PX * Math.max(0.2, Math.min(1, e.ci ?? 1));
+// Desvio lateral (com sinal do motor de bola) para um trajeto de (fx,fy) a (tx,ty): o motor desvia no vetor (-dy, dx); `dir` é o sentido do gol no eixo x
+export const curveOffset = (e: Pick<CExec, 'fx' | 'ci'>, fx0: number, fy0: number, tx: number, ty: number, dir: number): number => {
+  const l = Math.hypot(tx - fx0, ty - fy0) || 1;
+  const px = -(ty - fy0) / l;
+  return curveMag(e) * (Math.sign(px * dir) || 1);
+};
 type Pt = { u: number; v: number };
 type Rnd = () => number;
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
@@ -72,7 +82,8 @@ export function landing(i: CornerIn, rnd: Rnd): { land: Pt; err: number } {
   if (e.fx === 'dentro') v -= 0.012;
   else if (e.fx === 'fora') v += 0.012;
   else if (e.fx === 'alta') v += 0.01;
-  const fxHard = e.fx === 'direta' ? 0.9 : e.fx === 'rasteira' ? 0.95 : e.fx === 'alta' ? 1.05 : 1.2;
+  const ci = Math.max(0.2, Math.min(1, e.ci ?? 1));
+  const fxHard = e.fx === 'direta' ? 0.9 : e.fx === 'rasteira' ? 0.95 : e.fx === 'alta' ? 1.05 : 0.9 + 0.3 * ci;
   const err = (0.028 + Math.abs(dPow) * 0.12 + Math.max(0, e.pw - 0.85) * 0.2) * fxHard * (1 + i.pressure * 0.3) * (1 - sk * 0.28);
   const g = () => (rnd() + rnd() + rnd() - 1.5) * 0.8;
   return { land: { u: clamp(u + g() * err, 0, 1), v: clamp(v + g() * err, 0.02, 1.05) }, err };
@@ -112,7 +123,7 @@ export function cornerProbs(i: CornerIn, land: Pt, keeperOut: boolean, keeperWon
   const centre = 1 - Math.abs(land.u - 0.5) * 0.6;
   const quality = (e.play === 'recuo' && land.v > 0.7 ? 0.5 : 0.4 + 0.5 * depth) * (0.65 + 0.35 * centre) * (e.fx === 'rasteira' ? 1.03 : 1);
   const onTarget = clamp(quality, 0.12, 0.85);
-  const saveP = clamp(0.5 + (i.keeperOvr - 78) * 0.01 - (e.fx === 'dentro' ? 0.05 : 0), 0.35, 0.72);
+  const saveP = clamp(0.5 + (i.keeperOvr - 78) * 0.01 - (e.fx === 'dentro' ? 0.05 * (e.ci ?? 1) : 0), 0.35, 0.72);
   let gol = pWin * onTarget * (1 - saveP) * 1.05;
   let defesa = pWin * onTarget * saveP * 0.7;
   let fin = pWin * (1 - onTarget) * 0.85 + pWin * onTarget * 0.18;
@@ -129,7 +140,7 @@ export function keeperDecision(i: CornerIn, land: Pt, rnd: Rnd): { out: boolean;
   const e = i.exec;
   const g = (rnd() + rnd() + rnd() - 1.5) * 0.8;
   const est = { u: land.u + g * 0.14, v: land.v + g * 0.12 };
-  const reach = 0.2 + (i.keeperOvr - 75) * 0.005 + (e.fx === 'alta' ? 0.04 : 0) - (e.fx === 'rasteira' ? 0.07 : 0) - (e.fx === 'dentro' ? 0.03 : 0);
+  const reach = 0.2 + (i.keeperOvr - 75) * 0.005 + (e.fx === 'alta' ? 0.04 : 0) - (e.fx === 'rasteira' ? 0.07 : 0) - (e.fx === 'dentro' ? 0.03 * (e.ci ?? 1) : 0);
   const near = est.v < reach + 0.06 && est.u > 0.12 && est.u < 0.88;
   const crowd = PLAY_RUNS[e.play].filter(([, end]) => dens(end, est) > 0.25).length;
   const out = near && crowd <= 2 && rnd() < clamp(0.45 + (i.keeperOvr - 75) * 0.012, 0.2, 0.85);
@@ -165,20 +176,20 @@ export function botCorner(takerOvr: number, used: CornerHist, defSeen: CornerHis
   const aim = { u: clamp(z.u + (rnd() - 0.5) * 0.2, 0.05, 0.95), v: clamp(z.v + (rnd() - 0.5) * 0.14, 0.08, 0.98) };
   // erro de leitura da força: o bot "segura o botão" quase no tempo certo
   const pw = clamp(idealPower(aim, fx) + (rnd() + rnd() - 1) * jitter * 2, 0.15, 1);
-  return { play, side, ax: aim.u, ay: aim.v, pw, fx };
+  return { play, side, ax: aim.u, ay: aim.v, pw, fx, ci: fx === 'dentro' || fx === 'fora' ? clamp(0.45 + rnd() * 0.55, 0.2, 1) : undefined };
 }
 
 // ---------- Codificação (vai na sala do multiplayer e no plano) e validação ----------
 export function encodeExec(e: CExec): string {
-  return `cx1:${e.play}:${e.side}:${e.ax.toFixed(2)}:${e.ay.toFixed(2)}:${e.pw.toFixed(2)}:${e.fx}`;
+  return `cx1:${e.play}:${e.side}:${e.ax.toFixed(2)}:${e.ay.toFixed(2)}:${e.pw.toFixed(2)}:${e.fx}${e.ci === undefined ? '' : `:${e.ci.toFixed(2)}`}`;
 }
 export function decodeExec(s: string | undefined | null): CExec | null {
   if (!s || !s.startsWith('cx1:')) return null;
-  const [, play, side, ax, ay, pw, fx] = s.split(':');
+  const [, play, side, ax, ay, pw, fx, ci] = s.split(':');
   if (!(PLAYS as string[]).includes(play) || !(EFFECTS as string[]).includes(fx)) return null;
   const n = [ax, ay, pw].map(Number);
   if (n.some((v) => !Number.isFinite(v))) return null;
-  return { play: play as CPlay, side: side === '1' ? 1 : 0, ax: clamp(n[0], 0, 1), ay: clamp(n[1], 0.02, 1), pw: clamp(n[2], 0.05, 1), fx: fx as CEffect };
+  return { play: play as CPlay, side: side === '1' ? 1 : 0, ax: clamp(n[0], 0, 1), ay: clamp(n[1], 0.02, 1), pw: clamp(n[2], 0.05, 1), fx: fx as CEffect, ci: ci !== undefined && Number.isFinite(Number(ci)) ? clamp(Number(ci), 0.2, 1) : undefined };
 }
 // Lado do canto igual para os dois lados do jogo (sai do minuto)
 export const cornerSide = (minute: number, salt = 0): 0 | 1 => ((Math.imul(minute + 7 + salt, 2654435761) >>> 8) & 1) as 0 | 1;

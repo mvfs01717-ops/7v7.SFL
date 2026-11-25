@@ -3,7 +3,7 @@ import { LiveCam } from '@/components/game/LiveCam';
 import type { LiveSnap } from '@/components/MatchPitch';
 import type { Cam, Proj } from '@/components/game/ReplayPlayer';
 import type { Ambience } from '@/lib/game/ambience';
-import { EFFECTS, EFFECT_LABEL, PLAYS, PLAY_INFO, PLAY_RUNS, cornerSide, idealPower, predictLand, type CEffect, type CExec, type CPlay } from '@/lib/game/corner';
+import { EFFECTS, EFFECT_LABEL, curveOffset, PLAYS, PLAY_INFO, PLAY_RUNS, cornerSide, idealPower, predictLand, type CEffect, type CExec, type CPlay } from '@/lib/game/corner';
 
 // Tela do cobrador de escanteio (inspirada no FC): mira no gramado, linha ciano da bola até o ponto de queda, efeito escrito embaixo da bola,
 // barra de força, menu de jogadas ensaiadas com prévia discreta das corridas e legenda de comandos. Tudo com discos, sem figuras humanas.
@@ -43,19 +43,20 @@ export default function CornerTaker({ minute, club, opponentColor = '#c8102e', t
   const [left, setLeft] = useState(total);
   const [play, setPlay] = useState<CPlay>('central');
   const [fx, setFx] = useState<CEffect>('direta');
+  const [ci, setCi] = useState(0.7); // intensidade do efeito (curva)
   const [aim, setAim] = useState(() => ({ ...PLAY_INFO.central.zone }));
   const [pw, setPw] = useState(0);
   const [charging, setCharging] = useState(false);
   const done = useRef(false);
-  const cur = useRef({ play, fx, aim, pw });
-  cur.current = { play, fx, aim, pw };
+  const cur = useRef({ play, fx, aim, pw, ci });
+  cur.current = { play, fx, aim, pw, ci };
   const chargeStart = useRef(0);
 
   const finish = (power: number) => {
     if (done.current) return;
     done.current = true;
     const c = cur.current;
-    onDone({ play: c.play, side, ax: c.aim.u, ay: c.aim.v, pw: Math.min(1, Math.max(0.05, power)), fx: c.fx });
+    onDone({ play: c.play, side, ax: c.aim.u, ay: c.aim.v, pw: Math.min(1, Math.max(0.05, power)), fx: c.fx, ci: c.fx === 'dentro' || c.fx === 'fora' ? c.ci : undefined });
   };
   // Tempo esgotado: executa o que está montado, com força um pouco abaixo da ideal (quem não decide perde qualidade)
   useEffect(() => {
@@ -105,6 +106,8 @@ export default function CornerTaker({ minute, club, opponentColor = '#c8102e', t
         const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
         setAim((a) => ({ u: Math.min(1, Math.max(0, a.u + dx * (side === 0 ? -1 : 1))), v: Math.min(1, Math.max(0.02, a.v + dy)) }));
       } else if (/^[1-7]$/.test(e.key)) pickPlay(PLAYS[Number(e.key) - 1]);
+      else if (e.key === 'z' || e.key === 'Z') setCi((v) => Math.max(0.2, +(v - 0.1).toFixed(2)));
+      else if (e.key === 'x' || e.key === 'X') setCi((v) => Math.min(1, +(v + 0.1).toFixed(2)));
       else if (e.key === 'e' || e.key === 'E') setFx((f) => EFFECTS[(EFFECTS.indexOf(f) + 1) % EFFECTS.length]);
       else if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) {
         e.preventDefault();
@@ -148,12 +151,12 @@ export default function CornerTaker({ minute, club, opponentColor = '#c8102e', t
       fx: null,
     };
   }
-  const st = useRef({ play, fx, aim, pw, side, recv: 0 });
+  const st = useRef({ play, fx, aim, pw, side, recv: 0, ci });
   const runsRef = useRef(runs);
   runsRef.current = runs;
   const pred = predictLand({ play, side, ax: aim.u, ay: aim.v, pw: pw || idealPower(aim, fx), fx });
   const recvIdx = runs.reduce((best, [, b], k) => (Math.hypot(b.u - pred.u, b.v - pred.v) < Math.hypot(runs[best][1].u - pred.u, runs[best][1].v - pred.v) ? k : best), 0);
-  st.current = { play, fx, aim, pw, side, recv: recvIdx };
+  st.current = { play, fx, aim, pw, side, recv: recvIdx, ci };
   const previewAt = useRef(performance.now());
   useEffect(() => {
     previewAt.current = performance.now();
@@ -210,10 +213,12 @@ export default function CornerTaker({ minute, club, opponentColor = '#c8102e', t
   const olRecv = useRef<SVGGElement>(null);
   const olFx = useRef<SVGTextElement>(null);
   const olBeam = useRef<SVGLineElement>(null);
-  const olExec = useRef<SVGGElement>(null);
+  const olExec = useRef<SVGEllipseElement>(null);
+  const olPuck = useRef<SVGGElement>(null);
+  const olHandle = useRef<SVGGElement>(null);
+  const dial = useRef<{ x: number; y: number; R: number; k: number; gx: number; gy: number; hx: number; hy: number } | null>(null);
+  const mode = useRef<'aim' | 'fx' | 'dir'>('aim');
   const olVal = useRef<SVGTextElement>(null);
-  const olTriL = useRef<SVGPolygonElement>(null);
-  const olTriR = useRef<SVGPolygonElement>(null);
   const homRef = useRef<number[] | null>(null);
   const onFrame = (proj: Proj, snap: LiveSnap, tilt: number) => {
     const c = st.current;
@@ -223,12 +228,15 @@ export default function CornerTaker({ minute, club, opponentColor = '#c8102e', t
     const pr = predictLand({ play: c.play, side: c.side, ax: c.aim.u, ay: c.aim.v, pw: c.pw || idealPower(c.aim, c.fx), fx: c.fx });
     const dst = toField(c.side, pr.u, pr.v);
     const peak = c.fx === 'alta' ? 62 : c.fx === 'rasteira' ? 3 : c.fx === 'direta' ? 20 : 32;
-    const bend = (c.fx === 'dentro' ? -1 : c.fx === 'fora' ? 1 : 0) * 34 * sg;
+    const cOff = curveOffset({ fx: c.fx, ci: c.ci }, ball.x, ball.y, dst.x, dst.y, 1);
+    const cl0 = Math.hypot(dst.x - ball.x, dst.y - ball.y) || 1;
+    const pX = -(dst.y - ball.y) / cl0;
+    const pY = (dst.x - ball.x) / cl0;
     let d = '';
     for (let n = 0; n <= 24; n += 1) {
       const tt = n / 24;
-      const x = ball.x + (dst.x - ball.x) * tt + bend * Math.sin(Math.PI * tt) * 0.9;
-      const y = ball.y + (dst.y - ball.y) * tt + bend * Math.sin(Math.PI * tt) * 0.35;
+      const x = ball.x + (dst.x - ball.x) * tt + pX * cOff * Math.sin(Math.PI * tt);
+      const y = ball.y + (dst.y - ball.y) * tt + pY * cOff * Math.sin(Math.PI * tt);
       const z = 4 + peak * Math.sin(Math.PI * tt);
       const q = proj(x, y, z);
       if (q.d < 25) continue;
@@ -256,9 +264,33 @@ export default function CornerTaker({ minute, club, opponentColor = '#c8102e', t
     mark(olTaker.current, 0);
     mark(olRecv.current, 1 + c.recv);
     const gb = proj(ball.x, ball.y, 0);
-    // marcador de execução: destaque laranja no gramado ao redor da bola (acompanha a perspectiva)
-    const er = Math.min(34, Math.max(20, 12 * gb.s));
-    olExec.current?.setAttribute('transform', `translate(${gb.sx.toFixed(1)} ${gb.sy.toFixed(1)}) scale(${(er * 1.25).toFixed(1)} ${(er * Math.max(0.34, tilt * 0.9)).toFixed(1)})`);
+    // Controle de direção e efeito ao redor da bola (anel laranja): o disco branco define a curva e a altura; a alça ciano gira a direção
+    const er = Math.min(40, Math.max(26, 14 * gb.s));
+    const R = er * 1.3;
+    const k = Math.max(0.4, tilt * 0.95);
+    const gw = proj(ball.x + 30, ball.y, 0);
+    let gxs = (gw.sx - gb.sx) / R;
+    let gys = (gw.sy - gb.sy) / (R * k);
+    const gl = Math.hypot(gxs, gys);
+    if (gl < 1e-3) { gxs = 0; gys = 1; } else { gxs /= gl; gys /= gl; }
+    const gd0 = proj(dst.x, dst.y, 0);
+    const th = Math.atan2(gd0.sy - gb.sy, gd0.sx - gb.sx);
+    dial.current = { x: gb.sx, y: gb.sy, R, k, gx: gxs, gy: gys, hx: gb.sx + Math.cos(th) * R, hy: gb.sy + Math.sin(th) * R * k };
+    olExec.current?.setAttribute('cx', gb.sx.toFixed(1));
+    olExec.current?.setAttribute('cy', gb.sy.toFixed(1));
+    olExec.current?.setAttribute('rx', R.toFixed(1));
+    olExec.current?.setAttribute('ry', (R * k).toFixed(1));
+    // eixo da altura: perpendicular à curva, apontando para cima na tela
+    let lx = gys;
+    let ly = -gxs;
+    if (ly > 0 || (Math.abs(ly) < 1e-3 && lx < 0)) { lx = -lx; ly = -ly; }
+    const cc = c.fx === 'dentro' ? c.ci : c.fx === 'fora' ? -c.ci : 0;
+    const ll = c.fx === 'alta' ? 0.8 : c.fx === 'rasteira' ? -0.8 : 0;
+    const pnx = cc * gxs + ll * lx;
+    const pny = cc * gys + ll * ly;
+    olPuck.current?.setAttribute('transform', `translate(${(gb.sx + pnx * R).toFixed(1)} ${(gb.sy + pny * R * k).toFixed(1)})`);
+    olHandle.current?.setAttribute('transform', `translate(${dial.current.hx.toFixed(1)} ${dial.current.hy.toFixed(1)}) rotate(${((th * 180) / Math.PI + 90).toFixed(1)})`);
+    Object.assign(dial.current, { lx, ly });
     // feixe de mira: sai da bola em direção ao destino (vertical na tela, como na referência), com a inclinação real da mira
     const gd = proj(dst.x, dst.y, 0);
     const bx = gd.sx - gb.sx;
@@ -271,14 +303,16 @@ export default function CornerTaker({ minute, club, opponentColor = '#c8102e', t
     olBeam.current?.setAttribute('y2', (gb.sy + (by / bl) * len).toFixed(1));
     // setas de ajuste fino ao lado da bola e valores
     const tw = 6;
-    olTriL.current?.setAttribute('points', `${(gb.sx - er * 1.05).toFixed(1)},${gb.sy.toFixed(1)} ${(gb.sx - er * 1.05 - tw).toFixed(1)},${(gb.sy - tw * 0.7).toFixed(1)} ${(gb.sx - er * 1.05 - tw).toFixed(1)},${(gb.sy + tw * 0.7).toFixed(1)}`);
-    olTriR.current?.setAttribute('points', `${(gb.sx + er * 1.05).toFixed(1)},${gb.sy.toFixed(1)} ${(gb.sx + er * 1.05 + tw).toFixed(1)},${(gb.sy - tw * 0.7).toFixed(1)} ${(gb.sx + er * 1.05 + tw).toFixed(1)},${(gb.sy + tw * 0.7).toFixed(1)}`);
     const dirV = Math.round((c.aim.u - 0.5) * 100);
     const depV = Math.round(c.aim.v * 100);
-    if (olVal.current) olVal.current.textContent = `DIREÇÃO ${dirV > 0 ? '+' : ''}${dirV}  ·  ALCANCE ${depV}`;
-    olVal.current?.setAttribute('x', (gb.sx - er * 1.05 - tw - 10).toFixed(1));
+    if (olVal.current) olVal.current.textContent = `DIREÇÃO ${dirV > 0 ? '+' : ''}${dirV}  ·  ALCANCE ${depV}${c.fx === 'dentro' || c.fx === 'fora' ? `  ·  EFEITO ${Math.round(c.ci * 100)}%` : ''}`;
+    // rótulos à esquerda da bola, sempre dentro da cena
+    const endX = gb.sx - R - 14;
+    const w1 = olFx.current?.getComputedTextLength?.() ?? 0;
+    const w2 = olVal.current?.getComputedTextLength?.() ?? 0;
+    olVal.current?.setAttribute('x', Math.max(14, endX - w2).toFixed(1));
     olVal.current?.setAttribute('y', (gb.sy + 12).toFixed(1));
-    olFx.current?.setAttribute('x', (gb.sx - er * 1.05 - tw - 10).toFixed(1));
+    olFx.current?.setAttribute('x', Math.max(14, endX - w1).toFixed(1));
     olFx.current?.setAttribute('y', (gb.sy - 4).toFixed(1));
     // homografia tela -> campo (para mirar tocando/arrastando no gramado)
     const f = [[560, 70], [720, 70], [720, 370], [560, 370]];
@@ -289,14 +323,61 @@ export default function CornerTaker({ minute, club, opponentColor = '#c8102e', t
     homRef.current = homography(sc, f);
   };
   const ovRef = useRef<SVGSVGElement>(null);
-  const aimFromPointer = (e: React.PointerEvent) => {
+  const svgPt = (e: React.PointerEvent) => {
     const r = ovRef.current?.getBoundingClientRect();
+    if (!r) return null;
+    return { x: ((e.clientX - r.left) / r.width) * SW, y: ((e.clientY - r.top) / r.height) * SH };
+  };
+  const aimFromPointer = (e: React.PointerEvent) => {
+    const q = svgPt(e);
     const hm = homRef.current;
-    if (!r || !hm) return;
-    const p = applyH(hm, ((e.clientX - r.left) / r.width) * SW, ((e.clientY - r.top) / r.height) * SH);
+    if (!q || !hm) return;
+    const p = applyH(hm, q.x, q.y);
     if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) return;
-    const a = fromField(side, p.x, p.y);
-    setAim(a);
+    if (mode.current === 'dir') {
+      // alça de direção: gira a mira em volta da bola mantendo o alcance
+      const cy0 = side === 0 ? FY0 : FY1;
+      const bx = FX1 - 3;
+      const by = cy0 - (side === 0 ? -1 : 1) * 4;
+      const cur0 = toField(side, cur.current.aim.u, cur.current.aim.v);
+      const L = Math.hypot(cur0.x - bx, cur0.y - by) || 1;
+      const l2 = Math.hypot(p.x - bx, p.y - by) || 1;
+      setAim(fromField(side, bx + ((p.x - bx) / l2) * L, by + ((p.y - by) / l2) * L));
+      return;
+    }
+    setAim(fromField(side, p.x, p.y));
+  };
+  // Controle de efeito: o disco branco dentro do anel. Um eixo é a curva (para dentro / para fora, com intensidade), o outro é a altura (alta / rasteira)
+  const fxFromPointer = (e: React.PointerEvent) => {
+    const q = svgPt(e);
+    const d = dial.current as (typeof dial.current & { lx: number; ly: number }) | null;
+    if (!q || !d) return;
+    let nx = (q.x - d.x) / d.R;
+    let ny = (q.y - d.y) / (d.R * d.k);
+    const nl = Math.hypot(nx, ny);
+    if (nl > 1) { nx /= nl; ny /= nl; }
+    const c = nx * d.gx + ny * d.gy;
+    const l = nx * d.lx + ny * d.ly;
+    if (Math.abs(l) > 0.5 && Math.abs(l) > Math.abs(c)) setFx(l > 0 ? (cur.current.play === 'recuo' ? 'direta' : 'alta') : 'rasteira');
+    else if (Math.abs(c) < 0.18) setFx('direta');
+    else { setFx(c > 0 ? 'dentro' : 'fora'); setCi(Math.min(1, Math.max(0.2, +Math.abs(c).toFixed(2)))); }
+  };
+  const onDown = (e: React.PointerEvent) => {
+    (e.currentTarget as SVGSVGElement).setPointerCapture?.(e.pointerId);
+    const q = svgPt(e);
+    const d = dial.current;
+    mode.current = 'aim';
+    if (q && d) {
+      if (Math.hypot(q.x - d.hx, q.y - d.hy) < 18) mode.current = 'dir';
+      else if (Math.hypot((q.x - d.x) / d.R, (q.y - d.y) / (d.R * d.k)) < 1.15) mode.current = 'fx';
+    }
+    if (mode.current === 'fx') fxFromPointer(e);
+    else aimFromPointer(e);
+  };
+  const onMove = (e: React.PointerEvent) => {
+    if (!e.buttons) return;
+    if (mode.current === 'fx') fxFromPointer(e);
+    else aimFromPointer(e);
   };
 
   const idealP = idealPower(aim, fx);
@@ -319,30 +400,31 @@ export default function CornerTaker({ minute, club, opponentColor = '#c8102e', t
               ref={ovRef}
               className="ct-ov"
               viewBox={`0 0 ${SW} ${SH}`}
-              onPointerDown={(e) => { (e.currentTarget as SVGSVGElement).setPointerCapture?.(e.pointerId); aimFromPointer(e); }}
-              onPointerMove={(e) => { if (e.buttons) aimFromPointer(e); }}
+              onPointerDown={onDown}
+              onPointerMove={onMove}
             >
               <defs>
                 <linearGradient id="ct-beam" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#38d6f0" /></linearGradient>
               </defs>
-              <g ref={olExec}>
-                <ellipse rx="1" ry="1" fill="rgba(255,140,40,.30)" stroke="rgba(255,170,70,.9)" strokeWidth="0.06" vectorEffect="non-scaling-stroke" style={{ strokeWidth: 2 }}>
-                  <animate attributeName="rx" values="0.92;1.08;0.92" dur="1.8s" repeatCount="indefinite" />
-                  <animate attributeName="ry" values="0.92;1.08;0.92" dur="1.8s" repeatCount="indefinite" />
-                  <animate attributeName="opacity" values="0.75;1;0.75" dur="1.8s" repeatCount="indefinite" />
-                </ellipse>
-                <ellipse rx="0.22" ry="0.22" fill="none" stroke="#fff" vectorEffect="non-scaling-stroke" style={{ strokeWidth: 1.5 }} />
-              </g>
+              <ellipse ref={olExec} fill="rgba(255,140,40,.26)" stroke="rgba(255,170,70,.95)" strokeWidth="2.2" style={{ cursor: 'pointer' }}>
+                <animate attributeName="opacity" values="0.78;1;0.78" dur="1.8s" repeatCount="indefinite" />
+              </ellipse>
               <line ref={olBeam} stroke="#38d6f0" strokeWidth="3" strokeLinecap="round" opacity="0.9" style={{ filter: 'drop-shadow(0 0 4px rgba(56,214,240,.9))' }} />
-              <polygon ref={olTriL} fill="#facc15" opacity="0.9" />
-              <polygon ref={olTriR} fill="#facc15" opacity="0.9" />
+              <g ref={olHandle} style={{ cursor: 'grab' }}>
+                <circle r="11" fill="rgba(56,214,240,.18)" />
+                <path d="M-6 4 L0 -7 L6 4 Z" fill="#38d6f0" stroke="rgba(0,0,0,.6)" strokeWidth="1" />
+              </g>
+              <g ref={olPuck} style={{ cursor: 'grab' }}>
+                <circle r="8" fill="#fff" stroke="#38d6f0" strokeWidth="2.5" style={{ filter: 'drop-shadow(0 0 4px rgba(56,214,240,.9))' }} />
+                <circle r="2.4" fill="#f59e0b" />
+              </g>
               <path ref={olLine} fill="none" stroke="#38d6f0" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" opacity="0.6" style={{ filter: 'drop-shadow(0 0 3px rgba(56,214,240,.7))' }} />
               <ellipse ref={olRing} fill="rgba(56,214,240,.12)" stroke="#38d6f0" strokeWidth="1.6" />
               <ellipse ref={olAim} fill="none" stroke="#fff" strokeWidth="1.8" strokeDasharray="4 3" opacity="0.9" />
               {tri(olTaker, '#38bdf8', taker ?? 'Cobrador')}
               {tri(olRecv, '#22d3ee', `Receptor`)}
-              <text ref={olFx} textAnchor="end" fontSize="13" fontWeight="800" fill="#fff" stroke="rgba(0,0,0,.65)" strokeWidth="3" paintOrder="stroke" fontFamily="Inter, sans-serif" letterSpacing=".6">{CROSS_LABEL[fx].toUpperCase()}</text>
-              <text ref={olVal} textAnchor="end" fontSize="11" fontWeight="800" fill="#facc15" stroke="rgba(0,0,0,.7)" strokeWidth="3" paintOrder="stroke" fontFamily="Inter, sans-serif" letterSpacing=".5" />
+              <text ref={olFx} textAnchor="start" fontSize="13" fontWeight="800" fill="#fff" stroke="rgba(0,0,0,.65)" strokeWidth="3" paintOrder="stroke" fontFamily="Inter, sans-serif" letterSpacing=".6">{CROSS_LABEL[fx].toUpperCase()}</text>
+              <text ref={olVal} textAnchor="start" fontSize="11" fontWeight="800" fill="#facc15" stroke="rgba(0,0,0,.7)" strokeWidth="3" paintOrder="stroke" fontFamily="Inter, sans-serif" letterSpacing=".5" />
             </svg>
           </div>
 
@@ -351,6 +433,8 @@ export default function CornerTaker({ minute, club, opponentColor = '#c8102e', t
             <div className="ct-legend ct-pn">
               <div><kbd>←↑↓→</kbd><span>Mirar</span></div>
               <div><kbd>E</kbd><span>Efeito</span></div>
+              <div><kbd>Z X</kbd><span>Intensidade da curva</span></div>
+              <div><kbd>◉</kbd><span>Arraste o disco: efeito</span></div>
               <div><kbd>1–7</kbd><span>Jogada</span></div>
               <div><kbd>␣</kbd><span>Cruzar (segure = força)</span></div>
             </div>
