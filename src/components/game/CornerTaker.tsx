@@ -260,6 +260,14 @@ export default function CornerTaker({ minute, club, opponentColor = '#c8102e', t
       const cl = Math.hypot(cm.x - bx0, cm.y - by0) || 1;
       const ux = (cm.x - bx0) / cl;
       const uy = (cm.y - by0) / cl;
+      // Etapa de organização: a câmera sai da bandeirinha e passa para trás da linha de fundo, olhando para a área (transição suave)
+      if (phaseRef.current === 'area' || kick.current) {
+        const ac = { x: FX1 + 78, y: MID_Y + sg * 38, z: 52, tx: 648, ty: MID_Y - sg * 8, f: 470 };
+        const q = 0.045;
+        cm.x += (ac.x - cm.x) * q; cm.y += (ac.y - cm.y) * q; cm.z += (ac.z - cm.z) * q;
+        if (!kick.current) { cm.tx += (ac.tx - cm.tx) * q; cm.ty += (ac.ty - cm.ty) * q; }
+        cm.f += (ac.f - cm.f) * q;
+      }
       const kk = kick.current;
       let takerD = 22;
       let bxp = FX1 - 3;
@@ -284,10 +292,6 @@ export default function CornerTaker({ minute, club, opponentColor = '#c8102e', t
           // a câmera acompanha a bola com suavidade
           cm.tx += (bxp - cm.tx) * 0.035;
           cm.ty += (byp - cm.ty) * 0.035;
-          cm.x += (FX1 + 40 - cm.x) * 0.012;
-        } else if (e < 520) {
-          // pequeno ajuste de enquadramento na preparação: aproxima um pouco da bola
-          cm.f += (560 - cm.f) * 0.03;
         }
         runK = Math.min(1, e / (KICK_CONTACT + kk.dur * 0.6));
       }
