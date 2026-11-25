@@ -115,9 +115,12 @@ export default function RestartTaker({ req, live, seconds = 20, onDone }: Props)
     const l = Math.hypot(px - cx, py - cy) || 1;
     return { x: cx, y: cy, z, tx: cx + ((px - cx) / l) * z * 2.4, ty: cy + ((py - cy) / l) * z * 2.4, tz: 0, f };
   };
+  // Câmera de transmissão: fica atrás e ao lado do cobrador (ou do goleiro), afastada o bastante para os discos terem tamanho natural
+  const inward = lateral ? -sg : 1; // sentido do campo a partir da linha
+  const gkSide = req.ball.x < (FX0 + 720) / 2 ? 1 : -1; // o gol do goleiro fica para o lado oposto ao meio do campo
   camRef.current = lateral
-    ? aimCam(req.ball.x - 70, req.ball.y + sg * 40, 46, req.ball.x + 140, req.ball.y - sg * 10, 380)
-    : aimCam(FX0 + 34, MID_Y + 58, 40, FX0 + 250, MID_Y - 16, 380);
+    ? { x: req.ball.x - 12, y: req.ball.y - inward * 96, z: 58, tx: req.ball.x + 26, ty: req.ball.y + inward * 170, tz: 0, f: 380 }
+    : { x: req.ball.x - gkSide * 70, y: MID_Y + 58, z: 58, tx: req.ball.x + gkSide * 180, ty: MID_Y - 14, tz: 0, f: 380 };
   const order = useMemo(() => [...req.players.filter((p) => p.side === 'user'), ...req.players.filter((p) => p.side === 'bot')], [req]);
   const snapRef = useRef<LiveSnap | null>(null);
   if (!snapRef.current) {

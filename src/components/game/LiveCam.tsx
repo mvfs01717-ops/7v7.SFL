@@ -183,15 +183,33 @@ export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, 
       const tilt = Math.max(0.28, Math.min(0.95, Math.abs(cc.tz - cc.z) / Math.hypot(cc.tx - cc.x, cc.ty - cc.y, cc.tz - cc.z)));
 
       onFrame?.(proj, snap, tilt);
+      // Recorte no plano próximo: segmentos que cruzam a frente da câmera são cortados na interseção, em vez de descartar os vértices
+      // (descartar deixava o gramado e as linhas perto da câmera sumirem, e a tela ficava escura).
+      const NEAR = 25;
       const path = (pts: [number, number, number][], close = false) => {
+        const n = pts.length;
+        const dOf = (p: [number, number, number]) => proj(p[0], p[1], p[2]).d;
+        const out: [number, number, number][] = [];
+        const last = close ? n : n - 1;
+        for (let i = 0; i < n; i += 1) {
+          const a = pts[i];
+          const b = pts[(i + 1) % n];
+          const da = dOf(a);
+          const inA = da >= NEAR;
+          if (inA) out.push(a);
+          if (i < last) {
+            const db = dOf(b);
+            const inB = db >= NEAR;
+            if (inA !== inB) {
+              const t = (NEAR - da) / (db - da);
+              out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]);
+            }
+          }
+        }
         let d = '';
         let open = false;
-        for (const [x, y, z] of pts) {
+        for (const [x, y, z] of out) {
           const q = proj(x, y, z);
-          if (q.d < 25) {
-            open = false;
-            continue;
-          }
           d += `${open ? 'L' : 'M'}${q.sx.toFixed(1)} ${q.sy.toFixed(1)}`;
           open = true;
         }
