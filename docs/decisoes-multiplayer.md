@@ -10,7 +10,7 @@ Data: 2026-11-25. Tomadas por delegação do usuário ("o que você achar melhor
 ## 2. Multiplayer
 - **Decisão**: o anfitrião é a autoridade. Cada lance usa sorteio determinístico por chave (`src/lib/game/seeded.ts`), derivado de sala, minuto, item do plano e ação.
 - Os lances críticos (passe, disputa, chute, defesa) são resolvidos pelo anfitrião e enviados ao convidado. O convidado não sorteia nenhum lance crítico.
-- Sorteios por quadro ou por `dt` (MatchPitch, linhas 2515, 2520, 2707, 2834) passam a ser sorteados uma vez por ação.
+- Sorteios de decisão e por `dt` (MatchPitch, linhas 2515, 2520, 2707, 2834, 2957, 2963, 2980) passam a usar semente pela chave do ciclo ou da ação. A chave precisa ser igual nos dois clientes.
 - Visual pode continuar com `Math.random`.
 
 ## 3. Fallback
