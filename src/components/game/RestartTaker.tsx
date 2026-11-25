@@ -21,6 +21,8 @@ const FY1 = 430;
 const MID_Y = 220;
 const SW = 740;
 const SH = 564;
+const KICK_WIND = 560; // ms de preparação até o contato com a bola
+const easeIO = (t: number) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 const PEAK: Record<RPlay, number> = { tradicional: 26, rapido: 18, curto: 5, longo: 48, medio: 30 };
 const ABBR = (p: string) => p;
 
@@ -37,11 +39,23 @@ export default function RestartTaker({ req, live, seconds = 20, onDone }: Props)
   cur.current = { target, play };
   const scr = useRef<Record<string, { x: number; y: number }>>({});
 
+  const [kicking, setKicking] = useState(false);
+  const kick = useRef<{ t0: number; play: RPlay; target: string; dur: number } | null>(null);
   const go = (over?: Partial<{ play: RPlay }>) => {
     if (done.current) return;
     done.current = true;
-    onDone({ target: cur.current.target, play: over?.play ?? cur.current.play });
+    const choice = { target: cur.current.target, play: over?.play ?? cur.current.play };
+    // Batida: o cobrador recua, ganha embalo e toca na bola; só então a bola voa até o receptor escolhido. Depois a jogada segue na partida.
+    const tp = req.players.find((p) => p.key === choice.target);
+    const dist = tp ? Math.hypot(tp.x - req.ball.x, tp.y - req.ball.y) : 80;
+    const dur = Math.min(1500, Math.max(450, (choice.play === 'rapido' ? 0.6 : 1) * (dist / (choice.play === 'longo' ? 0.42 : 0.3))));
+    const wind = choice.play === 'rapido' ? 160 : KICK_WIND;
+    kick.current = { t0: performance.now(), play: choice.play, target: choice.target, dur };
+    kickWind.current = wind;
+    setKicking(true);
+    window.setTimeout(() => onDone(choice), wind + dur + 300);
   };
+  const kickWind = useRef(KICK_WIND);
   useEffect(() => {
     const id = window.setInterval(() => setLeft((n) => n - 1), 1000);
     return () => window.clearInterval(id);
@@ -136,6 +150,62 @@ export default function RestartTaker({ req, live, seconds = 20, onDone }: Props)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target]);
 
+  // Batida e reação: roda só depois de confirmar. O disco recua, acelera, toca na bola e a bola voa até o receptor (arco pela altura da jogada)
+  useEffect(() => {
+    let raf = 0;
+    const loop = (now: number) => {
+      raf = requestAnimationFrame(loop);
+      const kk = kick.current;
+      if (!kk) return;
+      const sn = snapRef.current!;
+      const ti = order.findIndex((p) => p.key === req.taker);
+      const tp = req.players.find((p) => p.key === kk.target);
+      if (!tp) return;
+      const e = now - kk.t0;
+      const wind = kickWind.current;
+      const tx0 = req.ball.x;
+      const ty0 = lateral ? req.ball.y - sg * 3 : req.ball.y;
+      const dx = tp.x - tx0;
+      const dy = tp.y - ty0;
+      const l = Math.hypot(dx, dy) || 1;
+      const ux = dx / l;
+      const uy = dy / l;
+      // posição do cobrador: recua do lado oposto ao alvo, acelera e passa pela bola
+      let back = 0;
+      if (e < wind * 0.55) back = 14 * easeIO(e / (wind * 0.55));
+      else if (e < wind) { const q = (e - wind * 0.55) / (wind * 0.45); back = 14 - 20 * q * q; }
+      else back = -6 + 3 * Math.min(1, (e - wind) / 300);
+      sn.pts[ti * 2] = tx0 - ux * back;
+      sn.pts[ti * 2 + 1] = ty0 - uy * back;
+      const bx0 = tx0 + ux * 10;
+      const by0 = ty0 + uy * 10;
+      const cm = camRef.current!;
+      if (e < wind) {
+        // a bola fica à frente do cobrador até o contato
+        sn.ball[0] = bx0; sn.ball[1] = by0; sn.ball[2] = lateral ? 18 : 0;
+      } else {
+        const t = Math.min(1, (e - wind) / kk.dur);
+        const te = 1 - Math.pow(1 - t, 1.3);
+        sn.ball[0] = bx0 + (tp.x - bx0) * te;
+        sn.ball[1] = by0 + (tp.y - by0) * te;
+        sn.ball[2] = (lateral ? 18 : 3) * (1 - te) + (6 + PEAK[kk.play]) * Math.sin(Math.PI * te);
+        cm.tx += (sn.ball[0] - cm.tx) * 0.04;
+        cm.ty += (sn.ball[1] - cm.ty) * 0.04;
+        // o adversário mais próximo do receptor aperta a marcação enquanto a bola viaja
+        const oi = order.findIndex((p) => p.side !== taker.side && p.pos !== 'GK' && p.key === nearestOpp.current);
+        if (oi >= 0) {
+          const ox = sn.pts[oi * 2];
+          const oy = sn.pts[oi * 2 + 1];
+          sn.pts[oi * 2] = ox + (tp.x - ox) * 0.03;
+          sn.pts[oi * 2 + 1] = oy + (tp.y - oy) * 0.03;
+        }
+      }
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const nearestOpp = useRef('');
   const olLine = useRef<SVGPathElement>(null);
   const olRing = useRef<SVGEllipseElement>(null);
   const olTaker = useRef<SVGGElement>(null);
@@ -201,6 +271,7 @@ export default function RestartTaker({ req, live, seconds = 20, onDone }: Props)
   const oppD = rcv ? Math.min(...opp.map((o) => Math.hypot(o.x - rcv.x, o.y - rcv.y))) : 99;
   const pLose = rcv ? loseChance(req.kind, play, Math.hypot(rcv.x - req.ball.x, rcv.y - req.ball.y), oppD, taker.ovr, rcv.ovr) : 0;
   const risk = riskLabel(pLose);
+  if (rcv && !kick.current) nearestOpp.current = [...opp].sort((a, b) => Math.hypot(a.x - rcv.x, a.y - rcv.y) - Math.hypot(b.x - rcv.x, b.y - rcv.y))[0]?.key ?? '';
   const info = plays.find((p) => p.id === play)!;
   const gkOpp = req.players.find((p) => p.side !== taker.side && p.pos === 'GK');
   const tri = (el: React.RefObject<SVGGElement>, color: string) => (
@@ -212,7 +283,7 @@ export default function RestartTaker({ req, live, seconds = 20, onDone }: Props)
   return (
     <div className="ct-wrap rt-wrap" role="dialog" aria-label={lateral ? 'Lateral' : 'Tiro de meta'}>
       <style>{CT_CSS}{RT_CSS}</style>
-      <div className="ct-box">
+      <div className={`ct-box${kicking ? ' ct-kicking' : ''}`}>
         <div className="ct-main">
           <div className="ct-stage">
             <LiveCam liveRef={snapRef} mode="corner" camOverride={camRef} onFrame={onFrame} club={live.club} opponent={live.opponent} home={live.home} ambience={live.ambience} burst={null} score={live.score} />
