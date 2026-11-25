@@ -80,6 +80,7 @@ export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, 
 
   const stripes = useRef<(SVGPathElement | null)[]>([]);
   const lineNodes = useRef<(SVGPathElement | null)[]>([]);
+  const lineG = useRef<SVGGElement>(null);
   const goalNodes = useRef<(SVGPathElement | null)[]>([]);
   const netNodes = useRef<(SVGPathElement | null)[]>([]);
   const layer = useRef<SVGGElement | null>(null);
@@ -228,6 +229,11 @@ export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, 
         [[FX1, MID_Y - 90, 0], [FX1 - 92, MID_Y - 90, 0], [FX1 - 92, MID_Y + 90, 0], [FX1, MID_Y + 90, 0]],
       ];
       lines.forEach((pts, n) => lineNodes.current[n]?.setAttribute('d', path(pts)));
+      if (mode === 'corner') {
+        // linhas e gol ficam mais grossos perto da câmera e mais finos ao longe (espessura por perspectiva)
+        const ls = proj(MID_X, MID_Y, 0).s;
+        lineG.current?.setAttribute('stroke-width', Math.min(3.4, Math.max(1.1, 1.5 * ls)).toFixed(2));
+      }
       [FX0, FX1].forEach((gx, n) => {
         const out = n === 0 ? -1 : 1;
         const wob = Math.abs(gx - postX) < 5 && pAge < 900 && !liteRef.current ? Math.sin(pAge * 0.09) * 3.2 * Math.exp(-pAge / 280) : 0;
@@ -459,7 +465,7 @@ export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, 
         const visible = g.d > 30;
         actors.current[n]?.setAttribute('display', visible ? 'inline' : 'none');
         if (!visible) continue;
-        const ts = Math.min(g.s, 1.7);
+        const ts = Math.min(g.s, 1.7) * (mode === 'corner' ? 0.8 : 1); // no modo de cobrança os discos ficam um pouco menores (escala visual)
         const rx = 15 * ts;
         shadows.current[n]?.setAttribute('transform', `translate(${g.sx.toFixed(1)} ${g.sy.toFixed(1)})`);
         shadows.current[n]?.setAttribute('rx', (rx * 0.95).toFixed(1));
@@ -561,17 +567,38 @@ export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, 
           <filter id="lc-soft" x="-30%" y="-80%" width="160%" height="260%">
             <feGaussianBlur stdDeviation="1.6" />
           </filter>
+          {/* textura de gramado: ruído SVG com tom verde, repetido em padrão (renderizado uma vez por tile) */}
+          <filter id="lc-grain" x="0" y="0" width="100%" height="100%">
+            <feTurbulence type="fractalNoise" baseFrequency="0.9 0.35" numOctaves="2" seed="7" result="n" />
+            <feColorMatrix in="n" type="matrix" values="0 0 0 0 0.05  0 0 0 0 0.22  0 0 0 0 0.08  0 0 0 -2.2 1.05" />
+          </filter>
+          <pattern id="lc-grain-tile" width="140" height="90" patternUnits="userSpaceOnUse">
+            <rect width="140" height="90" filter="url(#lc-grain)" opacity={0.28} />
+          </pattern>
+          <radialGradient id="lc-stadium" cx="50%" cy="28%" r="62%">
+            <stop offset="0%" stopColor="#fff7d6" stopOpacity={0.22} />
+            <stop offset="55%" stopColor="#fff7d6" stopOpacity={0.05} />
+            <stop offset="100%" stopColor="#000" stopOpacity={0.28} />
+          </radialGradient>
+          <radialGradient id="lc-flood" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#ffffff" stopOpacity={0.55} />
+            <stop offset="100%" stopColor="#ffffff" stopOpacity={0} />
+          </radialGradient>
         </defs>
         <rect width={W} height={H} fill="url(#lc-sky)" />
         {/* chão: no modo de cobrança o gramado perto da câmera some no recorte das faixas; preenchemos com o mesmo gramado para a tela não ficar escura */}
         <rect y={H * 0.5} width={W} height={H * 0.5} fill={mode === 'corner' ? arena.grassA : '#0b2d19'} />
         {mode === 'corner' && <rect y={H * 0.78} width={W} height={H * 0.22} fill={arena.grassB} opacity={0.55} />}
+        {mode === 'corner' && <rect y={H * 0.5} width={W} height={H * 0.5} fill="url(#lc-grain-tile)" />}
+        {mode === 'corner' && <rect y={H * 0.5} width={W} height={H * 0.5} fill="url(#lc-stadium)" />}
+        {mode === 'corner' && <ellipse cx={W * 0.12} cy={H * 0.04} rx={W * 0.18} ry={H * 0.09} fill="url(#lc-flood)" />}
+        {mode === 'corner' && <ellipse cx={W * 0.88} cy={H * 0.04} rx={W * 0.18} ry={H * 0.09} fill="url(#lc-flood)" />}
         <rect width={W} height={H * 0.46} fill="url(#lc-crowd)" opacity={0.8} />
         <rect width={W} height={H * 0.46} fill="url(#lc-sky)" opacity={0.5} />
         {Array.from({ length: 10 }).map((_, i) => (
           <path key={i} ref={(el: SVGPathElement | null) => { stripes.current[i] = el; }} fill={mixHex(i % 2 ? arena.grassB : arena.grassA, mixHex(arena.grassA, arena.grassB), Math.min(0.7, grassFade))} stroke={mixHex(i % 2 ? arena.grassB : arena.grassA, mixHex(arena.grassA, arena.grassB), Math.min(0.7, grassFade))} strokeWidth={0.6} />
         ))}
-        <g fill="none" stroke="rgba(255,255,255,.6)" strokeWidth={2.2} strokeLinejoin="round">
+        <g ref={lineG} fill="none" stroke="rgba(255,255,255,.7)" strokeWidth={2.2} strokeLinejoin="round">
           {Array.from({ length: 5 }).map((_, i) => (
             <path key={i} ref={(el: SVGPathElement | null) => { lineNodes.current[i] = el; }} />
           ))}
