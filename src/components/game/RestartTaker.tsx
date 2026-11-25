@@ -43,7 +43,8 @@ const PRESETS: Record<RKind, { id: RPlay; power: number; height: number }[]> = {
 };
 const ABBR = (p: string) => p;
 
-export default function RestartTaker({ req, live, seconds = 20, onDone }: Props) {
+// Tempo para escolher a cobrança (escanteio, lateral ou tiro de meta). Ao zerar, a cobrança sai com a escolha atual.
+export default function RestartTaker({ req, live, seconds = 40, onDone }: Props) {
   const lateral = req.kind === 'lateral';
   const plays = RPLAYS[req.kind];
   const presets = PRESETS[req.kind];
