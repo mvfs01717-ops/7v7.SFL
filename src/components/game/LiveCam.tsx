@@ -33,6 +33,10 @@ const FX1 = 720;
 const FY0 = 10;
 const FY1 = 430;
 const MID_X = 370;
+// pontos da borda do campo: a arquibancada fica acima do ponto mais alto do campo visível na tela
+const EDGE_PTS: [number, number][] = [];
+for (let x = FX0; x <= FX1; x += 20) EDGE_PTS.push([x, FY0], [x, FY1]);
+for (let y = FY0; y <= FY1; y += 20) EDGE_PTS.push([FX0, y], [FX1, y]);
 const MID_Y = 220;
 const GOAL_HALF = 42;
 const GOAL_H = 30;
@@ -81,6 +85,11 @@ export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, 
   const stripes = useRef<(SVGPathElement | null)[]>([]);
   const lineNodes = useRef<(SVGPathElement | null)[]>([]);
   const lineG = useRef<SVGGElement>(null);
+  const crowdR = useRef<SVGRectElement>(null);
+  const skyR = useRef<SVGRectElement>(null);
+  const groundR = useRef<SVGRectElement>(null);
+  const grainR = useRef<SVGRectElement>(null);
+  const stadR = useRef<SVGRectElement>(null);
   const goalNodes = useRef<(SVGPathElement | null)[]>([]);
   const netNodes = useRef<(SVGPathElement | null)[]>([]);
   const layer = useRef<SVGGElement | null>(null);
@@ -233,6 +242,19 @@ export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, 
         // linhas e gol ficam mais grossos perto da câmera e mais finos ao longe (espessura por perspectiva)
         const ls = proj(MID_X, MID_Y, 0).s;
         lineG.current?.setAttribute('stroke-width', Math.min(3.4, Math.max(1.1, 1.5 * ls)).toFixed(2));
+        // a arquibancada e o gramado de fundo começam onde o campo termina na tela: quanto mais a câmera olha para o gramado, menor a faixa de arquibancada
+        let top = H * 0.5;
+        for (const [ex, ey] of EDGE_PTS) {
+          const o = proj(ex, ey, 0);
+          if (o.d > 8) top = Math.min(top, o.sy);
+        }
+        const fy = Math.max(H * 0.08, Math.min(H * 0.5, top));
+        crowdR.current?.setAttribute('height', fy.toFixed(1));
+        skyR.current?.setAttribute('height', fy.toFixed(1));
+        for (const el of [groundR.current, grainR.current, stadR.current]) {
+          el?.setAttribute('y', fy.toFixed(1));
+          el?.setAttribute('height', (H - fy).toFixed(1));
+        }
       }
       [FX0, FX1].forEach((gx, n) => {
         const out = n === 0 ? -1 : 1;
@@ -465,11 +487,14 @@ export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, 
         const visible = g.d > 30;
         actors.current[n]?.setAttribute('display', visible ? 'inline' : 'none');
         if (!visible) continue;
-        const ts = Math.min(g.s, 1.7) * (mode === 'corner' ? 0.8 : 1); // no modo de cobrança os discos ficam um pouco menores (escala visual)
+        // escala visual: no modo de cobrança usa a raiz da perspectiva com teto, então discos perto da câmera não ficam desproporcionais (o tamanho físico não muda)
+        const ts = mode === 'corner' ? Math.max(0.55, Math.min(Math.sqrt(g.s), 1.15)) : Math.min(g.s, 1.7);
         const rx = 15 * ts;
         shadows.current[n]?.setAttribute('transform', `translate(${g.sx.toFixed(1)} ${g.sy.toFixed(1)})`);
-        shadows.current[n]?.setAttribute('rx', (rx * 0.95).toFixed(1));
-        shadows.current[n]?.setAttribute('ry', (rx * 0.95 * tilt * 0.55).toFixed(1));
+        const shK = mode === 'corner' ? 0.8 : 0.95;
+        shadows.current[n]?.setAttribute('rx', (rx * shK).toFixed(1));
+        shadows.current[n]?.setAttribute('ry', (rx * shK * tilt * 0.5).toFixed(1));
+        shadows.current[n]?.setAttribute('fill-opacity', mode === 'corner' ? '0.26' : '0.4');
         const ring = rings.current[n];
         if (ring) {
           const has = n === snap.holder;
@@ -503,6 +528,7 @@ export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, 
         shadows.current[ballKey]?.setAttribute('transform', `translate(${(bg.sx + bz * 0.25 * bg.s).toFixed(1)} ${bg.sy.toFixed(1)})`);
         shadows.current[ballKey]?.setAttribute('rx', (8 * bg.s * Math.max(0.4, 1 - bz / 90)).toFixed(1));
         shadows.current[ballKey]?.setAttribute('ry', (8 * bg.s * Math.max(0.4, 1 - bz / 90) * tilt * 0.55).toFixed(1));
+        shadows.current[ballKey]?.setAttribute('fill-opacity', mode === 'corner' ? '0.3' : '0.45');
         tokens.current[ballKey]?.setAttribute('transform', `translate(${bp.sx.toFixed(1)} ${bp.sy.toFixed(1)}) scale(${Math.min(bp.s, 2.4).toFixed(3)})`);
         depths.push({ key: ballKey, d: bg.d });
       }
@@ -587,14 +613,14 @@ export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, 
         </defs>
         <rect width={W} height={H} fill="url(#lc-sky)" />
         {/* chão: no modo de cobrança o gramado perto da câmera some no recorte das faixas; preenchemos com o mesmo gramado para a tela não ficar escura */}
-        <rect y={H * 0.5} width={W} height={H * 0.5} fill={mode === 'corner' ? arena.grassA : '#0b2d19'} />
+        <rect ref={groundR} y={H * 0.5} width={W} height={H * 0.5} fill={mode === 'corner' ? arena.grassA : '#0b2d19'} />
         {mode === 'corner' && <rect y={H * 0.78} width={W} height={H * 0.22} fill={arena.grassB} opacity={0.55} />}
-        {mode === 'corner' && <rect y={H * 0.5} width={W} height={H * 0.5} fill="url(#lc-grain-tile)" />}
-        {mode === 'corner' && <rect y={H * 0.5} width={W} height={H * 0.5} fill="url(#lc-stadium)" />}
+        {mode === 'corner' && <rect ref={grainR} y={H * 0.5} width={W} height={H * 0.5} fill="url(#lc-grain-tile)" />}
+        {mode === 'corner' && <rect ref={stadR} y={H * 0.5} width={W} height={H * 0.5} fill="url(#lc-stadium)" />}
         {mode === 'corner' && <ellipse cx={W * 0.12} cy={H * 0.04} rx={W * 0.18} ry={H * 0.09} fill="url(#lc-flood)" />}
         {mode === 'corner' && <ellipse cx={W * 0.88} cy={H * 0.04} rx={W * 0.18} ry={H * 0.09} fill="url(#lc-flood)" />}
-        <rect width={W} height={H * 0.46} fill="url(#lc-crowd)" opacity={0.8} />
-        <rect width={W} height={H * 0.46} fill="url(#lc-sky)" opacity={0.5} />
+        <rect ref={crowdR} width={W} height={H * 0.46} fill="url(#lc-crowd)" opacity={0.8} />
+        <rect ref={skyR} width={W} height={H * 0.46} fill="url(#lc-sky)" opacity={0.5} />
         {Array.from({ length: 10 }).map((_, i) => (
           <path key={i} ref={(el: SVGPathElement | null) => { stripes.current[i] = el; }} fill={mixHex(i % 2 ? arena.grassB : arena.grassA, mixHex(arena.grassA, arena.grassB), Math.min(0.7, grassFade))} stroke={mixHex(i % 2 ? arena.grassB : arena.grassA, mixHex(arena.grassA, arena.grassB), Math.min(0.7, grassFade))} strokeWidth={0.6} />
         ))}

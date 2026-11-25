@@ -16,6 +16,7 @@ type Props = {
   onDone: (c: RestartChoice) => void;
 };
 const FX0 = 20;
+const FX1 = 720;
 const FY0 = 10;
 const FY1 = 430;
 const MID_Y = 220;
@@ -118,9 +119,12 @@ export default function RestartTaker({ req, live, seconds = 20, onDone }: Props)
   // Câmera de transmissão: fica atrás e ao lado do cobrador (ou do goleiro), afastada o bastante para os discos terem tamanho natural
   const inward = lateral ? -sg : 1; // sentido do campo a partir da linha
   const gkSide = req.ball.x < (FX0 + 720) / 2 ? 1 : -1; // o gol do goleiro fica para o lado oposto ao meio do campo
+  // lateral: câmera mais alta e mais inclinada para o gramado (linha de fundo mais alta na tela, cobrador visível no terço inferior)
+  // tiro de meta: câmera atrás da linha de gol, olhando para o campo; o gol inteiro e o goleiro aparecem na metade inferior
+  const goalX = gkSide === 1 ? FX0 : FX1;
   camRef.current = lateral
-    ? { x: req.ball.x - 12, y: req.ball.y - inward * 96, z: 58, tx: req.ball.x + 26, ty: req.ball.y + inward * 170, tz: 0, f: 380 }
-    : { x: req.ball.x - gkSide * 70, y: MID_Y + 58, z: 58, tx: req.ball.x + gkSide * 180, ty: MID_Y - 14, tz: 0, f: 380 };
+    ? { x: req.ball.x - 20, y: req.ball.y - inward * 110, z: 140, tx: req.ball.x + 6, ty: req.ball.y + inward * 100, tz: 0, f: 500 }
+    : { x: goalX - gkSide * 120, y: MID_Y, z: 120, tx: goalX + gkSide * 100, ty: MID_Y - 50, tz: 0, f: 420 };
   const order = useMemo(() => [...req.players.filter((p) => p.side === 'user'), ...req.players.filter((p) => p.side === 'bot')], [req]);
   const snapRef = useRef<LiveSnap | null>(null);
   if (!snapRef.current) {
