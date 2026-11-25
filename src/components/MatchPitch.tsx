@@ -543,9 +543,11 @@ export default function MatchPitch({ wet = 0.3, grassFade = 0, liveRef, home = '
     const rc = all2.find((x) => x.key === c.target && x.side === O && x.pos !== 'GK');
     const tk = all2.find((x) => x.key === taker.key) ?? taker;
     if (!rc) return null;
-    const no = nearestOpp(all2, O, rc);
+    // quem corta: o defensor que estava sobre a trajetória da bola na cena (medido na confirmação); sem ele, o mais próximo do receptor
+    const cutSlot = c.live?.cut ? all2.find((x) => x.key === c.live!.cut && x.side !== O && x.pos !== 'GK') : undefined;
+    const no = cutSlot && c.live ? { slot: cutSlot, d: c.live.lane } : nearestOpp(all2, O, rc);
     // distâncias ao vivo (mesmas do risco mostrado na tela); sem elas, usa as posições do início
-    const p = loseChance(kind, c.play, c.live?.d ?? dist(tk, rc), c.live?.oppD ?? no.d, tk.ovr, rc.ovr);
+    const p = loseChance(kind, c.play, c.live?.d ?? dist(tk, rc), c.live?.lane ?? no.d, tk.ovr, rc.ovr);
     const lost = !!no.slot && Math.random() < p;
     const dur = c.play === 'longo' ? 860 : c.play === 'curto' ? 420 : c.play === 'rapido' ? 470 : c.play === 'medio' ? 650 : 560;
     const arc = c.play === 'longo' ? 32 : c.play === 'curto' ? 5 : c.play === 'medio' ? 16 : 14;

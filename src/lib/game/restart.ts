@@ -4,7 +4,8 @@ export type RKind = 'lateral' | 'tirometa';
 export type RPlay = 'tradicional' | 'rapido' | 'curto' | 'longo' | 'medio';
 export type RPlayer = { key: string; name: string; pos: string; ovr: number; side: 'user' | 'bot'; x: number; y: number };
 // live: distâncias medidas na cena no momento da confirmação (receptor ao cobrador/bola e ao defensor mais próximo), usadas no risco
-export type RestartChoice = { target: string; play: RPlay; live?: { d: number; oppD: number } };
+// live: medidas na cena no momento da confirmação. lane = distância do defensor mais próximo à trajetória da bola (quem pode interceptar); cut = esse defensor
+export type RestartChoice = { target: string; play: RPlay; live?: { d: number; lane: number; cut?: string } };
 export type RestartReq = {
   kind: RKind;
   minute: number;

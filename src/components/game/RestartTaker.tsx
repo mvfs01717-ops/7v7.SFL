@@ -46,6 +46,8 @@ export default function RestartTaker({ req, live, seconds = 20, onDone }: Props)
     if (done.current) return;
     done.current = true;
     const choice = { target: cur.current.target, play: over?.play ?? cur.current.play, live: liveNow() ?? undefined };
+    // quem corta a bola é quem pressiona durante o voo
+    if (choice.live?.cut) nearestOpp.current = choice.live.cut;
     // Batida: o cobrador recua, ganha embalo e toca na bola; só então a bola voa até o receptor escolhido. Depois a jogada segue na partida.
     const tp = req.players.find((p) => p.key === choice.target);
     const dist = tp ? Math.hypot(tp.x - req.ball.x, tp.y - req.ball.y) : 80;
@@ -216,20 +218,31 @@ export default function RestartTaker({ req, live, seconds = 20, onDone }: Props)
   }, []);
   const nearestOpp = useRef('');
   // ---------- risco ao vivo: distância real do receptor e do defensor mais próximo na cena (a mesma usada no resultado) ----------
-  const liveNow = (): { d: number; oppD: number } | null => {
+  // interceptação: distância de cada defensor ao segmento bola→receptor (a trajetória real do passe); o mais perto é quem pode cortar
+  const liveNow = (): { d: number; lane: number; cut?: string } | null => {
     const sn = snapRef.current;
     const ri = order.findIndex((p) => p.key === cur.current.target);
     if (!sn || ri < 0) return null;
     const rx = sn.pts[ri * 2];
     const ry = sn.pts[ri * 2 + 1];
-    let oppD = 99;
+    const ax = req.ball.x;
+    const ay = req.ball.y;
+    const vx = rx - ax;
+    const vy = ry - ay;
+    const len2 = vx * vx + vy * vy || 1;
+    let lane = 99;
+    let cut: string | undefined;
     order.forEach((p, n) => {
       if (p.side === taker.side || p.pos === 'GK') return;
-      oppD = Math.min(oppD, Math.hypot(sn.pts[n * 2] - rx, sn.pts[n * 2 + 1] - ry));
+      const px = sn.pts[n * 2];
+      const py = sn.pts[n * 2 + 1];
+      const t = Math.max(0, Math.min(1, ((px - ax) * vx + (py - ay) * vy) / len2));
+      const dd = Math.hypot(px - (ax + vx * t), py - (ay + vy * t));
+      if (dd < lane) { lane = dd; cut = p.key; }
     });
-    return { d: Math.hypot(rx - req.ball.x, ry - req.ball.y), oppD };
+    return { d: Math.hypot(rx - ax, ry - ay), lane, cut };
   };
-  const [lr, setLr] = useState<{ d: number; oppD: number } | null>(null);
+  const [lr, setLr] = useState<{ d: number; lane: number; cut?: string } | null>(null);
   useEffect(() => {
     setLr(liveNow());
     const id = window.setInterval(() => { if (!kick.current) setLr(liveNow()); }, 250);
@@ -388,7 +401,7 @@ export default function RestartTaker({ req, live, seconds = 20, onDone }: Props)
   const opp = req.players.filter((p) => p.side !== taker.side && p.pos !== 'GK');
   const oppD = rcv ? Math.min(...opp.map((o) => Math.hypot(o.x - rcv.x, o.y - rcv.y))) : 99;
   // risco com as posições ao vivo (o mesmo cálculo do resultado); antes da primeira medida, usa as posições do início
-  const pLose = rcv ? loseChance(req.kind, play, lr?.d ?? Math.hypot(rcv.x - req.ball.x, rcv.y - req.ball.y), lr?.oppD ?? oppD, taker.ovr, rcv.ovr) : 0;
+  const pLose = rcv ? loseChance(req.kind, play, lr?.d ?? Math.hypot(rcv.x - req.ball.x, rcv.y - req.ball.y), lr?.lane ?? oppD, taker.ovr, rcv.ovr) : 0;
   const risk = riskLabel(pLose);
   if (rcv && !kick.current) nearestOpp.current = [...opp].sort((a, b) => Math.hypot(a.x - rcv.x, a.y - rcv.y) - Math.hypot(b.x - rcv.x, b.y - rcv.y))[0]?.key ?? '';
   const info = plays.find((p) => p.id === play)!;
