@@ -24,6 +24,7 @@ type Props = {
 type Team = { name: string; abbreviation: string; primary_color: string; secondary_color: string };
 
 // Campo do jogo (mesmas medidas da câmera 3D): gol do usuário atacando para a direita
+const CROSS_LABEL: Record<string, string> = { dentro: 'Cruzamento com curva para dentro', fora: 'Cruzamento com curva para fora', direta: 'Cruzamento direto', alta: 'Cruzamento por cobertura', rasteira: 'Cruzamento rasteiro' };
 const FX1 = 720;
 const FY0 = 10;
 const FY1 = 430;
@@ -208,6 +209,11 @@ export default function CornerTaker({ minute, club, opponentColor = '#c8102e', t
   const olTaker = useRef<SVGGElement>(null);
   const olRecv = useRef<SVGGElement>(null);
   const olFx = useRef<SVGTextElement>(null);
+  const olBeam = useRef<SVGLineElement>(null);
+  const olExec = useRef<SVGGElement>(null);
+  const olVal = useRef<SVGTextElement>(null);
+  const olTriL = useRef<SVGPolygonElement>(null);
+  const olTriR = useRef<SVGPolygonElement>(null);
   const homRef = useRef<number[] | null>(null);
   const onFrame = (proj: Proj, snap: LiveSnap, tilt: number) => {
     const c = st.current;
@@ -250,8 +256,30 @@ export default function CornerTaker({ minute, club, opponentColor = '#c8102e', t
     mark(olTaker.current, 0);
     mark(olRecv.current, 1 + c.recv);
     const gb = proj(ball.x, ball.y, 0);
-    olFx.current?.setAttribute('x', (gb.sx + 70).toFixed(1));
-    olFx.current?.setAttribute('y', (gb.sy - 38).toFixed(1));
+    // marcador de execução: destaque laranja no gramado ao redor da bola (acompanha a perspectiva)
+    const er = Math.min(34, Math.max(20, 12 * gb.s));
+    olExec.current?.setAttribute('transform', `translate(${gb.sx.toFixed(1)} ${gb.sy.toFixed(1)}) scale(${(er * 1.25).toFixed(1)} ${(er * Math.max(0.34, tilt * 0.9)).toFixed(1)})`);
+    // feixe de mira: sai da bola em direção ao destino (vertical na tela, como na referência), com a inclinação real da mira
+    const gd = proj(dst.x, dst.y, 0);
+    const bx = gd.sx - gb.sx;
+    const by = gd.sy - gb.sy;
+    const bl = Math.hypot(bx, by) || 1;
+    const len = Math.min(150, 90 * gb.s + 30);
+    olBeam.current?.setAttribute('x1', gb.sx.toFixed(1));
+    olBeam.current?.setAttribute('y1', (gb.sy - 4).toFixed(1));
+    olBeam.current?.setAttribute('x2', (gb.sx + (bx / bl) * len).toFixed(1));
+    olBeam.current?.setAttribute('y2', (gb.sy + (by / bl) * len).toFixed(1));
+    // setas de ajuste fino ao lado da bola e valores
+    const tw = 6;
+    olTriL.current?.setAttribute('points', `${(gb.sx - er * 1.05).toFixed(1)},${gb.sy.toFixed(1)} ${(gb.sx - er * 1.05 - tw).toFixed(1)},${(gb.sy - tw * 0.7).toFixed(1)} ${(gb.sx - er * 1.05 - tw).toFixed(1)},${(gb.sy + tw * 0.7).toFixed(1)}`);
+    olTriR.current?.setAttribute('points', `${(gb.sx + er * 1.05).toFixed(1)},${gb.sy.toFixed(1)} ${(gb.sx + er * 1.05 + tw).toFixed(1)},${(gb.sy - tw * 0.7).toFixed(1)} ${(gb.sx + er * 1.05 + tw).toFixed(1)},${(gb.sy + tw * 0.7).toFixed(1)}`);
+    const dirV = Math.round((c.aim.u - 0.5) * 100);
+    const depV = Math.round(c.aim.v * 100);
+    if (olVal.current) olVal.current.textContent = `DIREÇÃO ${dirV > 0 ? '+' : ''}${dirV}  ·  ALCANCE ${depV}`;
+    olVal.current?.setAttribute('x', (gb.sx - er * 1.05 - tw - 10).toFixed(1));
+    olVal.current?.setAttribute('y', (gb.sy + 12).toFixed(1));
+    olFx.current?.setAttribute('x', (gb.sx - er * 1.05 - tw - 10).toFixed(1));
+    olFx.current?.setAttribute('y', (gb.sy - 4).toFixed(1));
     // homografia tela -> campo (para mirar tocando/arrastando no gramado)
     const f = [[560, 70], [720, 70], [720, 370], [560, 370]];
     const sc = f.map(([x, y]) => {
@@ -294,12 +322,27 @@ export default function CornerTaker({ minute, club, opponentColor = '#c8102e', t
               onPointerDown={(e) => { (e.currentTarget as SVGSVGElement).setPointerCapture?.(e.pointerId); aimFromPointer(e); }}
               onPointerMove={(e) => { if (e.buttons) aimFromPointer(e); }}
             >
-              <path ref={olLine} fill="none" stroke="#38d6f0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" opacity="0.95" style={{ filter: 'drop-shadow(0 0 3px rgba(56,214,240,.7))' }} />
+              <defs>
+                <linearGradient id="ct-beam" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#38d6f0" /></linearGradient>
+              </defs>
+              <g ref={olExec}>
+                <ellipse rx="1" ry="1" fill="rgba(255,140,40,.30)" stroke="rgba(255,170,70,.9)" strokeWidth="0.06" vectorEffect="non-scaling-stroke" style={{ strokeWidth: 2 }}>
+                  <animate attributeName="rx" values="0.92;1.08;0.92" dur="1.8s" repeatCount="indefinite" />
+                  <animate attributeName="ry" values="0.92;1.08;0.92" dur="1.8s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" values="0.75;1;0.75" dur="1.8s" repeatCount="indefinite" />
+                </ellipse>
+                <ellipse rx="0.22" ry="0.22" fill="none" stroke="#fff" vectorEffect="non-scaling-stroke" style={{ strokeWidth: 1.5 }} />
+              </g>
+              <line ref={olBeam} stroke="#38d6f0" strokeWidth="3" strokeLinecap="round" opacity="0.9" style={{ filter: 'drop-shadow(0 0 4px rgba(56,214,240,.9))' }} />
+              <polygon ref={olTriL} fill="#facc15" opacity="0.9" />
+              <polygon ref={olTriR} fill="#facc15" opacity="0.9" />
+              <path ref={olLine} fill="none" stroke="#38d6f0" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" opacity="0.6" style={{ filter: 'drop-shadow(0 0 3px rgba(56,214,240,.7))' }} />
               <ellipse ref={olRing} fill="rgba(56,214,240,.12)" stroke="#38d6f0" strokeWidth="1.6" />
               <ellipse ref={olAim} fill="none" stroke="#fff" strokeWidth="1.8" strokeDasharray="4 3" opacity="0.9" />
               {tri(olTaker, '#38bdf8', taker ?? 'Cobrador')}
               {tri(olRecv, '#22d3ee', `Receptor`)}
-              <text ref={olFx} textAnchor="middle" fontSize="13" fontWeight="800" fill="#fff" stroke="rgba(0,0,0,.65)" strokeWidth="3" paintOrder="stroke" fontFamily="Inter, sans-serif" letterSpacing=".6">{EFFECT_LABEL[fx].toUpperCase()}</text>
+              <text ref={olFx} textAnchor="end" fontSize="13" fontWeight="800" fill="#fff" stroke="rgba(0,0,0,.65)" strokeWidth="3" paintOrder="stroke" fontFamily="Inter, sans-serif" letterSpacing=".6">{CROSS_LABEL[fx].toUpperCase()}</text>
+              <text ref={olVal} textAnchor="end" fontSize="11" fontWeight="800" fill="#facc15" stroke="rgba(0,0,0,.7)" strokeWidth="3" paintOrder="stroke" fontFamily="Inter, sans-serif" letterSpacing=".5" />
             </svg>
           </div>
 
