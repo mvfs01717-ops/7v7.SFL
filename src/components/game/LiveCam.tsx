@@ -545,7 +545,9 @@ export function LiveCam({ liveRef, mode, club, opponent, home, ambience, burst, 
           </filter>
         </defs>
         <rect width={W} height={H} fill="url(#lc-sky)" />
-        <rect y={H * 0.5} width={W} height={H * 0.5} fill="#0b2d19" />
+        {/* chão: no modo de cobrança o gramado perto da câmera some no recorte das faixas; preenchemos com o mesmo gramado para a tela não ficar escura */}
+        <rect y={H * 0.5} width={W} height={H * 0.5} fill={mode === 'corner' ? arena.grassA : '#0b2d19'} />
+        {mode === 'corner' && <rect y={H * 0.78} width={W} height={H * 0.22} fill={arena.grassB} opacity={0.55} />}
         <rect width={W} height={H * 0.46} fill="url(#lc-crowd)" opacity={0.8} />
         <rect width={W} height={H * 0.46} fill="url(#lc-sky)" opacity={0.5} />
         {Array.from({ length: 10 }).map((_, i) => (

@@ -116,8 +116,8 @@ export default function RestartTaker({ req, live, seconds = 20, onDone }: Props)
     return { x: cx, y: cy, z, tx: cx + ((px - cx) / l) * z * 2.4, ty: cy + ((py - cy) / l) * z * 2.4, tz: 0, f };
   };
   camRef.current = lateral
-    ? aimCam(req.ball.x - 60, req.ball.y - sg * 6, 34, req.ball.x + 120, req.ball.y - sg * 50, 360)
-    : aimCam(FX0 - 8, MID_Y + 30, 34, FX0 + 260, MID_Y - 34, 360);
+    ? aimCam(req.ball.x - 70, req.ball.y + sg * 40, 46, req.ball.x + 140, req.ball.y - sg * 10, 380)
+    : aimCam(FX0 + 34, MID_Y + 58, 40, FX0 + 250, MID_Y - 16, 380);
   const order = useMemo(() => [...req.players.filter((p) => p.side === 'user'), ...req.players.filter((p) => p.side === 'bot')], [req]);
   const snapRef = useRef<LiveSnap | null>(null);
   if (!snapRef.current) {
@@ -209,6 +209,8 @@ export default function RestartTaker({ req, live, seconds = 20, onDone }: Props)
   const olLine = useRef<SVGPathElement>(null);
   const olRing = useRef<SVGEllipseElement>(null);
   const olTaker = useRef<SVGGElement>(null);
+  const olOrient = useRef<SVGGElement>(null);
+  const orient = useRef<number | null>(null); // ângulo atual (tela), suavizado para girar gradualmente
   const olRecv = useRef<SVGGElement>(null);
   const olName = useRef<SVGTextElement>(null);
   const stR = useRef({ target, play });
@@ -246,6 +248,15 @@ export default function RestartTaker({ req, live, seconds = 20, onDone }: Props)
       const q = proj(snap.pts[idx * 2], snap.pts[idx * 2 + 1], 46);
       el.setAttribute('transform', `translate(${q.sx.toFixed(1)} ${q.sy.toFixed(1)}) scale(${Math.min(1.5, Math.max(0.6, q.s * 0.55)).toFixed(2)})`);
     };
+    // orientação do disco cobrador: gira suavemente para o alvo escolhido
+    const tg = proj(snap.pts[ti * 2], snap.pts[ti * 2 + 1], 9);
+    const tr = proj(rx, ry, 9);
+    const want = Math.atan2(tr.sy - tg.sy, tr.sx - tg.sx);
+    if (orient.current === null) orient.current = want;
+    let dA = want - orient.current;
+    dA = Math.atan2(Math.sin(dA), Math.cos(dA));
+    orient.current += dA * 0.2;
+    olOrient.current?.setAttribute('transform', `translate(${tg.sx.toFixed(1)} ${tg.sy.toFixed(1)}) rotate(${((orient.current * 180) / Math.PI).toFixed(1)}) scale(${Math.min(1.6, Math.max(0.6, tg.s * 0.6)).toFixed(2)})`);
     mark(olTaker.current, ti);
     mark(olRecv.current, ri);
   };
@@ -290,6 +301,9 @@ export default function RestartTaker({ req, live, seconds = 20, onDone }: Props)
             <svg ref={ovRef} className="ct-ov" viewBox={`0 0 ${SW} ${SH}`} onPointerDown={pick}>
               <path ref={olLine} fill="none" stroke="#38d6f0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" opacity="0.95" style={{ filter: 'drop-shadow(0 0 3px rgba(56,214,240,.7))' }} />
               <ellipse ref={olRing} fill="rgba(56,214,240,.12)" stroke="#38d6f0" strokeWidth="1.6" />
+              <g ref={olOrient}>
+                <path d="M4 -4 L16 0 L4 4 Z" fill="#facc15" stroke="rgba(0,0,0,.6)" strokeWidth="1" />
+              </g>
               {tri(olTaker, '#38bdf8')}
               {tri(olRecv, '#22d3ee')}
             </svg>
