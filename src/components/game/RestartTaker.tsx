@@ -45,7 +45,7 @@ export default function RestartTaker({ req, live, seconds = 20, onDone }: Props)
   const go = (over?: Partial<{ play: RPlay }>) => {
     if (done.current) return;
     done.current = true;
-    const choice = { target: cur.current.target, play: over?.play ?? cur.current.play };
+    const choice = { target: cur.current.target, play: over?.play ?? cur.current.play, live: liveNow() ?? undefined };
     // Batida: o cobrador recua, ganha embalo e toca na bola; só então a bola voa até o receptor escolhido. Depois a jogada segue na partida.
     const tp = req.players.find((p) => p.key === choice.target);
     const dist = tp ? Math.hypot(tp.x - req.ball.x, tp.y - req.ball.y) : 80;
@@ -215,6 +215,27 @@ export default function RestartTaker({ req, live, seconds = 20, onDone }: Props)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const nearestOpp = useRef('');
+  // ---------- risco ao vivo: distância real do receptor e do defensor mais próximo na cena (a mesma usada no resultado) ----------
+  const liveNow = (): { d: number; oppD: number } | null => {
+    const sn = snapRef.current;
+    const ri = order.findIndex((p) => p.key === cur.current.target);
+    if (!sn || ri < 0) return null;
+    const rx = sn.pts[ri * 2];
+    const ry = sn.pts[ri * 2 + 1];
+    let oppD = 99;
+    order.forEach((p, n) => {
+      if (p.side === taker.side || p.pos === 'GK') return;
+      oppD = Math.min(oppD, Math.hypot(sn.pts[n * 2] - rx, sn.pts[n * 2 + 1] - ry));
+    });
+    return { d: Math.hypot(rx - req.ball.x, ry - req.ball.y), oppD };
+  };
+  const [lr, setLr] = useState<{ d: number; oppD: number } | null>(null);
+  useEffect(() => {
+    setLr(liveNow());
+    const id = window.setInterval(() => { if (!kick.current) setLr(liveNow()); }, 250);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target, play]);
   // ---------- movimento durante a escolha ----------
   // Companheiros se abrem para oferecer linhas de passe; defensores marcam o cobrador e se fecham nas linhas. Só altera a posição mostrada:
   // o alvo, a força e a jogada escolhidas não dependem disso. O efeito dessa pressão nas chances fica para a etapa 4.
@@ -366,7 +387,8 @@ export default function RestartTaker({ req, live, seconds = 20, onDone }: Props)
   const rcv = cands.find((c) => c.key === target);
   const opp = req.players.filter((p) => p.side !== taker.side && p.pos !== 'GK');
   const oppD = rcv ? Math.min(...opp.map((o) => Math.hypot(o.x - rcv.x, o.y - rcv.y))) : 99;
-  const pLose = rcv ? loseChance(req.kind, play, Math.hypot(rcv.x - req.ball.x, rcv.y - req.ball.y), oppD, taker.ovr, rcv.ovr) : 0;
+  // risco com as posições ao vivo (o mesmo cálculo do resultado); antes da primeira medida, usa as posições do início
+  const pLose = rcv ? loseChance(req.kind, play, lr?.d ?? Math.hypot(rcv.x - req.ball.x, rcv.y - req.ball.y), lr?.oppD ?? oppD, taker.ovr, rcv.ovr) : 0;
   const risk = riskLabel(pLose);
   if (rcv && !kick.current) nearestOpp.current = [...opp].sort((a, b) => Math.hypot(a.x - rcv.x, a.y - rcv.y) - Math.hypot(b.x - rcv.x, b.y - rcv.y))[0]?.key ?? '';
   const info = plays.find((p) => p.id === play)!;
