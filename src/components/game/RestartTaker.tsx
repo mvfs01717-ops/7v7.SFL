@@ -184,7 +184,7 @@ export default function RestartTaker({ req, live, seconds = 40, onDone }: Props)
     if (!sn) return;
     const from = launch();
     feintCd.current = now + 1400;
-    // o cobrador dribla na linha; o defensor mais perto da trajetória do passe (quem poderia cortar) é empurrado para fora dela
+    // a finta não move o cobrador: só empurra o defensor mais perto da trajetória do passe (quem poderia cortar) é empurrado para fora dela
     const aimV = aim.current;
     const vx = aimV.x - from.x;
     const vy = aimV.y - from.y;
@@ -255,8 +255,6 @@ export default function RestartTaker({ req, live, seconds = 40, onDone }: Props)
       else if (e.key === 'x' || e.key === 'X') setPower((v) => clamp(v + 6, 0, 100));
       else if (e.key === 's' || e.key === 'S') setHeight((v) => clamp(v - 8, 0, 100));
       else if (e.key === 'w' || e.key === 'W') setHeight((v) => clamp(v + 8, 0, 100));
-      else if (e.key === 'a' || e.key === 'A') { if (lateral) spotT.current = clamp(spotT.current - 8, FX0 + 40, FX1 - 40); }
-      else if (e.key === 'd' || e.key === 'D') { if (lateral) spotT.current = clamp(spotT.current + 8, FX0 + 40, FX1 - 40); }
       else if (e.key === 'f' || e.key === 'F') feint();
       else if (/^[1-5]$/.test(e.key) && presets[Number(e.key) - 1]) setPreset(presets[Number(e.key) - 1]);
       else if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); go(); }
@@ -271,7 +269,8 @@ export default function RestartTaker({ req, live, seconds = 40, onDone }: Props)
     ? { x: bx - 20, y: req.ball.y - inward * 110, z: 140, tx: bx + 6, ty: req.ball.y + inward * 100, tz: 0, f: 500 }
     : { x: goalX - gkSide * 120, y: MID_Y, z: 120, tx: goalX + gkSide * 100, ty: MID_Y - 50, tz: 0, f: 420 });
   const camRef = useRef<Cam | null>(null);
-  camRef.current = camFor(lateral ? sp.current.x : req.ball.x);
+  // Lateral: o cobrador fica no ponto de saída da bola; a câmera só se desloca em direção à mira
+  camRef.current = camFor(lateral ? sp.current.x + (aim.current.x - sp.current.x) * 0.35 : req.ball.x);
 
   // ---------- disco do cobrador, bola e demais discos ----------
   const baseRef = useRef<number[]>(order.flatMap((p) => [p.x, p.y]));
@@ -365,9 +364,6 @@ export default function RestartTaker({ req, live, seconds = 40, onDone }: Props)
       sn.ball[0] = from.x + (ex / el) * 10;
       sn.ball[1] = from.y + (ey / el) * 10;
       sn.ball[2] = lateral ? 18 : 0;
-      // finta: o cobrador faz um drible curto para o lado e volta; é só animação (a jogada é medida na posição de origem)
-      const fdg = dodge.current;
-      if (fdg && now - fdg.t0 < 320) sn.pts[ti * 2] += fdg.wx * Math.sin(Math.PI * ((now - fdg.t0) / 320)) * 12;
       const t = (now - t0) / 1000;
       const ramp = easeIO(Math.min(1, (now - t0) / 1600));
       const dg = dodge.current;
@@ -539,7 +535,6 @@ export default function RestartTaker({ req, live, seconds = 40, onDone }: Props)
               <div><kbd>Arrastar</kbd><span>Mirar no campo</span></div>
               <div><kbd>Z X</kbd><span>Força</span></div>
               <div><kbd>S W</kbd><span>Altura</span></div>
-              {lateral && <div><kbd>A D</kbd><span>Posição na linha</span></div>}
               {lateral && <div><kbd>F</kbd><span>Finta</span></div>}
               <div><kbd>Q</kbd><span>Ir ao companheiro</span></div>
               <div><kbd>1–{presets.length}</kbd><span>Predefinições</span></div>
@@ -566,12 +561,6 @@ export default function RestartTaker({ req, live, seconds = 40, onDone }: Props)
                 <label><span>ALTURA</span><b>{hLabel}</b></label>
                 <input type="range" min={0} max={100} value={height} onChange={(e) => setHeight(Number(e.target.value))} disabled={finishing} />
               </div>
-              {lateral && (
-                <div className="rt-sl">
-                  <label><span>POSIÇÃO NA LINHA</span><b>{Math.round(spotX)}</b></label>
-                  <input type="range" min={FX0 + 40} max={FX1 - 40} value={spotX} onChange={(e) => { spotT.current = Number(e.target.value); setSpotX(Number(e.target.value)); }} disabled={finishing} />
-                </div>
-              )}
               <div className="ct-pt"><span>RISCO DE PERDER A BOLA</span><b style={{ color: risk.c }}>{risk.t}</b></div>
               {lateral && <button type="button" className="rt-feint" onClick={feint} disabled={finishing}>FINTA (F)</button>}
               <button type="button" className="ct-go" onClick={() => go()}>{lateral ? 'COBRAR LATERAL' : 'COBRAR TIRO DE META'}</button>
